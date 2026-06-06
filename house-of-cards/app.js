@@ -14,7 +14,10 @@ const LANGUAGES = ['EN','JP','CN','Other'];
 /* ============================== state ============================== */
 let state = null;
 let ui = { route:'dashboard', cart:[], cartPayments:[], focusId:null, sellPanel:null, showPanel:null,
-           tradeDraft:null, inForm:{}, zellePick:null, authed:false, loginUser:null, loginMode:'login' };
+           tradeDraft:null, inForm:{}, zellePick:null, authed:false, loginUser:null, loginMode:'login', authView:'landing' };
+
+/* audit trail — everyone on a company shares access, but every change is signed by who made it */
+function logChange(area,detail){ if(!state)return; state.audit=state.audit||[]; state.audit.push({id:uid('log'),at:Date.now(),userId:state.currentUserId,area,detail}); if(state.audit.length>3000)state.audit=state.audit.slice(-3000); }
 
 /* simple local password hash (this is a trusted-team local app, not bank-grade) */
 function hashPass(s){ s=String(s==null?'':s); let h=5381; for(let i=0;i<s.length;i++){ h=((h<<5)+h+s.charCodeAt(i))>>>0; } return 'h'+h.toString(36); }
@@ -28,7 +31,7 @@ function freshState(){
     currentUserId:reggie.id,
     paymentAccounts:{cash:'drawer',venmo:manny.id,cashapp:reggie.id,paypal:reggie.id,square:reggie.id,zelle:'prompt'},
     settings:{ cashFloat:200, floatOwnerId:reggie.id, prizePrice:10, prizePlaysPerShow:400, prizeSplit:[reggie.id,manny.id] },
-    inventory:[], shows:[], currentShowId:null, trades:[], wantlist:[], sales:[], imageDB:{}
+    inventory:[], shows:[], currentShowId:null, trades:[], wantlist:[], sales:[], imageDB:{}, audit:[]
   };
 }
 /* identity key for the shared image database (so re-adding the same card reuses its image) */
@@ -184,14 +187,20 @@ function header(headers,names){ const low=headers.map(h=>h.toLowerCase().trim())
 
 /* ============================== rendering ============================== */
 const TABS=[['dashboard','Dashboard'],['inventory','Inventory'],['add','Add Item'],['import','Import CSV'],['labels','Print Labels'],
-  ['sell','Sell'],['trades','Trades'],['wishlist','Wish List'],['history','Sold History'],['reports','Reports'],['settings','Settings']];
+  ['sell','Sell'],['trades','Trades'],['wishlist','Wish List'],['history','Sold History'],['reports','Reports'],['activity','Activity'],['settings','Settings']];
 const PARENT={checkout:'sell',newtrade:'trades'};
 const VIEWS={dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,import:viewImport,labels:viewLabels,
-  sell:viewSell,checkout:viewCheckout,trades:viewTrades,newtrade:viewNewTrade,wishlist:viewWishlist,history:viewHistory,reports:viewReports,settings:viewSettings};
+  sell:viewSell,checkout:viewCheckout,trades:viewTrades,newtrade:viewNewTrade,wishlist:viewWishlist,history:viewHistory,reports:viewReports,activity:viewActivity,settings:viewSettings};
 function go(route){ ui.route=route; ui.focusId=null; render(); window.scrollTo(0,0); }
 function render(){
   const logo=el('brandLogo'); if(logo){ if(state&&state.settings&&state.settings.logo){ logo.src=state.settings.logo; } else if(!logo.dataset.set){ logo.dataset.set='1'; logo.src='logo.png'; logo.onerror=()=>{logo.onerror=null;logo.src='logo.svg';}; } }
-  if(!ui.authed){ el('whoBar').innerHTML=''; el('tabs').innerHTML=''; el('view').innerHTML=viewLogin(); afterRenderFocus(); return; }
+  if(!ui.authed){ el('whoBar').innerHTML=''; el('tabs').innerHTML='';
+    const av=ui.authView||'landing';
+    if(av==='login'){ stopBounce(); el('view').innerHTML=viewLogin(); }
+    else if(av==='signup'){ stopBounce(); el('view').innerHTML=viewSignup(); }
+    else { el('view').innerHTML=viewLanding(); startBounce(); }
+    afterRenderFocus(); updateImgChip(); return; }
+  stopBounce();
   el('whoBar').innerHTML='<span class="muted">'+esc(me().name)+'</span>'+
     '<select id="userSwitch" onchange="switchUserPrompt(this.value)">'+state.users.map(u=>'<option value="'+u.id+'"'+(u.id===state.currentUserId?' selected':'')+'>'+u.name+'</option>').join('')+'</select>'+
     '<button class="sm ghost" onclick="logout()">Log out</button>';
@@ -201,6 +210,44 @@ function render(){
   afterRenderFocus(); updateImgChip();
 }
 function afterRenderFocus(){ if(ui.focusId){ const f=el(ui.focusId); if(f){ f.focus(); try{const n=f.value.length;f.setSelectionRange(n,n);}catch(e){} } } }
+
+/* -------- Landing page (huge bouncing logo + Login/Sign up) -------- */
+function landingLogo(){ return (state&&state.settings&&state.settings.logo)?state.settings.logo:'logo.png'; }
+function viewLanding(){
+  return '<div class="landing">'+
+    '<div class="landing-top"><button class="gold" onclick="ui.authView=\'login\';render()">Login</button>'+
+      '<button class="blue" onclick="ui.authView=\'signup\';render()">Sign up</button></div>'+
+    '<div class="bounce-area" id="bounceArea"><img id="bounceLogo" class="bounce-logo" src="'+landingLogo()+'" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/></div>'+
+    '<div class="landing-cap"><b>HOUSE</b> OF CARDS</div>'+
+  '</div>'; }
+let bounceRAF=null;
+function startBounce(){ const area=el('bounceArea'), logo=el('bounceLogo'); if(!area||!logo)return; stopBounce();
+  let x=24,y=24,dx=2.4,dy=2.0;
+  const step=()=>{ const aw=area.clientWidth, ah=area.clientHeight, lw=logo.clientWidth||180, lh=logo.clientHeight||180;
+    x+=dx; y+=dy;
+    if(x<=0){x=0;dx=Math.abs(dx);} if(y<=0){y=0;dy=Math.abs(dy);}
+    if(x+lw>=aw){x=aw-lw;dx=-Math.abs(dx);} if(y+lh>=ah){y=ah-lh;dy=-Math.abs(dy);}
+    logo.style.transform='translate('+x+'px,'+y+'px)'; bounceRAF=requestAnimationFrame(step); };
+  step(); }
+function stopBounce(){ if(bounceRAF){ cancelAnimationFrame(bounceRAF); bounceRAF=null; } }
+
+/* -------- Sign up (new team member; everyone shares company access) -------- */
+function viewSignup(){
+  return '<div class="login"><h2 class="page">Create account <small>new House of Cards team member</small></h2><div class="card">'+
+    fld('Your name',inp('su_name','','your name'))+
+    fld('Password',inp('su_pass','','at least 3 characters','password'))+
+    fld('Confirm password',inp('su_pass2','','','password'))+
+    fld('Security question (for password reset)',inp('su_q','','e.g. First pet\'s name'))+
+    fld('Security answer',inp('su_a','','your answer'))+
+    '<div class="row"><button class="gold" onclick="doSignup()">Create account</button><button class="ghost" onclick="ui.authView=\'landing\';render()">Back</button></div>'+
+    '<div class="muted" style="margin-top:8px">Everyone on the team shares full access to the company’s data. Every change is logged with your name (see the Activity tab) so edits can always be traced.</div>'+
+  '</div></div>'; }
+function doSignup(){ const name=val('su_name'); if(!name){ toast('Enter your name.'); return; }
+  if(state.users.some(u=>norm(u.name)===norm(name))){ toast('That name already exists — try Login.'); return; }
+  const p=val('su_pass'); if(p.length<3){ toast('Password needs at least 3 characters.'); return; }
+  if(p!==val('su_pass2')){ toast('Passwords don’t match.'); return; }
+  const u={id:uid('u'),name,pass:hashPass(p),secQ:val('su_q'),secA:val('su_a')?hashPass(val('su_a').toLowerCase()):'',mustChange:false};
+  state.users.push(u); state.currentUserId=u.id; ui.authed=true; ui.authView='landing'; ui.route='dashboard'; logChange('account','created account "'+name+'"'); save(); toast('Welcome, '+name+'!'); render(); }
 
 /* -------- Login / accounts -------- */
 function viewLogin(){
@@ -218,7 +265,9 @@ function viewLogin(){
     fld('Who are you?',usel.replace('id="lg_user"','id="lg_user" onchange="ui.loginUser=this.value"'))+
     fld('Password',inp('lg_pass','','default is: test','password'))+
     '<div class="row"><button class="gold" onclick="doLogin()">Sign in</button>'+
-    '<button class="ghost" onclick="ui.loginMode=\'forgot\';ui.loginUser=val(\'lg_user\');render()">Forgot password?</button></div>'+
+    '<button class="ghost" onclick="ui.loginMode=\'forgot\';ui.loginUser=val(\'lg_user\');render()">Forgot password?</button>'+
+    '<button class="ghost" onclick="ui.authView=\'signup\';render()">Sign up</button>'+
+    '<button class="ghost right" onclick="ui.authView=\'landing\';render()">← Home</button></div>'+
     '<div class="muted" style="margin-top:8px">First time? Everyone\'s password starts as <b>test</b> — change it under Settings → My account.</div>'+
     '</div></div>';
 }
@@ -233,7 +282,7 @@ function doReset(){ const id=val('lg_user'); const u=state.users.find(x=>x.id===
   const np=val('lg_new'); if(np.length<3){ toast('Pick a password of at least 3 characters.'); return; }
   u.pass=hashPass(np); u.mustChange=false; save(); ui.loginMode='login'; toast('Password reset — sign in now.'); render();
 }
-function logout(){ ui.authed=false; ui.loginMode='login'; stopImgJob(); render(); }
+function logout(){ ui.authed=false; ui.loginMode='login'; ui.authView='landing'; stopImgJob(); render(); }
 function switchUserPrompt(id){ if(id===state.currentUserId)return; const u=state.users.find(x=>x.id===id); if(!u)return;
   const p=prompt('Password for '+u.name+' (each person signs into their own account):'); if(p===null){ render(); return; }
   if(u.pass!==hashPass(p)){ toast('Wrong password — staying as '+me().name+'.'); render(); return; }
@@ -446,16 +495,16 @@ function needsPhoto(cond){ return cond && cond!=='NM'; }
 function saveItem(makeAvailable){
   const data=collectItem(); if(!data.name){toast('Card name is required');return;}
   if(data.grade&&data.grade.toLowerCase()!=='ungraded')data.priceOverride=true;
-  if(editingId){ const it=state.inventory.find(i=>i.id===editingId); const oldKey=cardKey(it); Object.assign(it,data); it.needsReview=false;
+  if(editingId){ const it=state.inventory.find(i=>i.id===editingId); Object.assign(it,data); it.needsReview=false;
     if(pendingPhoto){ it.photo=pendingPhoto; it.stock=false; it.realImage=true; it.imgSrc='manual'; dbSave(it,pendingPhoto,'manual'); }
-    save();toast('Saved.');editingId=null;pendingPhoto=null;go('inventory');return; }
+    logChange('inventory','edited "'+(it.name||'item')+'" ('+it.barcode+')'); save();toast('Saved.');editingId=null;pendingPhoto=null;go('inventory');return; }
   let photo=pendingPhoto, fromDB=false;
   if(!photo){ const e=dbEntry(data); if(e){ photo=e.photo; data.stock=(e.source!=='manual'); data.realImage=true; data.imgSrc=e.srcUrl||'db'; fromDB=true; } } // reuse our saved image
   if(makeAvailable && needsPhoto(data.condition) && (!photo||data.stock)){ toast('Condition '+data.condition+' needs a real photo of THIS copy. Add one, or use "Save to intake".'); return; }
   if(!photo){ photo=stockImage(data); data.stock=true; } // generated placeholder as last resort
   const item=Object.assign({id:uid('item'),barcode:genBarcodeId(),photo:photo,stock:data.stock||false,suggestedPrice:0,status:makeAvailable?'available':'intake',dateAdded:Date.now()},data);
   if(pendingPhoto){ item.realImage=true; item.imgSrc='manual'; dbSave(item,pendingPhoto,'manual'); } // a real photo becomes this card's saved image
-  state.inventory.push(item); save(); pendingPhoto=null;
+  state.inventory.push(item); logChange('inventory','added "'+(item.name||'item')+'" ('+item.barcode+')'+(makeAvailable?' to stock':' to intake')); save(); pendingPhoto=null;
   if(makeAvailable){ toast('Added & ready'+(fromDB?' (reused saved image)':'')+'. Printing label…'); printLabels([item.id]); } else toast('Saved to intake'+(fromDB?' (reused saved image)':'')+'.');
   go('inventory');
 }
@@ -543,8 +592,8 @@ function pixelate(ctx,x,y,w,h){ x=Math.round(x);y=Math.round(y);w=Math.round(w);
 }
 function editItem(id){editingId=id;pendingPhoto=null;go('add');}
 function cancelEdit(){editingId=null;pendingPhoto=null;go('inventory');}
-function deleteItem(id){ const it=state.inventory.find(i=>i.id===id); const nm=it?(it.name||'this item'):'this item'; if(!confirm('Delete "'+nm+'" permanently? This cannot be undone.'))return; state.inventory=state.inventory.filter(i=>i.id!==id);save();toast('Deleted.');editingId=null;go('inventory'); }
-function finishIntake(id){ const it=state.inventory.find(i=>i.id===id); if(needsPhoto(it.condition)&&(!it.photo||it.stock)){editItem(id);toast('Condition '+it.condition+' needs a real photo before selling.');return;} it.status='available';save();toast('Item is now available.');render(); }
+function deleteItem(id){ const it=state.inventory.find(i=>i.id===id); const nm=it?(it.name||'this item'):'this item'; if(!confirm('Delete "'+nm+'" permanently? This cannot be undone.'))return; state.inventory=state.inventory.filter(i=>i.id!==id);logChange('inventory','deleted "'+nm+'"');save();toast('Deleted.');editingId=null;go('inventory'); }
+function finishIntake(id){ const it=state.inventory.find(i=>i.id===id); if(needsPhoto(it.condition)&&(!it.photo||it.stock)){editItem(id);toast('Condition '+it.condition+' needs a real photo before selling.');return;} it.status='available';it.needsReview=false;logChange('inventory','finalized "'+(it.name||'item')+'" to in-stock');save();toast('Item is now available.');render(); }
 
 /* -------- Import CSV -------- */
 const COND_MAP={'near mint':'NM','nm':'NM','mint':'NM','lightly played':'LP','lp':'LP','moderately played':'MP','mp':'MP','heavily played':'HP','hp':'HP','damaged':'DMG','dmg':'DMG','played':'MP'};
@@ -600,7 +649,7 @@ function commitCSV(mode){ if(!csvRows)return; let updated=0,added=0,skipped=0,su
     if(r.matches.length){ r.matches.forEach(it=>{ it.suggestedPrice=r.csvMarket; if(r.locked){suggestedOnly++;return;} if(r.action==='use'){it.listPrice=r.newPrice;updated++;} else if(r.action==='skip'){skipped++;} }); }
     else { if(mode==='add'&&r.action!=='skip'){ const data={category:'Pokemon',set:r.set,name:r.name,number:r.number,rarity:'',variance:r.variance,language:r.language,grade:r.grade,condition:r.condition,ownerId:state.currentUserId,costBasis:0,listPrice:r.newPrice};
       state.inventory.push(Object.assign({id:uid('item'),barcode:genBarcodeId(),suggestedPrice:r.csvMarket,priceOverride:(r.grade&&r.grade.toLowerCase()!=='ungraded'),status:'intake',dateAdded:Date.now()},imageForNew(data),data)); added++; } else skipped++; } });
-  save(); csvSummary=updated+' price(s) updated · '+added+' new item(s) added to intake · '+suggestedOnly+' locked/graded (suggested only) · '+skipped+' skipped.';
+  logChange('import','CSV import — '+updated+' repriced, '+added+' added, '+skipped+' skipped'); save(); csvSummary=updated+' price(s) updated · '+added+' new item(s) added to intake · '+suggestedOnly+' locked/graded (suggested only) · '+skipped+' skipped.';
   csvRows=null; toast('Import complete.'); go('import');
 }
 function downloadSampleCSV(){ const csv='Category,Set,Product Name,Card Number,Rarity,Variance,Grade,Card Condition,Quantity,Market Price,Price Override\n'+
@@ -678,7 +727,7 @@ function completeSale(){ const total=cartTotal(); const paid=ui.cartPayments.red
     lines:ui.cart.map(c=>({id:uid('ln'),itemId:c.itemId,type:c.type,desc:c.desc,ownerId:c.ownerId,qty:c.qty||1,listPrice:c.listPrice,soldPrice:Number(c.soldPrice)||0,costBasis:c.costBasis||0,discountReason:c.discountReason||''})),
     payments:ui.cartPayments.slice()};
   state.sales.push(sale); ui.cart.forEach(c=>{ if(c.itemId){const it=state.inventory.find(i=>i.id===c.itemId); if(it)it.status='sold';} });
-  ui.cart=[];ui.cartPayments=[];save();toast('Sale recorded ✔');go('sell');
+  logChange('sales','rang up '+sale.lines.length+' line(s) — '+money(total)); ui.cart=[];ui.cartPayments=[];save();toast('Sale recorded ✔');go('sell');
 }
 
 /* -------- Trades -------- */
@@ -732,12 +781,12 @@ function saveTrade(){ const d=ui.tradeDraft; if(!d.out.length&&!d.in.length){toa
   d.out.forEach(o=>{ const it=state.inventory.find(i=>i.id===o.itemId); if(it)it.status='traded'; });
   const show=openShow();
   state.trades.push({id:uid('trade'),showId:show?show.id:null,createdAt:Date.now(),outItems:d.out.slice(),inItems:d.in.slice(),buyout,keeperId,outItemIds,inItemIds});
-  ui.tradeDraft=null; save(); toast('Trade saved. Incoming cards added to intake.'); go('trades');
+  logChange('trades','logged a trade — gave '+d.out.length+', received '+d.in.length); ui.tradeDraft=null; save(); toast('Trade saved. Incoming cards added to intake.'); go('trades');
 }
 function deleteTrade(id){ const t=state.trades.find(x=>x.id===id); if(!t)return; if(!confirm('Delete this trade? Outgoing items go back to available; incoming items (if unsold) are removed.'))return;
   (t.outItemIds||[]).forEach(iid=>{ const it=state.inventory.find(i=>i.id===iid); if(it&&it.status==='traded')it.status='available'; });
   (t.inItemIds||[]).forEach(iid=>{ const it=state.inventory.find(i=>i.id===iid); if(it&&it.status!=='sold')state.inventory=state.inventory.filter(x=>x.id!==iid); });
-  state.trades=state.trades.filter(x=>x.id!==id); save(); toast('Trade deleted & reverted.'); render();
+  state.trades=state.trades.filter(x=>x.id!==id); logChange('trades','deleted a trade & reverted items'); save(); toast('Trade deleted & reverted.'); render();
 }
 
 /* -------- Wish list -------- */
@@ -796,9 +845,9 @@ function viewReports(){ const show=openShow(); let cur='';
   return '<h2 class="page">Reports <small>start a show, take sales, finalize for the money breakdown</small></h2>'+cur+
     '<div class="card"><h3>Finalized shows</h3>'+(finals||'<div class="muted">None yet.</div>')+'</div><div id="reportOut"></div>';
 }
-function startShow(){ if(openShow()){toast('A show is already open.');return;} const name=val('sh_name')||'Card Show'; const show={id:uid('show'),name,date:Date.now(),status:'open',cashFloat:state.settings.cashFloat,prizePlaysStart:state.settings.prizePlaysPerShow,cashOuts:[],finalizedAt:null}; state.shows.push(show);state.currentShowId=show.id;ui.showPanel=null;save();toast('Show started.');go('sell'); }
-function addCashOut(){ const show=openShow();if(!show)return; const amt=num('co_amt'); if(amt<=0){toast('Enter an amount.');return;} show.cashOuts=show.cashOuts||[]; show.cashOuts.push({id:uid('co'),userId:val('co_user'),amount:amt,note:val('co_note')}); ui.showPanel=null; save();toast('Cash-out recorded.');render(); }
-function finalizeShow(){ const show=openShow();if(!show)return; if(!confirm('Finalize "'+show.name+'"? No more sales can be added.'))return; show.status='finalized';show.finalizedAt=Date.now();save();toast('Show finalized.');render();viewReport(show.id); }
+function startShow(){ if(openShow()){toast('A show is already open.');return;} const name=val('sh_name')||'Card Show'; const show={id:uid('show'),name,date:Date.now(),status:'open',cashFloat:state.settings.cashFloat,prizePlaysStart:state.settings.prizePlaysPerShow,cashOuts:[],finalizedAt:null}; state.shows.push(show);state.currentShowId=show.id;ui.showPanel=null;logChange('shows','started show "'+name+'"');save();toast('Show started.');go('sell'); }
+function addCashOut(){ const show=openShow();if(!show)return; const amt=num('co_amt'); if(amt<=0){toast('Enter an amount.');return;} show.cashOuts=show.cashOuts||[]; show.cashOuts.push({id:uid('co'),userId:val('co_user'),amount:amt,note:val('co_note')}); logChange('shows','cash-out '+money(amt)+' to '+userName(val('co_user'))); ui.showPanel=null; save();toast('Cash-out recorded.');render(); }
+function finalizeShow(){ const show=openShow();if(!show)return; if(!confirm('Finalize "'+show.name+'"? No more sales can be added.'))return; show.status='finalized';show.finalizedAt=Date.now();logChange('shows','finalized show "'+show.name+'"');save();toast('Show finalized.');render();viewReport(show.id); }
 function viewReport(showId){ const show=state.shows.find(s=>s.id===showId);const st=computeSettlement(show);const profit=ownerProfit(show);
   // matrix table: rows = method, cols = each person, + method total
   const head='<tr><th>Method → who gets it</th>'+state.users.map(u=>'<th>'+u.name+'</th>').join('')+'<th>Method total</th></tr>';
@@ -825,6 +874,22 @@ function viewReport(showId){ const show=state.shows.find(s=>s.id===showId);const
   el('reportOut').innerHTML=html; el('reportOut').scrollIntoView({behavior:'smooth'});
 }
 
+/* -------- Activity / audit log -------- */
+let actFilter={q:'',user:''};
+function viewActivity(){ let log=(state.audit||[]).slice().reverse();
+  if(actFilter.user)log=log.filter(e=>e.userId===actFilter.user);
+  if(actFilter.q)log=log.filter(e=>smatch((e.detail||'')+' '+(e.area||'')+' '+userName(e.userId),actFilter.q));
+  const userOpts='<option value="">Everyone</option>'+state.users.map(u=>'<option value="'+u.id+'"'+(actFilter.user===u.id?' selected':'')+'>'+esc(u.name)+'</option>').join('');
+  const rows=log.slice(0,500).map(e=>'<tr><td class="muted" style="white-space:nowrap">'+new Date(e.at).toLocaleString()+'</td>'+
+    '<td><span class="pill owner">'+esc(userName(e.userId))+'</span></td><td><span class="tag">'+esc(e.area||'')+'</span></td><td>'+esc(e.detail||'')+'</td></tr>').join('');
+  return '<h2 class="page">Activity <small>every change is signed by who made it — '+(state.audit||[]).length+' logged</small></h2>'+
+    '<div class="card"><div class="grid2">'+
+      '<label class="fld"><span>Search</span><input id="actSearch" value="'+esc(actFilter.q)+'" oninput="actFilter.q=this.value;ui.focusId=\'actSearch\';render()" placeholder="what / who / area"/></label>'+
+      '<label class="fld"><span>Who</span><select onchange="actFilter.user=this.value;render()">'+userOpts+'</select></label>'+
+    '</div><div class="muted">Everyone on the team shares full company access; this log is how you trace who did what.</div></div>'+
+    (log.length?'<div class="card"><table><thead><tr><th>When</th><th>Who</th><th>Area</th><th>Change</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<div class="empty">No activity logged yet.</div>');
+}
+
 /* -------- Settings -------- */
 function viewSettings(){ const s=state.settings;
   const acctSel=(m)=>{const cur=state.paymentAccounts[m];const opts=[['drawer','Cash drawer (no owner)'],['prompt','Ask per sale']].concat(state.users.map(u=>[u.id,u.name]));return '<select onchange="setAcct(\''+m+'\',this.value)">'+opts.map(([v,l])=>'<option value="'+v+'"'+(cur===v?' selected':'')+'>'+l+'</option>').join('')+'</select>';};
@@ -848,11 +913,11 @@ function viewSettings(){ const s=state.settings;
     '<div class="card"><h3>Beta — reset data</h3><div class="banner">Clear everything you entered while testing so you start clean for your first real show.</div><div class="row" style="margin-top:10px"><button class="red" onclick="resetTestData()">Clear test data (keep team & settings)</button><button class="red ghost" onclick="factoryReset()">Full factory reset</button><button class="ghost right" onclick="loadSample()">Load sample data</button></div></div>'+
     '<div class="card"><h3>About</h3><div class="muted">Local beta — data stored only in this browser, works offline. Camera scanning works on the hosted (https) version in Safari and Chrome (the first scan downloads the scanner, so it needs internet once). Card-front auto-read and online image fetching need internet; reused/saved images and everything else work offline.</div></div>';
 }
-function setAcct(m,v){state.paymentAccounts[m]=v;save();toast('Updated.');}
-function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.prizePrice=num('s_prize');state.settings.prizePlaysPerShow=num('s_plays');save();toast('Saved.');}
+function setAcct(m,v){state.paymentAccounts[m]=v;logChange('settings','set '+METHOD_LABEL[m]+' account');save();toast('Updated.');}
+function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.prizePrice=num('s_prize');state.settings.prizePlaysPerShow=num('s_plays');logChange('settings','updated show defaults');save();toast('Saved.');}
 function savePtcg(){state.settings.ptcgKey=val('s_ptcg');save();toast('Image API key saved.');}
 function saveLogo(input){ const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ state.settings.logo=r.result; save(); toast('Logo updated.'); render(); }; r.readAsDataURL(f); }
-function changePassword(){ const u=me(); if(u.pass!==hashPass(val('ac_cur'))){ toast('Current password is wrong.'); return; } const np=val('ac_new'); if(np.length<3){ toast('New password needs at least 3 characters.'); return; } u.pass=hashPass(np); u.mustChange=false; save(); toast('Password updated.'); render(); }
+function changePassword(){ const u=me(); if(u.pass!==hashPass(val('ac_cur'))){ toast('Current password is wrong.'); return; } const np=val('ac_new'); if(np.length<3){ toast('New password needs at least 3 characters.'); return; } u.pass=hashPass(np); u.mustChange=false; logChange('account','changed own password'); save(); toast('Password updated.'); render(); }
 function saveSecurityQ(){ const u=me(); const q=val('ac_q'); const a=val('ac_a'); if(!q){ toast('Enter a question.'); return; } u.secQ=q; if(a)u.secA=hashPass(a.toLowerCase()); save(); toast('Security question saved.'); render(); }
 function resetTestData(){ if(!confirm('Clear all inventory, sales, shows, trades and wish list? Team & settings stay.'))return; state.inventory=[];state.sales=[];state.shows=[];state.trades=[];state.wantlist=[];state.currentShowId=null;ui.cart=[];ui.cartPayments=[];save();toast('Test data cleared.');go('dashboard'); }
 function factoryReset(){ if(!confirm('FULL reset to factory defaults? Cannot be undone.'))return; stopImgJob(); state=freshState();ui={route:'dashboard',cart:[],cartPayments:[],focusId:null,sellPanel:null,showPanel:null,tradeDraft:null,inForm:{},authed:false,loginMode:'login'};save();toast('Factory reset done — sign in again.');render(); }
@@ -880,7 +945,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
 (async function init(){
   try{ state=await loadState(); }catch(e){ state=null; }
   if(!state){ state=freshState(); save(); }
-  state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];state.imageDB=state.imageDB||{};
+  state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];state.imageDB=state.imageDB||{};state.audit=state.audit||[];
   // migrate users to have passwords/security questions (default password "test")
   state.users.forEach(u=>{ if(!u.pass){ u.pass=hashPass('test'); u.mustChange=true; } if(u.secQ===undefined)u.secQ=''; if(u.secA===undefined)u.secA=''; });
   save();

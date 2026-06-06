@@ -105,6 +105,15 @@ header.top .who select{width:auto}
 .blurwrap canvas{max-width:90vw;border:3px solid var(--gold);border-radius:10px;background:#000}
 .blurbox{position:absolute;border:2px dashed var(--gold);background:rgba(244,180,0,.12);cursor:move}
 .reviewbadge{background:var(--gold);color:#1a1300;font-size:10px;font-weight:900;padding:2px 6px;border-radius:6px}
+.landing{display:flex;flex-direction:column;min-height:calc(100vh - 80px)}
+.landing-top{display:flex;gap:10px;justify-content:flex-end;padding:4px 2px 12px}
+.landing-top button{font-size:16px;padding:12px 22px}
+.bounce-area{position:relative;flex:1;min-height:60vh;border:3px solid #000;border-radius:18px;overflow:hidden;
+  background:radial-gradient(circle at 50% 40%,#22305a 0%,var(--bg2) 60%,var(--bg) 100%)}
+.bounce-logo{position:absolute;top:0;left:0;width:min(46vw,300px);height:auto;border-radius:18px;
+  filter:drop-shadow(0 0 22px rgba(244,180,0,.55));will-change:transform;user-select:none;pointer-events:none}
+.landing-cap{text-align:center;font-size:28px;font-weight:900;letter-spacing:1px;margin:14px 0 4px}
+.landing-cap b{color:var(--gold)}
 @media print{
   header.top,nav.tabs,.noprint,.imgchip{display:none!important}
   body{background:#fff;color:#000}
