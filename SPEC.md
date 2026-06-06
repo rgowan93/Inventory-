@@ -420,6 +420,12 @@ PDF is saved to the show record and shareable.
 - Sign up → **3-month free trial** → monthly billing via Stripe.
 - Own Business + sub-users, fully isolated.
 - House of Cards members free.
+- **Price is currently $0.00** (decided later, after the app proves useful). The
+  billing plumbing is in place but charges nothing until the price is set.
+
+### 6.14 Out of scope (explicitly decided)
+- **No sales-tax** collection or reporting.
+- **No digital receipts** to customers (text/email/QR).
 
 ---
 
@@ -522,12 +528,14 @@ each is approved:
 
 ## 11. Open items to confirm / future decisions
 
+- **Sales tax:** not collected. **Decided — no sales-tax feature.**
+- **Digital receipts:** **Decided — none** (no text/email/QR receipt to customer).
+- **Subscriber price:** currently **$0.00**; will be set later after verifying how
+  useful the app is in real use. Billing plumbing (Stripe + 3-month trial) is
+  built but priced at $0 until adjusted.
 - Final palette tuning against the actual logo asset file.
 - Per-friend granular price visibility (vs single on/off) — later.
-- Sales-tax collection/reporting — confirm if needed.
-- Digital receipt to customer (text/email/QR) — nice-to-have.
 - Returns/voids policy detail.
-- Subscriber pricing amount (to cover infra + margin).
 
 ---
 
