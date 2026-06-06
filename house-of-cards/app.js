@@ -225,12 +225,47 @@ function viewInventory(){
       '<label class="fld"><span>Owner</span><select onchange="invFilter.owner=this.value;render()">'+ownerOpts+'</select></label>'+
       '<label class="fld"><span>Status</span><select onchange="invFilter.status=this.value;render()">'+['','available','intake','sold','traded','hold'].map(s=>'<option'+(invFilter.status===s?' selected':'')+'>'+s+'</option>').join('')+'</select></label>'+
     '</div><div class="row"><button onclick="go(\'add\')">＋ Add item</button><button class="ghost" onclick="go(\'labels\')">Print labels</button>'+
-      (noPhoto?'<button class="ghost" onclick="fillStockImages()">🖼 Add stock images to '+noPhoto+' item(s) w/o photo</button>':'')+'</div></div>'+
+      '<button class="blue" onclick="fetchCardImages()">🖼 Fetch real card images (online)</button>'+
+      (noPhoto?'<button class="ghost" onclick="fillStockImages()">Placeholder images ('+noPhoto+')</button>':'')+'</div></div>'+
     (items.length?'<div class="card"><table><thead><tr><th>Item</th><th>Owner</th><th>Price</th><th>Barcode / actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       :'<div class="empty">No items yet. <a onclick="go(\'add\')">Add one</a> or <a onclick="loadSample()">load sample data</a>.</div>');
 }
 function photoThumb(i){return i.photo?'<img class="ph" src="'+i.photo+'"/>':'<div class="ph">no photo</div>';}
 function fillStockImages(){ let n=0; state.inventory.forEach(i=>{ if(!i.photo){ i.photo=stockImage(i); i.stock=true; n++; } }); save(); toast('Added stock images to '+n+' item(s).'); render(); }
+
+/* fetch real card images (free): pokemontcg.io first, TCGdex fallback, cached for offline */
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function fetchCardImages(){
+  const items=state.inventory.filter(i=>(!i.photo||i.stock)&&!i.realImage);
+  if(!items.length){toast('All items already have real images.');return;}
+  if(navigator.onLine===false){toast('You look offline — connect to wifi to fetch images.');return;}
+  let done=0,found=0; el('toast').innerHTML='<div class="toast">Fetching images for '+items.length+' item(s)…</div>';
+  for(const it of items){
+    try{ const url=await lookupImage(it); if(url){ it.photo=await toDataURL(url); it.stock=true; it.realImage=true; found++; } }catch(e){}
+    done++; if(done%4===0){ save(); el('toast').innerHTML='<div class="toast">Fetched '+done+'/'+items.length+' ('+found+' found)…</div>'; }
+    await sleep(160);
+  }
+  save(); toast('Done — found '+found+' image(s) of '+items.length+'.'); render();
+}
+async function lookupImage(it){
+  const number=(it.number||'').split('/')[0].trim();
+  try{ const headers=state.settings.ptcgKey?{'X-Api-Key':state.settings.ptcgKey}:{};
+    const q='name:"'+(it.name||'').replace(/"/g,'')+'"'+(number?(' number:'+number):'');
+    const r=await fetch('https://api.pokemontcg.io/v2/cards?pageSize=8&q='+encodeURIComponent(q),{headers});
+    if(r.ok){ const j=await r.json(); if(j.data&&j.data.length){ let best=j.data[0];
+      if(it.set){ const m=j.data.find(c=>c.set&&norm(c.set.name)===norm(it.set)); if(m)best=m; }
+      if(best.images&&(best.images.large||best.images.small)) return best.images.large||best.images.small; } }
+  }catch(e){}
+  try{ const lang=(it.language==='JP')?'ja':(it.language==='CN'?'zh-tw':'en');
+    const r=await fetch('https://api.tcgdex.net/v2/'+lang+'/cards?name='+encodeURIComponent(it.name||''));
+    if(r.ok){ const arr=await r.json(); if(arr&&arr.length){ let pick=arr[0];
+      if(number){ const m=arr.find(c=>String(c.localId)===number); if(m)pick=m; }
+      if(pick.image) return pick.image+'/high.png'; } }
+  }catch(e){}
+  return null;
+}
+async function toDataURL(url){ try{ const r=await fetch(url); if(!r.ok)return url; const b=await r.blob();
+  return await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>res(url);fr.readAsDataURL(b);}); }catch(e){ return url; } }
 
 /* -------- Add / Edit item (intake) -------- */
 let editingId=null, pendingPhoto=null;
@@ -240,7 +275,8 @@ function viewAdd(){
   const sel=(id,opts,cur)=>'<select id="'+id+'">'+opts.map(o=>'<option'+(o===cur?' selected':'')+'>'+o+'</option>').join('')+'</select>';
   const ownerSel='<select id="f_owner">'+state.users.map(u=>'<option value="'+u.id+'"'+((g('ownerId',state.currentUserId))===u.id?' selected':'')+'>'+u.name+'</option>').join('')+'</select>';
   return '<h2 class="page">'+(it?'Edit item':'Add item')+' <small>Photo only required if condition is NOT Near Mint · barcode auto-created</small></h2>'+
-    '<div class="card"><div class="grid2">'+
+    '<div class="card"><div class="row noprint" style="margin-bottom:10px"><button class="blue" onclick="scanOnAdd()">📷 Scan barcode / UPC</button><span class="muted">scan an existing label to edit it, or a sealed product\'s UPC</span></div>'+
+    '<div class="grid2">'+
       fld('Category',sel('f_cat',CATEGORIES,g('category','Pokemon')))+
       fld('Set',inp('f_set',g('set',''),'e.g. Surging Sparks'))+
       fld('Card name / product',inp('f_name',g('name',''),'e.g. Pikachu ex'))+
@@ -253,6 +289,7 @@ function viewAdd(){
       fld('Owner',ownerSel)+
       fld('What we paid (cost, private)',inp('f_cost',g('costBasis',''),'owner-only, never shown to others','number'))+
       fld('List price',inp('f_price',g('listPrice',''),'sale price','number'))+
+      fld('UPC / scanned code',inp('f_upc',g('upc',''),'sealed product (optional)'))+
     '</div>'+
     '<label class="fld"><span>Photo (required only if condition is worse than NM)</span><input id="f_photo" type="file" accept="image/*" onchange="previewPhoto(this)"/></label>'+
     '<div id="photoPrev">'+(g('photo','')?'<img class="ph" style="width:80px;height:110px" src="'+g('photo','')+'"/>':'')+'</div>'+
@@ -265,7 +302,7 @@ function viewAdd(){
     '</div></div>';
 }
 function previewPhoto(input){ const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ pendingPhoto=r.result; el('photoPrev').innerHTML='<img class="ph" style="width:80px;height:110px" src="'+pendingPhoto+'"/>'; }; r.readAsDataURL(f); }
-function collectItem(){ return {category:val('f_cat'),set:val('f_set'),name:val('f_name'),number:val('f_number'),rarity:val('f_rarity'),variance:val('f_var'),language:val('f_lang'),grade:val('f_grade'),condition:val('f_cond'),ownerId:val('f_owner'),costBasis:num('f_cost'),listPrice:num('f_price'),priceOverride:el('f_override').checked}; }
+function collectItem(){ return {category:val('f_cat'),set:val('f_set'),name:val('f_name'),number:val('f_number'),rarity:val('f_rarity'),variance:val('f_var'),language:val('f_lang'),grade:val('f_grade'),condition:val('f_cond'),ownerId:val('f_owner'),costBasis:num('f_cost'),listPrice:num('f_price'),priceOverride:el('f_override').checked,upc:val('f_upc')}; }
 function needsPhoto(cond){ return cond && cond!=='NM'; }
 function saveItem(makeAvailable){
   const data=collectItem(); if(!data.name){toast('Card name is required');return;}
@@ -279,6 +316,7 @@ function saveItem(makeAvailable){
   if(makeAvailable){ toast('Added & ready. Printing label…'); printLabels([item.id]); } else toast('Saved to intake.');
   go('inventory');
 }
+function scanOnAdd(){ openScanner(code=>{ code=(code||'').trim(); if(!code)return; const it=state.inventory.find(i=>i.barcode.toUpperCase()===code.toUpperCase()); if(it){ toast('Found existing item — opening to edit.'); editItem(it.id); } else { const f=el('f_upc'); if(f)f.value=code; toast('Scanned '+code+' → added to UPC field.'); } }); }
 function editItem(id){editingId=id;pendingPhoto=null;go('add');}
 function cancelEdit(){editingId=null;pendingPhoto=null;go('inventory');}
 function deleteItem(id){ if(!confirm('Delete this item permanently?'))return; state.inventory=state.inventory.filter(i=>i.id!==id);save();toast('Deleted.');editingId=null;go('inventory'); }
@@ -553,12 +591,14 @@ function viewSettings(){ const s=state.settings;
   return '<h2 class="page">Settings</h2>'+
     '<div class="card"><h3>Payment accounts — who receives each method</h3><table><tbody>'+acctRows+'</tbody></table><div class="muted" style="margin-top:8px">Default: Cash→drawer · Venmo→Manny · Cash App/PayPal/Square→Reggie · Zelle→ask per sale.</div></div>'+
     '<div class="card"><h3>Show defaults</h3><div class="grid3">'+fld('Cash float',inp('s_float',s.cashFloat,'','number'))+fld('Prize price',inp('s_prize',s.prizePrice,'','number'))+fld('Prize plays/show',inp('s_plays',s.prizePlaysPerShow,'','number'))+'</div><button class="gold" onclick="saveSettings()">Save defaults</button><div class="muted" style="margin-top:6px">Prize machine splits 50/50 Reggie ↔ Manny.</div></div>'+
+    '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
     '<div class="card"><h3>Team</h3>'+state.users.map(u=>'• '+u.name).join('<br>')+'<div class="muted" style="margin-top:6px">(House of Cards — all free, all can finalize.)</div></div>'+
     '<div class="card"><h3>Beta — reset data</h3><div class="banner">Clear everything you entered while testing so you start clean for your first real show.</div><div class="row" style="margin-top:10px"><button class="red" onclick="resetTestData()">Clear test data (keep team & settings)</button><button class="red ghost" onclick="factoryReset()">Full factory reset</button><button class="ghost right" onclick="loadSample()">Load sample data</button></div></div>'+
     '<div class="card"><h3>About</h3><div class="muted">Local beta — data stored only in this browser, works offline. Camera scanning works on the hosted (https/localhost) version; on a double-clicked file the browser blocks the camera, so type or use a USB/Bluetooth scanner.</div></div>';
 }
 function setAcct(m,v){state.paymentAccounts[m]=v;save();toast('Updated.');}
 function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.prizePrice=num('s_prize');state.settings.prizePlaysPerShow=num('s_plays');save();toast('Saved.');}
+function savePtcg(){state.settings.ptcgKey=val('s_ptcg');save();toast('Image API key saved.');}
 function resetTestData(){ if(!confirm('Clear all inventory, sales, shows, trades and wish list? Team & settings stay.'))return; state.inventory=[];state.sales=[];state.shows=[];state.trades=[];state.wantlist=[];state.currentShowId=null;ui.cart=[];ui.cartPayments=[];save();toast('Test data cleared.');go('dashboard'); }
 function factoryReset(){ if(!confirm('FULL reset to factory defaults? Cannot be undone.'))return; state=freshState();ui={route:'dashboard',cart:[],cartPayments:[],focusId:null,sellPanel:null,showPanel:null,tradeDraft:null,inForm:{}};save();toast('Factory reset done.');render(); }
 
