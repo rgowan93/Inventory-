@@ -262,7 +262,9 @@ function render(){
   const active=PARENT[ui.route]||ui.route;
   el('tabs').innerHTML='<div class="menu-brand"><b>HOUSE</b> OF CARDS</div>'+
     '<button class="menu-collapse" onclick="closeMenu()">‹ Collapse menu</button>'+
-    TABS.map(([r,l])=>'<button class="'+(active===r?'active':'')+'" onclick="go(\''+r+'\')">'+l+'</button>').join('');
+    TABS.map(([r,l])=>{ let label=l;
+      if(r==='friends'&&typeof fui!=='undefined'&&fui.incoming&&fui.incoming.length) label+=' <span class="badge">'+fui.incoming.length+'</span>';
+      return '<button class="'+(active===r?'active':'')+'" onclick="go(\''+r+'\')">'+label+'</button>'; }).join('');
   applyMenu();
   el('view').innerHTML=(VIEWS[ui.route]||viewDashboard)();
   afterRenderFocus(); updateImgChip();
@@ -345,7 +347,7 @@ function viewSignup(){
     '<div class="row"><button class="gold" onclick="doSignup()">Continue to subscription →</button><button class="ghost" onclick="ui.authView=\'landing\';render()">Back</button></div>'+
     '<div class="muted" style="margin-top:8px">Already have an account? <a href="#" onclick="ui.authView=\'login\';render();return false">Log in</a>. Everyone on a company shares full access; every change is signed by who made it.</div>'+
   '</div></div>'; }
-function doSignup(){ const name=val('su_name').trim(); if(!name){ toast('Enter your name.'); return; }
+async function doSignup(){ const name=val('su_name').trim(); if(!name){ toast('Enter your name.'); return; }
   const username=val('su_username').trim().toLowerCase(); if(!/^[a-z0-9_]{3,}$/.test(username)){ toast('Username: 3+ letters/numbers, no spaces.'); return; }
   if(state.users.some(u=>String(u.username||'').toLowerCase()===username)){ toast('That username is taken.'); return; }
   const email=val('su_email').trim(); if(!/^\S+@\S+\.\S+$/.test(email)){ toast('Enter a valid email address.'); return; }
@@ -353,7 +355,9 @@ function doSignup(){ const name=val('su_name').trim(); if(!name){ toast('Enter y
   const p=val('su_pass'); if(p.length<3){ toast('Password needs at least 3 characters.'); return; }
   if(p!==val('su_pass2')){ toast('Passwords don’t match.'); return; }
   const u={id:uid('u'),name,username,email,pass:hashPass(p),secQ:val('su_q'),secA:val('su_a')?hashPass(val('su_a').toLowerCase()):'',mustChange:false,subscription:{status:'pending',since:0}};
-  state.users.push(u); ui.newUserId=u.id; ui.authView='subscribe'; save(); render(); }
+  state.users.push(u); ui.newUserId=u.id; ui.authView='subscribe'; save(); render();
+  // also create the matching cloud account so this login works on every device and is searchable
+  if(cloudOn()&&typeof cloudSignUp==='function'){ try{ const r=await cloudSignUp(email,p,name,username); if(r&&r.error&&!/registered|already|exists/i.test(r.error)) console.warn('[HoC] cloud signup',r.error); }catch(e){ console.warn(e); } } }
 
 /* -------- Subscription portal -------- */
 function viewSubscribe(){
@@ -391,7 +395,7 @@ function viewLogin(){
         :'<div class="banner">'+esc(usr.name)+' hasn\'t set a security question, so self-reset isn\'t available. If the password was never changed, sign in with <b>test</b>.</div><div class="row" style="margin-top:10px"><button class="ghost" onclick="ui.forgotUser=null;render()">Back</button></div>')+
       '</div></div>'; }
   return '<div class="login"><h2 class="page">Sign in <small>House of Cards</small></h2><div class="card">'+
-    fld('Username',inp('lg_username','','your username'))+
+    fld('Username or email',inp('lg_username','','your username or email'))+
     fld('Password',inp('lg_pass','','','password'))+
     '<div class="row"><button class="gold" onclick="doLogin()">Sign in</button>'+
     '<button class="ghost" onclick="ui.loginMode=\'forgot\';ui.forgotUser=null;render()">Forgot password?</button>'+
@@ -400,11 +404,26 @@ function viewLogin(){
     '<div class="muted" style="margin-top:8px">Tip: existing team members log in with their username and the default password <b>test</b> until they change it.</div>'+
     '</div></div>';
 }
-function doLogin(){ const u=findUser(val('lg_username')); if(!u){ toast('No account with that username or email.'); return; }
-  if(u.pass!==hashPass(val('lg_pass'))){ toast('Wrong password.'); return; }
-  state.currentUserId=u.id; ui.authed=true; ui.route='dashboard'; save();
-  if(u.mustChange||u.pass===hashPass('test')){ toast('Tip: set your own password in Settings → My account.'); }
-  render();
+async function doLogin(){ const key=val('lg_username'), pass=val('lg_pass');
+  const u=findUser(key);
+  if(u && u.pass===hashPass(pass)){
+    state.currentUserId=u.id; ui.authed=true; ui.route='dashboard'; save();
+    if(u.mustChange||u.pass===hashPass('test')){ toast('Tip: set your own password in Settings → My account.'); }
+    if(cloudOn()&&typeof cloudLoginByKey==='function'&&u.email){ cloudLoginByKey(u.email,pass).then(()=>render()).catch(()=>{}); } // also connect cloud
+    render(); return;
+  }
+  // cloud account created on another device or on the Friends tab — recognize it here too
+  if(cloudOn()&&typeof cloudLoginByKey==='function'){
+    const r=await cloudLoginByKey(key,pass);
+    if(r&&r.ok){ const pr=r.profile||{};
+      let lu=findUser(pr.handle)||findUser(pr.email)||findUser(key);
+      if(!lu){ lu={id:uid('u'),name:pr.name||pr.handle||key,username:(pr.handle||'').toLowerCase(),email:pr.email||'',pass:hashPass(pass),secQ:'',secA:'',mustChange:false,subscription:{status:'cloud',since:Date.now()}}; state.users.push(lu); }
+      else { lu.pass=hashPass(pass); if(pr.email)lu.email=pr.email; }
+      state.currentUserId=lu.id; ui.authed=true; ui.route='dashboard'; save(); toast('Welcome, '+lu.name+'!'); render(); return;
+    }
+    if(r&&r.error&&!u){ toast(r.error); return; }
+  }
+  toast(u?'Wrong password.':'No account with that username or email.');
 }
 function doForgotFind(){ const u=findUser(val('lg_fkey')); if(!u){ toast('No account found for that.'); return; } ui.forgotUser=u.id; render(); }
 function doReset(){ const u=ui.forgotUser?state.users.find(x=>x.id===ui.forgotUser):null; if(!u||!u.secQ)return;

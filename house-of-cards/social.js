@@ -9,7 +9,7 @@ let cloudUser=null;   // Supabase auth user once connected to the cloud
 let myProfile=null;   // this user's row in public.profiles
 let myCompany=null;   // the company page this user owns (if any)
 let fui={ q:'', radius:0, results:null, friends:[], incoming:[], outgoing:[], following:[], followingIds:new Set(),
-          loaded:false, loc:null, cloc:null, busy:false, mode:'signin' };
+          blocked:[], blockedIds:new Set(), loaded:false, loc:null, cloc:null, busy:false, mode:'signin' };
 
 function socialReady(){ return cloudOn() && !!cloudUser; }
 function KM_PER_MI(){ return 1.609344; }
@@ -19,7 +19,7 @@ async function cloudInitSession(){
   if(!cloudOn()) return;
   try{
     const { data } = await sb.auth.getSession();
-    if(data && data.session){ cloudUser=data.session.user; await loadMyProfile(); render(); }
+    if(data && data.session){ cloudUser=data.session.user; await loadMyProfile(); try{ await loadSocial(); fui.loaded=true; }catch(e){} render(); }
     sb.auth.onAuthStateChange((_e,session)=>{ cloudUser=session?session.user:null; if(!cloudUser){myProfile=null;fui.loaded=false;} });
   }catch(e){ console.warn('[HoC] cloud session', e); }
 }
@@ -36,6 +36,20 @@ async function cloudSignIn(email,pass){
   cloudUser=data.user; await loadMyProfile(); return { ok:true };
 }
 async function cloudSignOut(){ try{ await sb.auth.signOut(); }catch(e){} cloudUser=null; myProfile=null; fui.loaded=false; }
+/* Log in to the cloud by either email OR username (handle). Lets the main app
+   login screen recognize cloud accounts created on any device. */
+async function cloudLoginByKey(key,pass){
+  if(!cloudOn()) return { error:'Cloud is off.' };
+  key=String(key||'').trim(); if(!key||!pass) return { error:'Enter your login and password.' };
+  let email=key;
+  if(!key.includes('@')){
+    const { data } = await sb.from('profiles').select('email').ilike('handle',key).maybeSingle();
+    if(data && data.email) email=data.email; else return { error:'No cloud account with that username.' };
+  }
+  const r=await cloudSignIn(email,pass); if(r.error) return { error:r.error };
+  try{ await loadSocial(); fui.loaded=true; }catch(e){}
+  return { ok:true, profile: myProfile || { email, handle:key, name:key } };
+}
 
 /* -------- profile -------- */
 async function loadMyProfile(){
@@ -83,6 +97,7 @@ async function searchProfiles(q){
 }
 async function findFriends(q,radiusKm){
   let rows=await searchProfiles(q);
+  if(fui.blockedIds && fui.blockedIds.size) rows=rows.filter(p=>!fui.blockedIds.has(p.id));   // hide people you've blocked
   if(radiusKm && myProfile && myProfile.lat!=null && myProfile.lng!=null){
     rows=rows.filter(p=>p.lat!=null&&p.lng!=null)
       .map(p=>{ p._dist=haversineKm(myProfile.lat,myProfile.lng,p.lat,p.lng); return p; })
@@ -105,13 +120,14 @@ async function loadSocial(){
   rows.forEach(r=>ids.add(r.requester===cloudUser.id?r.addressee:r.requester));
   let profs={};
   if(ids.size){ const { data:ps } = await sb.from('profiles').select('*').in('id',[...ids]); (ps||[]).forEach(p=>profs[p.id]=p); }
-  const friends=[],incoming=[],outgoing=[];
+  const friends=[],incoming=[],outgoing=[],blocked=[]; const blockedIds=new Set();
   rows.forEach(r=>{ const otherId=r.requester===cloudUser.id?r.addressee:r.requester; const other=profs[otherId]||{id:otherId,name:'(unknown)'};
+    if(r.status==='blocked'){ blockedIds.add(otherId); if(r.requester===cloudUser.id) blocked.push({rel:r,other}); return; }
     if(r.status==='accepted') friends.push({rel:r,other});
     else if(r.addressee===cloudUser.id) incoming.push({rel:r,other});
     else outgoing.push({rel:r,other}); });
-  fui.friends=friends; fui.incoming=incoming; fui.outgoing=outgoing;
-  await loadMyCompany(); await loadFollows();
+  fui.friends=friends; fui.incoming=incoming; fui.outgoing=outgoing; fui.blocked=blocked; fui.blockedIds=blockedIds;
+  await loadMyCompany();
 }
 function relatedIds(){ const s=new Set(); fui.friends.forEach(x=>s.add(x.other.id)); fui.incoming.forEach(x=>s.add(x.other.id)); fui.outgoing.forEach(x=>s.add(x.other.id)); return s; }
 
@@ -181,8 +197,21 @@ async function doFriendSearch(){ fui.q=val('fr_q'); const sel=el('fr_radius'); f
   const km=fui.radius?fui.radius*KM_PER_MI():0;
   const [people,companies]=await Promise.all([findFriends(fui.q,km),findCompanies(fui.q,km)]);
   fui.results={people,companies}; fui.busy=false; render(); }
-async function addFriend(id){ const r=await sendFriendRequest(id); if(r.error){ toast(r.error); return; } toast('Friend request sent.'); await loadSocial(); render(); }
-async function respondFriend(relId,accept){ await respondRequest(relId,accept); await loadSocial(); render(); toast(accept?'Friend added!':'Request declined.'); }
+async function addFriend(id){ if(!id){ toast('No user to add.'); return; }
+  const r=await sendFriendRequest(id);
+  if(r.error){ toast(/duplicate/i.test(r.error)?'Already added or request pending.':r.error); return; }
+  toast('Friend request sent — they’ll get a notification.'); await loadSocial(); render(); }
+async function addCompanyFriend(ownerId){ if(!ownerId){ toast('This shop hasn’t set an owner to add yet.'); return; } return addFriend(ownerId); }
+async function respondFriend(relId,accept){ await respondRequest(relId,accept); await loadSocial(); render(); toast(accept?'Friend added!':'Request denied.'); }
+async function unfriend(relId){ await sb.from('friendships').delete().eq('id',relId); await loadSocial(); render(); toast('Removed.'); }
+async function blockUser(otherId){ if(!socialReady()||!otherId) return;
+  const mine=cloudUser.id;
+  await sb.from('friendships').delete().or('and(requester.eq.'+mine+',addressee.eq.'+otherId+'),and(requester.eq.'+otherId+',addressee.eq.'+mine+')');
+  const { error } = await sb.from('friendships').insert({ requester:mine, addressee:otherId, status:'blocked' });
+  if(error){ toast(error.message); return; }
+  toast('User blocked.'); await loadSocial(); render(); }
+async function unblockUser(otherId){ await sb.from('friendships').delete().eq('requester',cloudUser.id).eq('addressee',otherId).eq('status','blocked');
+  await loadSocial(); render(); toast('Unblocked.'); }
 async function saveCompany(){
   const fields={ name:val('co_name'), handle:val('co_handle').toLowerCase(), bio:val('co_bio'), city:val('co_city') };
   if(!fields.name){ toast('Enter a company name.'); return; }
@@ -200,10 +229,9 @@ async function doFollow(id){ const r=await followCompany(id); if(r.error){ toast
 async function doUnfollow(id){ await unfollowCompany(id); toast('Unfollowed.'); await loadFollows(); render(); }
 function companyRow(c){
   const dist=(c._dist!=null)?'<span class="tag">'+(c._dist/KM_PER_MI()).toFixed(c._dist<KM_PER_MI()*10?1:0)+' mi</span>':'';
-  const mine=myCompany&&myCompany.id===c.id, following=fui.followingIds&&fui.followingIds.has(c.id);
+  const mine=myCompany&&myCompany.id===c.id;
   const btn= mine?'<span class="pill owner">yours</span>'
-    : following?'<button class="ghost sm" onclick="doUnfollow(\''+c.id+'\')">Following ✓</button>'
-    : '<button class="blue sm" onclick="doFollow(\''+c.id+'\')">Follow</button>';
+    : '<button class="blue sm" onclick="addCompanyFriend(\''+(c.owner||'')+'\')">＋ Add friend</button>';
   return '<div class="pickrow">'+profileAvatar(c,'sm')+
     '<div style="flex:1;min-width:0"><div style="font-weight:800">🏢 '+esc(c.name||'(company)')+' '+dist+'</div>'+
       '<div class="muted">'+(c.handle?'@'+esc(c.handle):'')+(c.city?' · '+esc(c.city):'')+'</div>'+
@@ -274,20 +302,21 @@ function viewFriends(){
   const reqCard=fui.incoming.length ? '<div class="card"><h3>Friend requests ('+fui.incoming.length+')</h3>'+
     fui.incoming.map(x=>friendRow(x.other,'respond',x.rel.id)).join('')+'</div>' : '';
   const friendsCard='<div class="card"><h3>Your friends ('+fui.friends.length+')</h3>'+
-    (fui.friends.length ? fui.friends.map(x=>friendRow(x.other,'friend')).join('') : '<div class="muted">No friends yet — find some above.</div>')+'</div>';
-  const followCard=(fui.following&&fui.following.length) ? '<div class="card"><h3>Companies you follow ('+fui.following.length+')</h3>'+
-    fui.following.map(companyRow).join('')+'</div>' : '';
+    (fui.friends.length ? fui.friends.map(x=>friendRow(x.other,'friend',x.rel.id)).join('') : '<div class="muted">No friends yet — find some above.</div>')+'</div>';
+  const blockedCard=(fui.blocked&&fui.blocked.length) ? '<div class="card"><h3>Blocked ('+fui.blocked.length+')</h3>'+
+    fui.blocked.map(x=>friendRow(x.other,'blocked')).join('')+'</div>' : '';
 
   return '<h2 class="page">Friends <small>connected as '+esc((myProfile&&myProfile.name)||cloudUser.email)+' · <a href="#" onclick="cloudDisconnect();return false">disconnect</a></small></h2>'+
-    profileCard+companyCard+searchCard+reqCard+friendsCard+followCard;
+    profileCard+companyCard+searchCard+reqCard+friendsCard+blockedCard;
 }
 function friendRow(p,action,relId){
   const dist=(p._dist!=null)?'<span class="tag">'+(p._dist/KM_PER_MI()).toFixed(p._dist<KM_PER_MI()*10?1:0)+' mi</span>':'';
   let btn='';
-  if(action==='add') btn='<button class="blue sm" onclick="addFriend(\''+p.id+'\')">＋ Add</button>';
-  else if(action==='respond') btn='<button class="gold sm" onclick="respondFriend(\''+relId+'\',true)">Accept</button> <button class="ghost sm" onclick="respondFriend(\''+relId+'\',false)">Decline</button>';
+  if(action==='add') btn='<button class="blue sm" onclick="addFriend(\''+p.id+'\')">＋ Add friend</button> <button class="ghost sm" onclick="blockUser(\''+p.id+'\')">Block</button>';
+  else if(action==='respond') btn='<button class="gold sm" onclick="respondFriend(\''+relId+'\',true)">Accept</button> <button class="ghost sm" onclick="respondFriend(\''+relId+'\',false)">Deny</button> <button class="red sm" onclick="blockUser(\''+p.id+'\')">Block</button>';
   else if(action==='related') btn='<span class="muted">pending / friend</span>';
-  else if(action==='friend') btn='<span class="pill avail">friend</span>';
+  else if(action==='friend') btn='<span class="pill avail">friend</span> <button class="ghost sm" onclick="unfriend(\''+relId+'\')">Remove</button> <button class="ghost sm" onclick="blockUser(\''+p.id+'\')">Block</button>';
+  else if(action==='blocked') btn='<button class="ghost sm" onclick="unblockUser(\''+p.id+'\')">Unblock</button>';
   return '<div class="pickrow">'+profileAvatar(p,'sm')+
     '<div style="flex:1;min-width:0"><div style="font-weight:800">'+esc(p.name||'(no name)')+' '+dist+'</div>'+
       '<div class="muted">'+(p.handle?'@'+esc(p.handle):'')+(p.company?' · '+esc(p.company):'')+(p.city?' · '+esc(p.city):'')+'</div>'+
