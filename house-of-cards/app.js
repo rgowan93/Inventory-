@@ -260,12 +260,16 @@ function uploadLogoPrompt(){ const inp=document.createElement('input'); inp.type
 let bounceRAF=null;
 function startBounce(){ const area=el('bounceArea'), logo=el('bounceLogo'); if(!area||!logo)return; stopBounce();
   let x=24,y=24,dx=2.4,dy=2.0;
-  const step=()=>{ const aw=area.clientWidth, ah=area.clientHeight, lw=logo.clientWidth||180, lh=logo.clientHeight||180;
-    x+=dx; y+=dy;
-    if(x<=0){x=0;dx=Math.abs(dx);} if(y<=0){y=0;dy=Math.abs(dy);}
-    if(x+lw>=aw){x=aw-lw;dx=-Math.abs(dx);} if(y+lh>=ah){y=ah-lh;dy=-Math.abs(dy);}
-    logo.style.transform='translate('+x+'px,'+y+'px)'; bounceRAF=requestAnimationFrame(step); };
-  step(); }
+  const step=()=>{ try{
+    if(document.hidden){ bounceRAF=requestAnimationFrame(step); return; } // don't churn in the background
+    const aw=area.clientWidth, ah=area.clientHeight, lw=logo.clientWidth||180, lh=logo.clientHeight||180;
+    if(aw>0&&ah>0){ x+=dx; y+=dy;
+      if(x<=0){x=0;dx=Math.abs(dx);} if(y<=0){y=0;dy=Math.abs(dy);}
+      if(x+lw>=aw){x=aw-lw;dx=-Math.abs(dx);} if(y+lh>=ah){y=ah-lh;dy=-Math.abs(dy);}
+      logo.style.transform='translate('+x+'px,'+y+'px)'; }
+    bounceRAF=requestAnimationFrame(step);
+  }catch(e){ stopBounce(); } };
+  bounceRAF=requestAnimationFrame(step); }
 function stopBounce(){ if(bounceRAF){ cancelAnimationFrame(bounceRAF); bounceRAF=null; } }
 
 /* -------- Sign up (new team member; everyone shares company access) -------- */

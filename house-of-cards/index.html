@@ -111,7 +111,7 @@ header.top .who select{width:auto}
 .bounce-area{position:relative;flex:1;min-height:60vh;border:3px solid #000;border-radius:18px;overflow:hidden;
   background:radial-gradient(circle at 50% 40%,#22305a 0%,var(--bg2) 60%,var(--bg) 100%)}
 .bounce-logo{position:absolute;top:0;left:0;width:min(46vw,300px);height:auto;border-radius:18px;
-  filter:drop-shadow(0 0 22px rgba(244,180,0,.55));will-change:transform;user-select:none;pointer-events:none}
+  box-shadow:0 6px 24px rgba(0,0,0,.45);will-change:transform;user-select:none;pointer-events:none}
 .landing-cap{text-align:center;font-size:28px;font-weight:900;letter-spacing:1px;margin:14px 0 4px}
 .landing-cap b{color:var(--gold)}
 @media print{
@@ -135,8 +135,14 @@ header.top .who select{width:auto}
 </div>
 <div id="toast"></div>
 <div id="imgchip" class="imgchip" style="display:none"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js"></script>
-<script src="app.js"></script>
+<script>
+/* on-screen crash catcher — surfaces JS errors instead of a blank/crashing page */
+(function(){function box(){var d=document.getElementById('crashlog');if(!d){d=document.createElement('div');d.id='crashlog';d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#3a0d0d;color:#fff;font:12px/1.4 monospace;padding:10px;white-space:pre-wrap;max-height:55vh;overflow:auto;border-top:2px solid #f44';document.body&&document.body.appendChild(d);}return d;}
+window.addEventListener('error',function(e){var d=box();if(d)d.textContent+='ERR: '+(e.message||e.error||'')+'  ['+(e.filename||'').split('/').pop()+':'+(e.lineno||'')+']\n';});
+window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
+<script src="config.js?v=20260606b"></script>
+<script src="app.js?v=20260606b"></script>
 </body>
 </html>
