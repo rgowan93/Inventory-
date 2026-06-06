@@ -41,8 +41,32 @@ create table if not exists public.friendships (
   unique (requester, addressee)
 );
 
+create table if not exists public.companies (
+  id          uuid primary key default uuid_generate_v4(),
+  owner       uuid references public.profiles(id) on delete set null,
+  name        text,
+  handle      text unique,
+  bio         text,
+  avatar_url  text,
+  city        text,
+  lat         double precision,
+  lng         double precision,
+  discoverable boolean default true,
+  created_at  timestamptz default now()
+);
+
+create table if not exists public.follows (
+  id         uuid primary key default uuid_generate_v4(),
+  follower   uuid references public.profiles(id) on delete cascade,
+  company    uuid references public.companies(id) on delete cascade,
+  created_at timestamptz default now(),
+  unique (follower, company)
+);
+
 alter table public.profiles    enable row level security;
 alter table public.friendships enable row level security;
+alter table public.companies   enable row level security;
+alter table public.follows     enable row level security;
 
 -- public directory: anyone can read profiles; you can only edit your own
 create policy "profiles readable"  on public.profiles for select using (true);
@@ -54,6 +78,17 @@ create policy "read own friendships"   on public.friendships for select using (a
 create policy "create friendship"      on public.friendships for insert with check (auth.uid() = requester);
 create policy "update friendship"      on public.friendships for update using (auth.uid() = requester or auth.uid() = addressee);
 create policy "delete friendship"      on public.friendships for delete using (auth.uid() = requester or auth.uid() = addressee);
+
+-- companies: anyone can find them; only the owner can edit theirs
+create policy "companies readable" on public.companies for select using (true);
+create policy "create company"     on public.companies for insert with check (auth.uid() = owner);
+create policy "update own company" on public.companies for update using (auth.uid() = owner);
+create policy "delete own company" on public.companies for delete using (auth.uid() = owner);
+
+-- follows: you manage your own follows
+create policy "read own follows"   on public.follows for select using (auth.uid() = follower);
+create policy "create own follow"  on public.follows for insert with check (auth.uid() = follower);
+create policy "delete own follow"  on public.follows for delete using (auth.uid() = follower);
 ```
 
 You should see **Success. No rows returned.**
@@ -90,6 +125,8 @@ create policy "avatars user update" on storage.objects
 ## That's it
 
 Open the app → **Friends** tab → **Create cloud account** (or **Sign in**).
-Set your photo, company, and city/GPS, then search for other sellers by name,
-username, company, or distance. Your profile photo now follows you on every
+Set your photo, then optionally create a **company page** with its own logo and
+location. Search for other sellers **and shops** by name, username, company, or
+distance (miles) — partial spellings work. Send friend requests to people and
+**Follow** companies. Your profile photo and company now follow you on every
 device you sign in on.

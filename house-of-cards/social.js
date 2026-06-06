@@ -7,7 +7,9 @@
 
 let cloudUser=null;   // Supabase auth user once connected to the cloud
 let myProfile=null;   // this user's row in public.profiles
-let fui={ q:'', radius:0, results:null, friends:[], incoming:[], outgoing:[], loaded:false, loc:null, busy:false, mode:'signin' };
+let myCompany=null;   // the company page this user owns (if any)
+let fui={ q:'', radius:0, results:null, friends:[], incoming:[], outgoing:[], following:[], followingIds:new Set(),
+          loaded:false, loc:null, cloc:null, busy:false, mode:'signin' };
 
 function socialReady(){ return cloudOn() && !!cloudUser; }
 function KM_PER_MI(){ return 1.609344; }
@@ -109,8 +111,42 @@ async function loadSocial(){
     else if(r.addressee===cloudUser.id) incoming.push({rel:r,other});
     else outgoing.push({rel:r,other}); });
   fui.friends=friends; fui.incoming=incoming; fui.outgoing=outgoing;
+  await loadMyCompany(); await loadFollows();
 }
 function relatedIds(){ const s=new Set(); fui.friends.forEach(x=>s.add(x.other.id)); fui.incoming.forEach(x=>s.add(x.other.id)); fui.outgoing.forEach(x=>s.add(x.other.id)); return s; }
+
+/* -------- companies (their own searchable, followable pages) -------- */
+async function loadMyCompany(){ if(!cloudUser){ myCompany=null; return null; }
+  const { data } = await sb.from('companies').select('*').eq('owner',cloudUser.id).maybeSingle();
+  myCompany=data||null; return myCompany; }
+async function upsertCompany(fields){ if(!cloudUser) return { error:'not connected' };
+  const row=Object.assign({ owner:cloudUser.id }, fields); if(myCompany&&myCompany.id)row.id=myCompany.id;
+  const { data, error } = await sb.from('companies').upsert(row).select().maybeSingle();
+  if(error) return { error:error.message }; myCompany=data; return { ok:true }; }
+async function uploadCompanyAvatar(file){ if(!socialReady()) return { error:'connect to the cloud first' };
+  if(!myCompany||!myCompany.id){ const r=await upsertCompany({ name:val('co_name')||'My company' }); if(r.error)return r; }
+  const ext=((file.name||'').split('.').pop()||'png').toLowerCase().replace(/[^a-z0-9]/g,'')||'png';
+  const path=cloudUser.id+'/company-'+myCompany.id+'.'+ext;
+  const { error } = await sb.storage.from('avatars').upload(path,file,{ upsert:true, contentType:file.type||'image/png' });
+  if(error) return { error:error.message };
+  const { data } = sb.storage.from('avatars').getPublicUrl(path);
+  return upsertCompany({ avatar_url:data.publicUrl+'?v='+Date.now() }); }
+async function searchCompanies(q){ q=(q||'').replace(/[%,()]/g,' ').trim();
+  let query=sb.from('companies').select('*').eq('discoverable',true).limit(40);
+  if(q){ const like='%'+q+'%'; query=query.or('name.ilike.'+like+',handle.ilike.'+like+',bio.ilike.'+like); }
+  const { data, error } = await query; if(error){ console.warn('[HoC] company search',error); return []; } return data||[]; }
+async function findCompanies(q,radiusKm){ let rows=await searchCompanies(q);
+  if(radiusKm && myProfile && myProfile.lat!=null && myProfile.lng!=null){
+    rows=rows.filter(c=>c.lat!=null&&c.lng!=null).map(c=>{ c._dist=haversineKm(myProfile.lat,myProfile.lng,c.lat,c.lng); return c; })
+      .filter(c=>c._dist<=radiusKm).sort((a,b)=>a._dist-b._dist); }
+  return rows; }
+async function loadFollows(){ if(!cloudUser){ fui.following=[]; fui.followingIds=new Set(); return; }
+  const { data:fl } = await sb.from('follows').select('*').eq('follower',cloudUser.id);
+  const rows=fl||[]; const ids=rows.map(r=>r.company);
+  let comps={}; if(ids.length){ const { data:cs } = await sb.from('companies').select('*').in('id',ids); (cs||[]).forEach(c=>comps[c.id]=c); }
+  fui.following=rows.map(r=>comps[r.company]).filter(Boolean); fui.followingIds=new Set(ids); }
+async function followCompany(id){ const { error } = await sb.from('follows').insert({ follower:cloudUser.id, company:id }); return error?{error:error.message}:{ok:true}; }
+async function unfollowCompany(id){ await sb.from('follows').delete().eq('follower',cloudUser.id).eq('company',id); }
 
 /* -------- UI actions (called from inline handlers) -------- */
 async function cloudConnect(){
@@ -142,9 +178,37 @@ async function useGPS(){ toast('Getting your location…'); const g=await getGPS
   fui.loc=g; toast('Location captured — tap Save profile to keep it.'); }
 async function doFriendSearch(){ fui.q=val('fr_q'); const sel=el('fr_radius'); fui.radius=sel?parseFloat(sel.value)||0:0;
   fui.busy=true; fui.results=null; render();
-  fui.results=await findFriends(fui.q, fui.radius?fui.radius*KM_PER_MI():0); fui.busy=false; render(); }
+  const km=fui.radius?fui.radius*KM_PER_MI():0;
+  const [people,companies]=await Promise.all([findFriends(fui.q,km),findCompanies(fui.q,km)]);
+  fui.results={people,companies}; fui.busy=false; render(); }
 async function addFriend(id){ const r=await sendFriendRequest(id); if(r.error){ toast(r.error); return; } toast('Friend request sent.'); await loadSocial(); render(); }
 async function respondFriend(relId,accept){ await respondRequest(relId,accept); await loadSocial(); render(); toast(accept?'Friend added!':'Request declined.'); }
+async function saveCompany(){
+  const fields={ name:val('co_name'), handle:val('co_handle').toLowerCase(), bio:val('co_bio'), city:val('co_city') };
+  if(!fields.name){ toast('Enter a company name.'); return; }
+  if(fui.cloc){ fields.lat=fui.cloc.lat; fields.lng=fui.cloc.lng; }
+  else if(fields.city && (!myCompany || myCompany.city!==fields.city || myCompany.lat==null)){
+    toast('Looking up your area…'); const g=await geocode(fields.city); if(g){ fields.lat=g.lat; fields.lng=g.lng; } }
+  const r=await upsertCompany(fields); if(r.error){ toast('Save failed: '+r.error); return; }
+  fui.cloc=null; toast('Company page saved.'); render(); }
+async function useCompanyGPS(){ toast('Getting location…'); const g=await getGPS();
+  if(!g){ toast('Couldn’t read GPS — type a city or ZIP instead.'); return; }
+  fui.cloc=g; toast('Location captured — tap Save company to keep it.'); }
+function onCompanyAvatarPick(input){ const f=input.files[0]; if(!f)return; toast('Uploading logo…');
+  uploadCompanyAvatar(f).then(r=>{ if(r.error)toast('Upload failed: '+r.error); else toast('Company logo updated.'); render(); }); }
+async function doFollow(id){ const r=await followCompany(id); if(r.error){ toast(r.error); return; } toast('Following.'); await loadFollows(); render(); }
+async function doUnfollow(id){ await unfollowCompany(id); toast('Unfollowed.'); await loadFollows(); render(); }
+function companyRow(c){
+  const dist=(c._dist!=null)?'<span class="tag">'+(c._dist/KM_PER_MI()).toFixed(c._dist<KM_PER_MI()*10?1:0)+' mi</span>':'';
+  const mine=myCompany&&myCompany.id===c.id, following=fui.followingIds&&fui.followingIds.has(c.id);
+  const btn= mine?'<span class="pill owner">yours</span>'
+    : following?'<button class="ghost sm" onclick="doUnfollow(\''+c.id+'\')">Following ✓</button>'
+    : '<button class="blue sm" onclick="doFollow(\''+c.id+'\')">Follow</button>';
+  return '<div class="pickrow">'+profileAvatar(c,'sm')+
+    '<div style="flex:1;min-width:0"><div style="font-weight:800">🏢 '+esc(c.name||'(company)')+' '+dist+'</div>'+
+      '<div class="muted">'+(c.handle?'@'+esc(c.handle):'')+(c.city?' · '+esc(c.city):'')+'</div>'+
+      (c.bio?'<div class="muted">'+esc(c.bio)+'</div>':'')+'</div>'+
+    '<div class="row" style="gap:6px">'+btn+'</div></div>'; }
 
 /* -------- avatar helpers shared with the top bar -------- */
 function profileAvatar(p,size){ const c='avatar-'+(size||'sm');
@@ -175,14 +239,32 @@ function viewFriends(){
       '<button class="ghost" onclick="useGPS()">📍 Use my GPS location</button>'+
       '<span class="muted">Location: '+loc+'</span></div></div>';
 
+  // company page (optional) — makes your shop its own searchable, followable entry
+  const c=myCompany||{};
+  const cloc = fui.cloc ? 'GPS set — Save to keep'
+            : (c.lat!=null ? ('on the map'+(c.city?' · '+esc(c.city):'')) : 'not set');
+  const companyCard='<div class="card"><h3>Your company page '+(myCompany?'':'<small class="muted">— optional; makes your shop searchable</small>')+'</h3>'+
+    '<div class="row" style="align-items:center;gap:14px;margin-bottom:8px">'+profileAvatar(c,'lg')+
+      '<label class="fld" style="flex:1;min-width:180px;margin:0"><span>Company logo</span><input type="file" accept="image/*" onchange="onCompanyAvatarPick(this)"/></label></div>'+
+    '<div class="grid2">'+fld('Company name',inp('co_name',c.name||'','your shop / team'))+fld('Company username',inp('co_handle',c.handle||'','@handle'))+'</div>'+
+    '<div class="grid2">'+fld('City or ZIP',inp('co_city',c.city||'','shop location'))+fld('Bio',inp('co_bio',c.bio||'','what you sell'))+'</div>'+
+    '<div class="row"><button class="gold" onclick="saveCompany()">'+(myCompany?'Save company':'Create company page')+'</button>'+
+      '<button class="ghost" onclick="useCompanyGPS()">📍 Use GPS</button><span class="muted">Location: '+cloc+'</span></div></div>';
+
   const radii=[[0,'Any distance'],[5,'5 mi'],[10,'10 mi'],[25,'25 mi'],[50,'50 mi'],[100,'100 mi'],[250,'250 mi']];
   const radSel='<select id="fr_radius" style="width:auto">'+radii.map(r=>'<option value="'+r[0]+'"'+(fui.radius===r[0]?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
   let results;
   if(fui.busy) results='<div class="muted">Searching…</div>';
-  else if(fui.results==null) results='<div class="muted">Search by name, username, company — or set a radius to find sellers near you. Partial spellings work.</div>';
-  else if(!fui.results.length) results='<div class="empty">No matches. Try fewer letters or a wider radius.</div>';
-  else { const rel=relatedIds(); results=fui.results.map(pr=>friendRow(pr,rel.has(pr.id)?'related':'add')).join(''); }
-  const searchCard='<div class="card"><h3>Find friends</h3>'+
+  else if(fui.results==null) results='<div class="muted">Search people and companies by name, username, or company — or set a radius to find sellers near you. Partial spellings work.</div>';
+  else {
+    const people=fui.results.people||[], companies=fui.results.companies||[];
+    if(!people.length && !companies.length) results='<div class="empty">No matches. Try fewer letters or a wider radius.</div>';
+    else { const rel=relatedIds();
+      const cHtml=companies.length?companies.map(companyRow).join(''):'<div class="muted">No companies matched.</div>';
+      const pHtml=people.length?people.map(pr=>friendRow(pr,rel.has(pr.id)?'related':'add')).join(''):'<div class="muted">No people matched.</div>';
+      results='<div class="muted" style="font-weight:800;margin-bottom:4px">Companies</div>'+cHtml+'<hr class="sep"><div class="muted" style="font-weight:800;margin-bottom:4px">People</div>'+pHtml; }
+  }
+  const searchCard='<div class="card"><h3>Find friends &amp; shops</h3>'+
     '<div class="row" style="align-items:flex-end">'+
       '<label class="fld" style="flex:1;min-width:200px;margin:0"><span>Name, username, or company</span><input id="fr_q" value="'+esc(fui.q||'')+'" placeholder="e.g. reggie, house of cards, smith" onkeydown="if(event.key===\'Enter\')doFriendSearch()"/></label>'+
       '<label class="fld" style="margin:0"><span>Within</span>'+radSel+'</label>'+
@@ -193,9 +275,11 @@ function viewFriends(){
     fui.incoming.map(x=>friendRow(x.other,'respond',x.rel.id)).join('')+'</div>' : '';
   const friendsCard='<div class="card"><h3>Your friends ('+fui.friends.length+')</h3>'+
     (fui.friends.length ? fui.friends.map(x=>friendRow(x.other,'friend')).join('') : '<div class="muted">No friends yet — find some above.</div>')+'</div>';
+  const followCard=(fui.following&&fui.following.length) ? '<div class="card"><h3>Companies you follow ('+fui.following.length+')</h3>'+
+    fui.following.map(companyRow).join('')+'</div>' : '';
 
   return '<h2 class="page">Friends <small>connected as '+esc((myProfile&&myProfile.name)||cloudUser.email)+' · <a href="#" onclick="cloudDisconnect();return false">disconnect</a></small></h2>'+
-    profileCard+searchCard+reqCard+friendsCard;
+    profileCard+companyCard+searchCard+reqCard+friendsCard+followCard;
 }
 function friendRow(p,action,relId){
   const dist=(p._dist!=null)?'<span class="tag">'+(p._dist/KM_PER_MI()).toFixed(p._dist<KM_PER_MI()*10?1:0)+' mi</span>':'';
