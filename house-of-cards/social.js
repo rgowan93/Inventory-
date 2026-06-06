@@ -44,9 +44,10 @@ async function cloudLoginByKey(key,pass){
   let email=key;
   if(!key.includes('@')){
     const { data } = await sb.from('profiles').select('email').ilike('handle',key).maybeSingle();
-    if(data && data.email) email=data.email; else return { error:'No cloud account with that username.' };
+    if(data && data.email) email=data.email; else return { error:'No cloud account for “'+key+'”. Try your email instead, or create the account.' };
   }
-  const r=await cloudSignIn(email,pass); if(r.error) return { error:r.error };
+  const r=await cloudSignIn(email,pass);
+  if(r.error) return { error: /confirm/i.test(r.error) ? 'That account’s email isn’t confirmed. In Supabase: Authentication → turn OFF “Confirm email”, save, then create the account again with a fresh email.' : r.error };
   try{ await loadSocial(); fui.loaded=true; }catch(e){}
   return { ok:true, profile: myProfile || { email, handle:key, name:key } };
 }
