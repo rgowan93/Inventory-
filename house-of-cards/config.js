@@ -11,5 +11,9 @@
 window.HOC_CONFIG = {
   SUPABASE_URL: "https://wbgtchvyuhwnhbzsumpn.supabase.co",
   SUPABASE_ANON_KEY: "sb_publishable_Gq94rEU04A8lYMg-d76QoQ_cbZnULQ3",
-  LOGO_BUCKET: "branding"   // public Storage bucket that holds the shared logo
+  LOGO_BUCKET: "branding",  // public Storage bucket that holds the shared logo
+
+  /* Subscription checkout. Paste a Stripe Payment Link (or other hosted checkout) URL here.
+     Leave empty to let new sign-ups start a free trial until billing is connected. */
+  SUBSCRIBE_URL: ""
 };

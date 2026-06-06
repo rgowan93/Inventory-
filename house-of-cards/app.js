@@ -223,6 +223,7 @@ function render(){
     const av=ui.authView||'landing';
     if(av==='login'){ stopBounce(); el('view').innerHTML=viewLogin(); }
     else if(av==='signup'){ stopBounce(); el('view').innerHTML=viewSignup(); }
+    else if(av==='subscribe'){ stopBounce(); el('view').innerHTML=viewSubscribe(); }
     else { el('view').innerHTML=viewLanding(); startBounce(); }
     afterRenderFocus(); updateImgChip(); return; }
   stopBounce();
@@ -242,13 +243,31 @@ function landingLogo(){
   if(state&&state.settings&&state.settings.logo) return state.settings.logo;  // local copy
   return 'logo.png';                                           // bundled fallback
 }
+const FEATURES=[
+  ['📦','Inventory','Track every card with photos, condition, grade, set, language and cost — singles, sealed, anything.'],
+  ['🏷️','Labels & barcodes','Auto-generate barcode IDs and print price labels for your showcase.'],
+  ['🛒','Point of sale','Ring up sales fast with a cart, split payments (cash, Venmo, Cash App, PayPal, Square, Zelle) and instant receipts.'],
+  ['🎪','Shows & cash-outs','Run live shows, track the cash float, log cash-outs per person and finalize with a full report.'],
+  ['🔄','Trades','Log two-way trades; incoming cards drop straight into intake, outgoing come out of stock.'],
+  ['⭐','Wish list','Keep a want-list so you know what to hunt for at the next show or break.'],
+  ['📥','CSV import & pricing','Bulk-import inventory and re-price in seconds from a price CSV.'],
+  ['📊','Reports','See profit by person, by show, and your sold history at a glance.'],
+  ['👥','Shared team access','Everyone on your company shares the same data — and every change is signed by who made it.'],
+  ['🕵️','Activity audit','A full, searchable log of who did what, so nothing ever gets lost.']];
 function viewLanding(){
   return '<div class="landing">'+
-    '<div class="landing-top"><button class="ghost" onclick="uploadLogoPrompt()" title="set your logo for this device">⚙ Set logo</button>'+
+    '<div class="landing-top"><button class="ghost sm" onclick="uploadLogoPrompt()" title="set your logo for this device">⚙ Set logo</button>'+
       '<span class="right"></span><button class="gold" onclick="ui.authView=\'login\';render()">Login</button>'+
       '<button class="blue" onclick="ui.authView=\'signup\';render()">Sign up</button></div>'+
     '<div class="bounce-area" id="bounceArea"><img id="bounceLogo" class="bounce-logo" src="'+landingLogo()+'" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/></div>'+
     '<div class="landing-cap"><b>HOUSE</b> OF CARDS</div>'+
+    '<div class="landing-tag">The all-in-one inventory, point-of-sale & show manager for trading-card sellers.</div>'+
+    '<div class="landing-info">'+
+      '<h3 class="landing-h">Everything you need to run your card business</h3>'+
+      '<div class="features">'+FEATURES.map(f=>'<div class="feat"><div class="feat-ic">'+f[0]+'</div><div><div class="feat-t">'+f[1]+'</div><div class="feat-d">'+f[2]+'</div></div></div>').join('')+'</div>'+
+      '<div class="landing-cta"><button class="blue lg" onclick="ui.authView=\'signup\';render()">Get started — sign up</button>'+
+        '<button class="ghost lg" onclick="ui.authView=\'login\';render()">I already have an account</button></div>'+
+    '</div>'+
   '</div>'; }
 function uploadLogoPrompt(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
   inp.onchange=async ()=>{ const f=inp.files[0]; if(!f)return;
@@ -272,56 +291,94 @@ function startBounce(){ const area=el('bounceArea'), logo=el('bounceLogo'); if(!
   bounceRAF=requestAnimationFrame(step); }
 function stopBounce(){ if(bounceRAF){ cancelAnimationFrame(bounceRAF); bounceRAF=null; } }
 
-/* -------- Sign up (new team member; everyone shares company access) -------- */
+/* -------- accounts: helpers + plans -------- */
+const PLANS=[
+  {id:'monthly',name:'Monthly',price:'$14.99',per:'/mo',blurb:'Full access, billed monthly. Cancel anytime.'},
+  {id:'yearly', name:'Yearly', price:'$149',  per:'/yr',blurb:'Two months free vs. monthly — best value.'}];
+function findUser(key){ key=String(key||'').trim().toLowerCase(); if(!key)return null;
+  return state.users.find(u=>String(u.username||'').toLowerCase()===key)
+      || state.users.find(u=>String(u.email||'').toLowerCase()===key)
+      || state.users.find(u=>String(u.name||'').toLowerCase()===key) || null; }
+
+/* -------- Sign up (account details) -------- */
 function viewSignup(){
-  return '<div class="login"><h2 class="page">Create account <small>new House of Cards team member</small></h2><div class="card">'+
-    fld('Your name',inp('su_name','','your name'))+
+  return '<div class="login"><h2 class="page">Create your account <small>start selling with House of Cards</small></h2><div class="card">'+
+    fld('Full name',inp('su_name','','first & last'))+
+    fld('Username',inp('su_username','','letters & numbers, no spaces'))+
+    fld('Email address',inp('su_email','','you@example.com','email'))+
     fld('Password',inp('su_pass','','at least 3 characters','password'))+
     fld('Confirm password',inp('su_pass2','','','password'))+
     fld('Security question (for password reset)',inp('su_q','','e.g. First pet\'s name'))+
     fld('Security answer',inp('su_a','','your answer'))+
-    '<div class="row"><button class="gold" onclick="doSignup()">Create account</button><button class="ghost" onclick="ui.authView=\'landing\';render()">Back</button></div>'+
-    '<div class="muted" style="margin-top:8px">Everyone on the team shares full access to the company’s data. Every change is logged with your name (see the Activity tab) so edits can always be traced.</div>'+
+    '<div class="row"><button class="gold" onclick="doSignup()">Continue to subscription →</button><button class="ghost" onclick="ui.authView=\'landing\';render()">Back</button></div>'+
+    '<div class="muted" style="margin-top:8px">Already have an account? <a href="#" onclick="ui.authView=\'login\';render();return false">Log in</a>. Everyone on a company shares full access; every change is signed by who made it.</div>'+
   '</div></div>'; }
-function doSignup(){ const name=val('su_name'); if(!name){ toast('Enter your name.'); return; }
-  if(state.users.some(u=>norm(u.name)===norm(name))){ toast('That name already exists — try Login.'); return; }
+function doSignup(){ const name=val('su_name').trim(); if(!name){ toast('Enter your name.'); return; }
+  const username=val('su_username').trim().toLowerCase(); if(!/^[a-z0-9_]{3,}$/.test(username)){ toast('Username: 3+ letters/numbers, no spaces.'); return; }
+  if(state.users.some(u=>String(u.username||'').toLowerCase()===username)){ toast('That username is taken.'); return; }
+  const email=val('su_email').trim(); if(!/^\S+@\S+\.\S+$/.test(email)){ toast('Enter a valid email address.'); return; }
+  if(state.users.some(u=>String(u.email||'').toLowerCase()===email.toLowerCase())){ toast('That email already has an account.'); return; }
   const p=val('su_pass'); if(p.length<3){ toast('Password needs at least 3 characters.'); return; }
   if(p!==val('su_pass2')){ toast('Passwords don’t match.'); return; }
-  const u={id:uid('u'),name,pass:hashPass(p),secQ:val('su_q'),secA:val('su_a')?hashPass(val('su_a').toLowerCase()):'',mustChange:false};
-  state.users.push(u); state.currentUserId=u.id; ui.authed=true; ui.authView='landing'; ui.route='dashboard'; logChange('account','created account "'+name+'"'); save(); toast('Welcome, '+name+'!'); render(); }
+  const u={id:uid('u'),name,username,email,pass:hashPass(p),secQ:val('su_q'),secA:val('su_a')?hashPass(val('su_a').toLowerCase()):'',mustChange:false,subscription:{status:'pending',since:0}};
+  state.users.push(u); ui.newUserId=u.id; ui.authView='subscribe'; save(); render(); }
 
-/* -------- Login / accounts -------- */
+/* -------- Subscription portal -------- */
+function viewSubscribe(){
+  const u=state.users.find(x=>x.id===ui.newUserId)||{}; const sel=ui.planPick||'monthly';
+  const plans=PLANS.map(p=>'<button class="plan'+(p.id===sel?' on':'')+'" onclick="ui.planPick=\''+p.id+'\';render()">'+
+      '<div class="plan-name">'+p.name+'</div><div class="plan-price">'+p.price+'<span>'+p.per+'</span></div><div class="plan-blurb">'+p.blurb+'</div></button>').join('');
+  return '<div class="login"><h2 class="page">Choose your plan <small>welcome, '+esc(u.name||'')+'</small></h2><div class="card">'+
+    '<div class="plans">'+plans+'</div>'+
+    '<div class="row" style="margin-top:12px"><button class="gold lg" onclick="doSubscribe()">Subscribe & enter</button>'+
+      '<button class="ghost" onclick="enterAfterSignup(\'trial\')">Start free trial instead</button></div>'+
+    '<div class="muted" style="margin-top:10px">Your account is created. Subscribe to unlock everything, or start a free trial and add billing later from Settings.</div>'+
+  '</div></div>'; }
+function doSubscribe(){ const u=state.users.find(x=>x.id===ui.newUserId); if(!u)return;
+  const url=(window.HOC_CONFIG&&window.HOC_CONFIG.SUBSCRIBE_URL)||'';
+  if(url){ const plan=ui.planPick||'monthly'; const full=url+(url.includes('?')?'&':'?')+'plan='+plan+'&email='+encodeURIComponent(u.email||'');
+    window.open(full,'_blank'); toast('Finish checkout in the new tab, then come back.'); enterAfterSignup('subscribing'); }
+  else { toast('Billing isn’t connected yet — starting your free trial.'); enterAfterSignup('trial'); } }
+function enterAfterSignup(status){ const u=state.users.find(x=>x.id===ui.newUserId); if(!u)return;
+  u.subscription={status:status||'trial',plan:ui.planPick||'monthly',since:Date.now()};
+  state.currentUserId=u.id; ui.authed=true; ui.authView='landing'; ui.route='dashboard'; ui.newUserId=null;
+  logChange('account','signed up ('+u.subscription.status+')'); save(); toast('Welcome, '+u.name+'!'); render(); }
+
+/* -------- Login -------- */
 function viewLogin(){
-  const u=ui.loginUser||state.users[0].id;
-  const usel='<select id="lg_user">'+state.users.map(x=>'<option value="'+x.id+'"'+(x.id===u?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select>';
-  if(ui.loginMode==='forgot'){ const usr=state.users.find(x=>x.id===u)||state.users[0];
-    return '<div class="login"><h2 class="page">Reset password</h2><div class="card">'+
-      fld('Account',usel.replace('id="lg_user"','id="lg_user" onchange="ui.loginUser=this.value;render()"'))+
+  if(ui.loginMode==='forgot'){
+    const usr=ui.forgotUser?state.users.find(x=>x.id===ui.forgotUser):null;
+    if(!usr){ return '<div class="login"><h2 class="page">Reset password</h2><div class="card">'+
+        fld('Username or email',inp('lg_fkey','','your username or email'))+
+        '<div class="row"><button class="gold" onclick="doForgotFind()">Find my account</button><button class="ghost" onclick="ui.loginMode=\'login\';render()">Back</button></div>'+
+      '</div></div>'; }
+    return '<div class="login"><h2 class="page">Reset password <small>'+esc(usr.name)+'</small></h2><div class="card">'+
       (usr.secQ?fld('Security question',('<div class="banner">'+esc(usr.secQ)+'</div>'))+fld('Your answer',inp('lg_ans','',''))+
         fld('New password',inp('lg_new','','','password'))+
-        '<div class="row"><button class="gold" onclick="doReset()">Reset password</button><button class="ghost" onclick="ui.loginMode=\'login\';render()">Back</button></div>'
-        :'<div class="banner">'+esc(usr.name)+' hasn\'t set a security question yet, so self-reset isn\'t available. Ask an admin, or log in with the default password <b>test</b> if it was never changed.</div><div class="row" style="margin-top:10px"><button class="ghost" onclick="ui.loginMode=\'login\';render()">Back</button></div>')+
+        '<div class="row"><button class="gold" onclick="doReset()">Reset password</button><button class="ghost" onclick="ui.forgotUser=null;render()">Back</button></div>'
+        :'<div class="banner">'+esc(usr.name)+' hasn\'t set a security question, so self-reset isn\'t available. If the password was never changed, sign in with <b>test</b>.</div><div class="row" style="margin-top:10px"><button class="ghost" onclick="ui.forgotUser=null;render()">Back</button></div>')+
       '</div></div>'; }
   return '<div class="login"><h2 class="page">Sign in <small>House of Cards</small></h2><div class="card">'+
-    fld('Who are you?',usel.replace('id="lg_user"','id="lg_user" onchange="ui.loginUser=this.value"'))+
-    fld('Password',inp('lg_pass','','default is: test','password'))+
+    fld('Username',inp('lg_username','','your username'))+
+    fld('Password',inp('lg_pass','','','password'))+
     '<div class="row"><button class="gold" onclick="doLogin()">Sign in</button>'+
-    '<button class="ghost" onclick="ui.loginMode=\'forgot\';ui.loginUser=val(\'lg_user\');render()">Forgot password?</button>'+
+    '<button class="ghost" onclick="ui.loginMode=\'forgot\';ui.forgotUser=null;render()">Forgot password?</button>'+
     '<button class="ghost" onclick="ui.authView=\'signup\';render()">Sign up</button>'+
     '<button class="ghost right" onclick="ui.authView=\'landing\';render()">← Home</button></div>'+
-    '<div class="muted" style="margin-top:8px">First time? Everyone\'s password starts as <b>test</b> — change it under Settings → My account.</div>'+
+    '<div class="muted" style="margin-top:8px">Tip: existing team members log in with their username and the default password <b>test</b> until they change it.</div>'+
     '</div></div>';
 }
-function doLogin(){ const id=val('lg_user'); const u=state.users.find(x=>x.id===id); if(!u)return;
+function doLogin(){ const u=findUser(val('lg_username')); if(!u){ toast('No account with that username or email.'); return; }
   if(u.pass!==hashPass(val('lg_pass'))){ toast('Wrong password.'); return; }
   state.currentUserId=u.id; ui.authed=true; ui.route='dashboard'; save();
   if(u.mustChange||u.pass===hashPass('test')){ toast('Tip: set your own password in Settings → My account.'); }
   render();
 }
-function doReset(){ const id=val('lg_user'); const u=state.users.find(x=>x.id===id); if(!u||!u.secQ)return;
+function doForgotFind(){ const u=findUser(val('lg_fkey')); if(!u){ toast('No account found for that.'); return; } ui.forgotUser=u.id; render(); }
+function doReset(){ const u=ui.forgotUser?state.users.find(x=>x.id===ui.forgotUser):null; if(!u||!u.secQ)return;
   if(u.secA!==hashPass(val('lg_ans').toLowerCase())){ toast('That answer doesn\'t match.'); return; }
   const np=val('lg_new'); if(np.length<3){ toast('Pick a password of at least 3 characters.'); return; }
-  u.pass=hashPass(np); u.mustChange=false; save(); ui.loginMode='login'; toast('Password reset — sign in now.'); render();
+  u.pass=hashPass(np); u.mustChange=false; save(); ui.loginMode='login'; ui.forgotUser=null; toast('Password reset — sign in now.'); render();
 }
 function logout(){ ui.authed=false; ui.loginMode='login'; ui.authView='landing'; stopImgJob(); render(); }
 function switchUserPrompt(id){ if(id===state.currentUserId)return; const u=state.users.find(x=>x.id===id); if(!u)return;
@@ -988,8 +1045,10 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
   try{ state=await loadState(); }catch(e){ state=null; }
   if(!state){ state=freshState(); save(); }
   state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];state.imageDB=state.imageDB||{};state.audit=state.audit||[];
-  // migrate users to have passwords/security questions (default password "test")
-  state.users.forEach(u=>{ if(!u.pass){ u.pass=hashPass('test'); u.mustChange=true; } if(u.secQ===undefined)u.secQ=''; if(u.secA===undefined)u.secA=''; });
+  // migrate users to have passwords/security questions (default password "test"), usernames + email
+  state.users.forEach(u=>{ if(!u.pass){ u.pass=hashPass('test'); u.mustChange=true; } if(u.secQ===undefined)u.secQ=''; if(u.secA===undefined)u.secA='';
+    if(!u.username)u.username=(u.name||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'')||('user'+Math.floor(Math.random()*9000+1000));
+    if(u.email===undefined)u.email=''; if(u.subscription===undefined)u.subscription={status:'owner',since:0}; });
   save();
   render();
 })();

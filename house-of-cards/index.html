@@ -108,12 +108,31 @@ header.top .who select{width:auto}
 .landing{display:flex;flex-direction:column;min-height:calc(100vh - 80px)}
 .landing-top{display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:4px 2px 12px}
 .landing-top button{font-size:16px;padding:12px 22px}
-.bounce-area{position:relative;flex:1;min-height:60vh;border:3px solid #000;border-radius:18px;overflow:hidden;
+.bounce-area{position:relative;flex:1;min-height:44vh;border:3px solid #000;border-radius:18px;overflow:hidden;
   background:radial-gradient(circle at 50% 40%,#22305a 0%,var(--bg2) 60%,var(--bg) 100%)}
 .bounce-logo{position:absolute;top:0;left:0;width:min(46vw,300px);height:auto;border-radius:18px;
   box-shadow:0 6px 24px rgba(0,0,0,.45);will-change:transform;user-select:none;pointer-events:none}
-.landing-cap{text-align:center;font-size:28px;font-weight:900;letter-spacing:1px;margin:14px 0 4px}
+.landing-cap{text-align:center;font-size:28px;font-weight:900;letter-spacing:1px;margin:14px 0 2px}
 .landing-cap b{color:var(--gold)}
+.landing-tag{text-align:center;color:var(--muted);max-width:640px;margin:0 auto 8px;font-size:15px}
+.landing-info{max-width:920px;margin:18px auto 32px;padding:0 4px}
+.landing-h{text-align:center;font-size:20px;font-weight:800;margin:18px 0}
+.features{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+@media(max-width:620px){.features{grid-template-columns:1fr}}
+.feat{display:flex;gap:12px;background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:14px}
+.feat-ic{font-size:24px;line-height:1}
+.feat-t{font-weight:800;margin-bottom:3px}
+.feat-d{color:var(--muted);font-size:13px;line-height:1.45}
+.landing-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:24px}
+button.lg{font-size:16px;padding:14px 26px}
+.plans{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:520px){.plans{grid-template-columns:1fr}}
+.plan{text-align:left;background:var(--bg2);border:2px solid var(--line);border-radius:14px;padding:16px;cursor:pointer;color:inherit}
+.plan.on{border-color:var(--gold);box-shadow:0 0 0 2px rgba(244,180,0,.25)}
+.plan-name{font-weight:800;font-size:15px}
+.plan-price{font-size:26px;font-weight:900;margin:4px 0}
+.plan-price span{font-size:13px;font-weight:600;color:var(--muted)}
+.plan-blurb{color:var(--muted);font-size:12px;line-height:1.4}
 @media print{
   header.top,nav.tabs,.noprint,.imgchip{display:none!important}
   body{background:#fff;color:#000}
@@ -142,7 +161,7 @@ window.addEventListener('error',function(e){var d=box();if(d)d.textContent+='ERR
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260606b"></script>
-<script src="app.js?v=20260606b"></script>
+<script src="config.js?v=20260606c"></script>
+<script src="app.js?v=20260606c"></script>
 </body>
 </html>
