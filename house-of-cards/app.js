@@ -11,6 +11,31 @@ const CATEGORIES = ['Pokemon','One Piece','Magic','Sports','Other'];
 const VARIANCES = ['Normal','Holofoil','Reverse Holofoil','Foil','Promo'];
 const LANGUAGES = ['EN','JP','CN','Other'];
 
+/* ============================== cloud (Supabase) ============================== */
+let sb = null;                       // Supabase client, or null when offline-only
+function cloudOn(){ return !!sb; }
+function initCloud(){
+  try{ const c=window.HOC_CONFIG||{};
+    if(c.SUPABASE_URL && c.SUPABASE_ANON_KEY && window.supabase){
+      sb = window.supabase.createClient(c.SUPABASE_URL, c.SUPABASE_ANON_KEY);
+      console.log('[HoC] cloud connected:', c.SUPABASE_URL);
+    } else { console.log('[HoC] running offline (no Supabase config)'); }
+  }catch(e){ console.warn('[HoC] cloud init failed', e); sb=null; }
+}
+function logoBucket(){ return (window.HOC_CONFIG&&window.HOC_CONFIG.LOGO_BUCKET)||'branding'; }
+/* public URL of the shared landing logo (same for every device); cache-busted by version */
+function cloudLogoUrl(){ const c=window.HOC_CONFIG||{}; if(!c.SUPABASE_URL)return null;
+  const v=(state&&state.settings&&state.settings.cloudLogoV)||0;
+  return c.SUPABASE_URL+'/storage/v1/object/public/'+logoBucket()+'/logo.png?v='+v; }
+/* upload the chosen file to Supabase Storage so the landing logo is shared everywhere */
+async function uploadCloudLogo(file){
+  if(!cloudOn()) return false;
+  const { error } = await sb.storage.from(logoBucket()).upload('logo.png', file, { upsert:true, contentType:file.type||'image/png' });
+  if(error){ console.warn('[HoC] logo upload', error); toast('Cloud upload failed: '+error.message); return false; }
+  state.settings.cloudLogoV = Date.now();   // bump version so every device refetches
+  return true;
+}
+
 /* ============================== state ============================== */
 let state = null;
 let ui = { route:'dashboard', cart:[], cartPayments:[], focusId:null, sellPanel:null, showPanel:null,
@@ -212,7 +237,11 @@ function render(){
 function afterRenderFocus(){ if(ui.focusId){ const f=el(ui.focusId); if(f){ f.focus(); try{const n=f.value.length;f.setSelectionRange(n,n);}catch(e){} } } }
 
 /* -------- Landing page (huge bouncing logo + Login/Sign up) -------- */
-function landingLogo(){ return (state&&state.settings&&state.settings.logo)?state.settings.logo:'logo.png'; }
+function landingLogo(){
+  if(cloudOn() && state&&state.settings&&state.settings.cloudLogoV) return cloudLogoUrl(); // shared across devices
+  if(state&&state.settings&&state.settings.logo) return state.settings.logo;               // local copy
+  return 'logo.png';                                                                        // bundled fallback
+}
 function viewLanding(){
   return '<div class="landing">'+
     '<div class="landing-top"><button class="ghost" onclick="uploadLogoPrompt()" title="set your logo for this device">⚙ Set logo</button>'+
@@ -222,7 +251,12 @@ function viewLanding(){
     '<div class="landing-cap"><b>HOUSE</b> OF CARDS</div>'+
   '</div>'; }
 function uploadLogoPrompt(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
-  inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ state.settings.logo=r.result; save(); toast('Logo set!'); render(); }; r.readAsDataURL(f); }; inp.click(); }
+  inp.onchange=async ()=>{ const f=inp.files[0]; if(!f)return;
+    const r=new FileReader(); r.onload=async ()=>{ state.settings.logo=r.result;   // keep a local copy for this device
+      if(cloudOn()){ toast('Uploading logo…'); const ok=await uploadCloudLogo(f); if(ok)toast('Logo saved to the cloud — it’s the landing logo on every device now.'); }
+      else { toast('Logo set for this device.'); }
+      save(); render(); };
+    r.readAsDataURL(f); }; inp.click(); }
 let bounceRAF=null;
 function startBounce(){ const area=el('bounceArea'), logo=el('bounceLogo'); if(!area||!logo)return; stopBounce();
   let x=24,y=24,dx=2.4,dy=2.0;
@@ -946,6 +980,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
 
 /* ============================== boot ============================== */
 (async function init(){
+  initCloud();
   try{ state=await loadState(); }catch(e){ state=null; }
   if(!state){ state=freshState(); save(); }
   state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];state.imageDB=state.imageDB||{};state.audit=state.audit||[];
