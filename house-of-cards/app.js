@@ -184,7 +184,7 @@ function header(headers,names){ // find a column index by candidate names
 
 /* ============================== rendering ============================== */
 const TABS=[
-  ['dashboard','Dashboard'],['inventory','Inventory'],['add','Add Item'],['labels','Print Labels'],
+  ['dashboard','Dashboard'],['inventory','Inventory'],['add','Add Item'],['import','Import CSV'],['labels','Print Labels'],
   ['sell','Sell'],['trades','Trades'],['wishlist','Wish List'],['history','Sold History'],
   ['reports','Reports'],['settings','Settings']
 ];
@@ -200,7 +200,7 @@ function render(){
   el('tabs').innerHTML=TABS.map(([r,l])=>'<button class="'+(ui.route===r?'active':'')+'" onclick="go(\''+r+'\')">'+l+'</button>').join('');
   // view
   const v=el('view');
-  const fn=({dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,labels:viewLabels,sell:viewSell,trades:viewTrades,wishlist:viewWishlist,history:viewHistory,reports:viewReports,settings:viewSettings})[ui.route]||viewDashboard;
+  const fn=({dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,import:viewImport,labels:viewLabels,sell:viewSell,trades:viewTrades,wishlist:viewWishlist,history:viewHistory,reports:viewReports,settings:viewSettings})[ui.route]||viewDashboard;
   v.innerHTML=fn();
 }
 
@@ -649,6 +649,126 @@ function loadSample(){
   ];
   samp.forEach(r=>state.inventory.push({id:uid('item'),barcode:genBarcodeId(),category:r[0],set:r[1],name:r[2],number:r[3],rarity:r[4],variance:r[5],language:r[6],grade:r[7],condition:r[8],ownerId:r[9],costBasis:r[10],listPrice:r[11],suggestedPrice:r[11],priceOverride:r[7]!=='Ungraded',photo:null,status:'available',dateAdded:Date.now()}));
   save();toast('Sample items added.');go('inventory');
+}
+
+/* -------- CSV import (price update / add inventory) -------- */
+const COND_MAP={'near mint':'NM','nm':'NM','mint':'NM','lightly played':'LP','lp':'LP','moderately played':'MP','mp':'MP','heavily played':'HP','hp':'HP','damaged':'DMG','dmg':'DMG','played':'MP'};
+function mapCond(s){s=(s||'').toLowerCase().trim();return COND_MAP[s]||(CONDITIONS.includes((s||'').toUpperCase())?s.toUpperCase():'NM');}
+function detectLang(name){const n=(name||'').toUpperCase();if(n.includes('(JP)')||n.includes(' JP'))return 'JP';if(n.includes('(CN)'))return 'CN';return 'EN';}
+const norm=s=>String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,'');
+function gradeMatch(a,b){const ag=(a||'Ungraded').toLowerCase().trim(),bg=(b||'Ungraded').toLowerCase().trim();const au=ag==='ungraded'||ag==='',bu=bg==='ungraded'||bg==='';if(au&&bu)return true;return ag===bg;}
+function rowMatches(it,r){
+  if(it.ownerId!==state.currentUserId)return false; // tied to uploader
+  if(norm(it.number)!==norm(r.number))return false;
+  if(r.set && norm(it.set)!==norm(r.set) && !norm(it.set).includes(norm(r.set)) && !norm(r.set).includes(norm(it.set)))return false;
+  if(it.condition!==r.condition)return false;
+  if((it.language||'EN')!==r.language)return false;
+  if(!gradeMatch(it.grade,r.grade))return false;
+  return true;
+}
+let csvRows=null;
+function viewImport(){
+  const banner='<div class="banner">Upload a CSV export (e.g. from Collectr). It matches rows to <b>your</b> inventory by set + card number + variance + grade + condition + language. Then review, adjust, and choose how to apply.</div>';
+  if(!csvRows){
+    return '<h2 class="page">Import CSV <small>bulk price update / add inventory — tied to '+me().name+'</small></h2>'+
+      '<div class="card">'+banner+
+      '<label class="fld" style="margin-top:12px"><span>Choose CSV file</span><input id="csvFile" type="file" accept=".csv,text/csv" onchange="onCSVFile(this)"/></label>'+
+      '<div class="row"><button class="ghost" onclick="downloadSampleCSV()">Download a sample CSV</button></div>'+
+      '<div class="muted" style="margin-top:8px">Graded cards are never auto-repriced — the CSV only updates their <i>suggested</i> price. Rows you\'ve locked stay locked too.</div></div>';
+  }
+  const matched=csvRows.filter(r=>r.matches.length>0).length;
+  const unmatched=csvRows.length-matched;
+  const rows=csvRows.map((r,idx)=>{
+    const cls=r.removed?'opacity:.35':'';
+    const tag=r.removed?'<span class="tag">removed</span>':(r.matches.length?'<span class="pill avail">match ×'+r.matches.length+'</span>':'<span class="pill sold">no match</span>');
+    const locked=r.locked;
+    const actSel=locked?'<span class="tag">🔒 suggested only</span>':
+      '<select onchange="csvRows['+idx+'].action=this.value;render()">'+
+      [['use','Use new price'],['keep','Keep current'],['skip','Skip']].map(([v,l])=>'<option value="'+v+'"'+(r.action===v?' selected':'')+'>'+l+'</option>').join('')+'</select>';
+    const cur=r.matches.length?money(r.matches[0].listPrice):'—';
+    return '<tr style="'+cls+'"><td><div>'+esc(r.name)+'</div><div class="muted">'+esc(r.set)+' #'+esc(r.number)+' · '+r.condition+(r.language!=='EN'?' · '+r.language:'')+(r.grade&&r.grade!=='Ungraded'?' · '+esc(r.grade):'')+'</div><div style="margin-top:3px">'+tag+'</div></td>'+
+      '<td class="money">'+cur+'</td>'+
+      '<td style="width:110px"><input type="number" value="'+r.newPrice+'" onchange="csvRows['+idx+'].newPrice=parseFloat(this.value)||0;render()"/></td>'+
+      '<td>'+actSel+'</td>'+
+      '<td>'+(r.removed?'<button class="sm ghost" onclick="csvRows['+idx+'].removed=false;render()">undo</button>':'<button class="sm red" onclick="csvRows['+idx+'].removed=true;render()">✕</button>')+'</td></tr>';
+  }).join('');
+  return '<h2 class="page">Import CSV — review <small>'+matched+' matched · '+unmatched+' unmatched · tied to '+me().name+'</small></h2>'+
+    '<div class="card noprint"><div class="row">'+
+      '<button class="gold" onclick="commitCSV(\'update\')">Update prices only</button>'+
+      '<button class="blue" onclick="commitCSV(\'add\')">Add new + update prices</button>'+
+      '<button class="ghost right" onclick="csvRows=null;render()">Cancel / new file</button>'+
+    '</div><div class="muted" style="margin-top:8px"><b>Update prices only</b>: changes prices on items you already have (unmatched rows ignored). <b>Add new + update</b>: also creates unmatched rows as new inventory (into intake).</div></div>'+
+    '<div class="card"><table><thead><tr><th>CSV item</th><th>Current</th><th>New price</th><th>Action</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+function onCSVFile(input){
+  const f=input.files[0]; if(!f)return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const rows=parseCSV(reader.result); if(rows.length<2){toast('CSV looks empty.');return;}
+      const H=rows[0];
+      const ci={cat:header(H,['category']),set:header(H,['set']),name:header(H,['product','name','card name']),
+        number:header(H,['card number','number','card num','card nu']),rarity:header(H,['rarity']),
+        variance:header(H,['variance','variant']),grade:header(H,['grade']),cond:header(H,['card condition','condition']),
+        price:header(H,['market price','market','price']),override:header(H,['price override','override'])};
+      if(ci.number<0 && ci.name<0){toast('Could not find a card name/number column.');return;}
+      csvRows=rows.slice(1).map(cells=>{
+        const get=i=>i>=0?(cells[i]||'').trim():'';
+        const name=get(ci.name), set=get(ci.set), number=get(ci.number);
+        const grade=get(ci.grade)||'Ungraded', condition=mapCond(get(ci.cond)), language=detectLang(name);
+        const variance=get(ci.variance)||'Normal';
+        const price=parseFloat((get(ci.price)||'0').replace(/[^0-9.\-]/g,''))||0;
+        const ovRaw=get(ci.override).toLowerCase(); const csvOverride=ovRaw==='true'||ovRaw==='1'||ovRaw==='yes';
+        const r={name,set,number,grade,condition,language,variance,newPrice:price,csvMarket:price,csvOverride,removed:false};
+        r.matches=state.inventory.filter(it=>it.status!=='sold'&&rowMatches(it,r));
+        const graded=(grade&&grade.toLowerCase()!=='ungraded');
+        const anyLocked=r.matches.some(m=>m.priceOverride);
+        r.locked=csvOverride||graded||anyLocked; // never auto-reprice these
+        r.action=r.locked?'keep':'use';
+        return r;
+      });
+      toast('Parsed '+csvRows.length+' rows.'); render();
+    }catch(e){ toast('Could not read that CSV.'); }
+  };
+  reader.readAsText(f);
+}
+function commitCSV(mode){
+  if(!csvRows){return;}
+  let updated=0,added=0,skipped=0,suggestedOnly=0;
+  csvRows.forEach(r=>{
+    if(r.removed){skipped++;return;}
+    if(r.matches.length){
+      r.matches.forEach(it=>{
+        it.suggestedPrice=r.csvMarket; // always refresh suggested
+        if(r.locked){ suggestedOnly++; return; }
+        if(r.action==='use'){ it.listPrice=r.newPrice; updated++; }
+        else if(r.action==='keep'){ /* leave */ }
+        else if(r.action==='skip'){ skipped++; }
+      });
+    } else {
+      if(mode==='add' && r.action!=='skip'){
+        state.inventory.push({id:uid('item'),barcode:genBarcodeId(),category:'Pokemon',set:r.set,name:r.name,number:r.number,
+          rarity:'',variance:r.variance,language:r.language,grade:r.grade,condition:r.condition,ownerId:state.currentUserId,
+          costBasis:0,listPrice:r.newPrice,suggestedPrice:r.csvMarket,priceOverride:(r.grade&&r.grade.toLowerCase()!=='ungraded'),
+          photo:null,status:'intake',dateAdded:Date.now()});
+        added++;
+      } else skipped++;
+    }
+  });
+  save();
+  alert('Import complete:\n• '+updated+' price(s) updated\n• '+added+' new item(s) added to intake\n• '+suggestedOnly+' locked/graded (suggested price only)\n• '+skipped+' skipped/removed');
+  csvRows=null;
+  go(added?'inventory':'inventory');
+}
+function downloadSampleCSV(){
+  const csv='Category,Set,Product Name,Card Number,Rarity,Variance,Grade,Card Condition,Quantity,Market Price,Price Override\n'+
+    'Pokemon,Surging Sparks,Pikachu ex,238/191,SIR,Holofoil,Ungraded,Near Mint,1,349.00,FALSE\n'+
+    'Pokemon,Prismatic Evolutions,Umbreon ex,161/131,SIR,Holofoil,Ungraded,Near Mint,1,1500.00,FALSE\n'+
+    'Pokemon,151,Charizard ex,199/165,SIR,Holofoil,PSA 10,Near Mint,1,800.00,FALSE\n'+
+    'Pokemon,Base Set,Blastoise,2/102,Holo,Holofoil,Ungraded,Lightly Played,1,225.00,FALSE\n'+
+    'Pokemon,Twilight Masquerade,Bloodmoon Ursaluna ex,141/167,SIR,Holofoil,Ungraded,Near Mint,1,140.00,FALSE\n';
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='house-of-cards-sample.csv';a.click();
+  toast('Sample CSV downloaded.');
 }
 
 /* ============================== utils ============================== */

@@ -30,19 +30,35 @@ STARTING FRESH FOR YOUR FIRST REAL SHOW
 Settings → "Clear test data" wipes everything you entered while testing but keeps
 the team & settings. ("Full factory reset" wipes absolutely everything.)
 
-WHAT'S IN THIS BETA (Phase 1 core)
+WHAT'S IN THIS BETA
 Users (Reggie/Manny/Hailey), owner-tagged inventory with conditions & photos,
 unique barcode per copy + batch label printing, offline POS cart with price
 adjustments / manual items / bundles / prize plays, all payment methods incl.
 Zelle "who received it?" prompt, $200 drawer float + cash-outs + reconciliation,
 prize machine ($10, 400/show, 50/50 Reggie/Manny), trades with buyouts, wish list
-with scan pings, sold history + trending, and the full FINALIZE settlement report
-(where the money is vs. who earned it vs. who pays whom, plus per-owner profit).
+with scan pings, sold history + trending, the full FINALIZE settlement report
+(where the money is vs. who earned it vs. who pays whom, plus per-owner profit),
+and CSV IMPORT (see below).
+
+CSV IMPORT  ->  the "Import CSV" tab
+- Upload a CSV export (e.g. from Collectr). There's a "Download a sample CSV"
+  button if you want to see the format / test it first.
+- It matches rows to YOUR inventory by set + card number + variance + grade +
+  condition + language, and shows matched vs. unmatched.
+- Review screen: edit any new price, remove rows (✕), and per row choose
+  Use new / Keep current / Skip.
+- Graded cards and locked items are never auto-repriced — the CSV only updates
+  their "suggested" price.
+- Two buttons:
+    * "Update prices only"  = change prices on items you already own.
+    * "Add new + update"     = also create unmatched rows as new inventory (they
+      go to intake so you can add photo/barcode before selling).
+- You get a summary (X updated / Y added / Z skipped) before it's done.
 
 NOT YET (comes after beta / when we go live)
 Cloud sync across multiple tablets, real camera scanning (here you type/scan the
 barcode into the box — a Bluetooth/USB scanner also types into it), live price
-feeds (TCGplayer/eBay/Collectr/etc.), CSV import, social friends, subscriptions.
+feeds (TCGplayer/eBay/Collectr/etc.), social friends, subscriptions.
 These are in the spec and come in later phases.
 
 NOTE
