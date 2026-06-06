@@ -91,6 +91,9 @@ const initials=u=>String((u&&u.name)||'?').trim().split(/\s+/).map(w=>w[0]).slic
 function avatarTag(u,size){ const c='avatar-'+(size||'sm'); return (u&&u.avatar)
   ? '<img class="'+c+'" src="'+esc(u.avatar)+'" alt=""/>'
   : '<div class="'+c+' avatar-ph">'+esc(initials(u))+'</div>'; }
+/* the signed-in person's avatar: prefer their synced cloud photo, else the local one */
+function currentAvatarTag(size){ if(typeof myProfile!=='undefined'&&myProfile&&myProfile.avatar_url)
+  return '<img class="avatar-'+(size||'sm')+'" src="'+esc(myProfile.avatar_url)+'" alt=""/>'; return avatarTag(me(),size); }
 const el=id=>document.getElementById(id);
 const val=id=>{const e=el(id);return e?e.value.trim():'';};
 const num=id=>{const v=parseFloat(val(id));return isNaN(v)?0:v;};
@@ -216,10 +219,11 @@ function header(headers,names){ const low=headers.map(h=>h.toLowerCase().trim())
 
 /* ============================== rendering ============================== */
 const TABS=[['dashboard','Dashboard'],['inventory','Inventory'],['add','Add Item'],['import','Import CSV'],['labels','Print Labels'],
-  ['sell','Sell'],['trades','Trades'],['wishlist','Wish List'],['history','Sold History'],['reports','Reports'],['activity','Activity'],['settings','Settings']];
+  ['sell','Sell'],['trades','Trades'],['wishlist','Wish List'],['history','Sold History'],['reports','Reports'],['friends','Friends'],['activity','Activity'],['settings','Settings']];
 const PARENT={checkout:'sell',newtrade:'trades'};
 const VIEWS={dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,import:viewImport,labels:viewLabels,
-  sell:viewSell,checkout:viewCheckout,trades:viewTrades,newtrade:viewNewTrade,wishlist:viewWishlist,history:viewHistory,reports:viewReports,activity:viewActivity,settings:viewSettings};
+  sell:viewSell,checkout:viewCheckout,trades:viewTrades,newtrade:viewNewTrade,wishlist:viewWishlist,history:viewHistory,reports:viewReports,
+  friends:(typeof viewFriends==='function'?viewFriends:viewDashboard),activity:viewActivity,settings:viewSettings};
 function go(route){ ui.route=route; ui.focusId=null; render(); window.scrollTo(0,0); }
 function setMenu(open){ ui.menuOpen=open; if(state&&state.settings)state.settings.menuOpen=open; applyMenu(); if(state)save(); }
 function toggleMenu(){ setMenu(!ui.menuOpen); }
@@ -237,7 +241,7 @@ function render(){
     else { el('view').innerHTML=viewLanding(); startBounce(); }
     afterRenderFocus(); updateImgChip(); return; }
   stopBounce();
-  el('whoBar').innerHTML=avatarTag(me(),'sm')+'<span class="muted">'+esc(me().name)+'</span>'+
+  el('whoBar').innerHTML=currentAvatarTag('sm')+'<span class="muted">'+esc(me().name)+'</span>'+
     '<select id="userSwitch" onchange="switchUserPrompt(this.value)">'+state.users.map(u=>'<option value="'+u.id+'"'+(u.id===state.currentUserId?' selected':'')+'>'+u.name+'</option>').join('')+'</select>'+
     '<button class="sm ghost" onclick="logout()">Log out</button>';
   const active=PARENT[ui.route]||ui.route;
@@ -1015,10 +1019,10 @@ function viewSettings(){ const s=state.settings;
     '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
     '<div class="card"><h3>My account — '+esc(me().name)+'</h3>'+
       '<div class="muted" style="margin-bottom:8px">Each person signs into their own account. You can only change your own password.</div>'+
-      '<div class="row" style="align-items:center;gap:14px;margin-bottom:6px">'+avatarTag(me(),'lg')+
+      '<div class="row" style="align-items:center;gap:14px;margin-bottom:6px">'+currentAvatarTag('lg')+
         '<label class="fld" style="flex:1;min-width:180px;margin:0"><span>Profile picture</span><input type="file" accept="image/*" onchange="saveAvatar(this)"/></label>'+
-        (me().avatar?'<button class="ghost sm" onclick="removeAvatar()">Remove</button>':'')+'</div>'+
-      '<div class="muted" style="margin-bottom:10px">Shows next to your name in the top bar. Saved on this device.</div><hr class="sep">'+
+        ((!socialReadySafe()&&me().avatar)?'<button class="ghost sm" onclick="removeAvatar()">Remove</button>':'')+'</div>'+
+      '<div class="muted" style="margin-bottom:10px">'+(socialReadySafe()?'Synced to all your devices via your cloud profile (manage it on the Friends tab).':'Saved on this device. Connect on the <b>Friends</b> tab to sync it across devices.')+'</div><hr class="sep">'+
       '<div class="grid2">'+fld('Current password',inp('ac_cur','','','password'))+fld('New password',inp('ac_new','','at least 3 characters','password'))+'</div>'+
       '<button class="gold" onclick="changePassword()">Update my password</button>'+
       '<hr class="sep"><div class="muted" style="margin-bottom:6px">Security question (lets you reset your own password if you forget it):</div>'+
@@ -1032,7 +1036,10 @@ function setAcct(m,v){state.paymentAccounts[m]=v;logChange('settings','set '+MET
 function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.prizePrice=num('s_prize');state.settings.prizePlaysPerShow=num('s_plays');logChange('settings','updated show defaults');save();toast('Saved.');}
 function savePtcg(){state.settings.ptcgKey=val('s_ptcg');save();toast('Image API key saved.');}
 function saveLogo(input){ const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ state.settings.logo=r.result; save(); toast('Logo updated.'); render(); }; r.readAsDataURL(f); }
-function saveAvatar(input){ const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ me().avatar=r.result; logChange('account','updated profile picture'); save(); toast('Profile picture updated.'); render(); }; r.readAsDataURL(f); }
+function socialReadySafe(){ return typeof socialReady==='function' && socialReady(); }
+function saveAvatar(input){ const f=input.files[0]; if(!f)return;
+  if(socialReadySafe()){ toast('Uploading photo…'); uploadAvatar(f).then(r=>{ if(r.error)toast('Cloud upload failed: '+r.error); else toast('Profile picture updated & synced.'); render(); }); return; }
+  const r=new FileReader(); r.onload=()=>{ me().avatar=r.result; logChange('account','updated profile picture'); save(); toast('Profile picture updated.'); render(); }; r.readAsDataURL(f); }
 function removeAvatar(){ me().avatar=null; save(); toast('Profile picture removed.'); render(); }
 function changePassword(){ const u=me(); if(u.pass!==hashPass(val('ac_cur'))){ toast('Current password is wrong.'); return; } const np=val('ac_new'); if(np.length<3){ toast('New password needs at least 3 characters.'); return; } u.pass=hashPass(np); u.mustChange=false; logChange('account','changed own password'); save(); toast('Password updated.'); render(); }
 function saveSecurityQ(){ const u=me(); const q=val('ac_q'); const a=val('ac_a'); if(!q){ toast('Enter a question.'); return; } u.secQ=q; if(a)u.secA=hashPass(a.toLowerCase()); save(); toast('Security question saved.'); render(); }
@@ -1072,4 +1079,5 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
   ui.menuOpen=state.settings.menuOpen;
   save();
   render();
+  if(typeof cloudInitSession==='function'){ try{ await cloudInitSession(); }catch(e){ console.warn(e); } }
 })();
