@@ -220,11 +220,12 @@ const TABS=[['dashboard','Dashboard'],['inventory','Inventory'],['add','Add Item
 const PARENT={checkout:'sell',newtrade:'trades'};
 const VIEWS={dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,import:viewImport,labels:viewLabels,
   sell:viewSell,checkout:viewCheckout,trades:viewTrades,newtrade:viewNewTrade,wishlist:viewWishlist,history:viewHistory,reports:viewReports,activity:viewActivity,settings:viewSettings};
-function go(route){ ui.route=route; ui.focusId=null; ui.menuOpen=false; render(); window.scrollTo(0,0); }
-function toggleMenu(){ ui.menuOpen=!ui.menuOpen; applyMenu(); }
-function closeMenu(){ ui.menuOpen=false; applyMenu(); }
-function applyMenu(){ const open=!!ui.menuOpen&&ui.authed; const n=el('tabs'), b=el('backdrop');
-  if(n)n.classList.toggle('open',open); if(b)b.classList.toggle('open',open); }
+function go(route){ ui.route=route; ui.focusId=null; render(); window.scrollTo(0,0); }
+function setMenu(open){ ui.menuOpen=open; if(state&&state.settings)state.settings.menuOpen=open; applyMenu(); if(state)save(); }
+function toggleMenu(){ setMenu(!ui.menuOpen); }
+function closeMenu(){ setMenu(false); }
+function applyMenu(){ const open=!!ui.menuOpen&&ui.authed; const n=el('tabs');
+  if(n)n.classList.toggle('open',open); document.body.classList.toggle('menu-open',open); }
 function render(){
   const logo=el('brandLogo'); if(logo){ if(state&&state.settings&&state.settings.logo){ logo.src=state.settings.logo; } else if(!logo.dataset.set){ logo.dataset.set='1'; logo.src='logo.png'; logo.onerror=()=>{logo.onerror=null;logo.src='logo.svg';}; } }
   const mb=el('menuBtn'); if(mb)mb.style.display=ui.authed?'':'none';
@@ -240,7 +241,9 @@ function render(){
     '<select id="userSwitch" onchange="switchUserPrompt(this.value)">'+state.users.map(u=>'<option value="'+u.id+'"'+(u.id===state.currentUserId?' selected':'')+'>'+u.name+'</option>').join('')+'</select>'+
     '<button class="sm ghost" onclick="logout()">Log out</button>';
   const active=PARENT[ui.route]||ui.route;
-  el('tabs').innerHTML=TABS.map(([r,l])=>'<button class="'+(active===r?'active':'')+'" onclick="go(\''+r+'\')">'+l+'</button>').join('');
+  el('tabs').innerHTML='<div class="menu-brand"><b>HOUSE</b> OF CARDS</div>'+
+    '<button class="menu-collapse" onclick="closeMenu()">‹ Collapse menu</button>'+
+    TABS.map(([r,l])=>'<button class="'+(active===r?'active':'')+'" onclick="go(\''+r+'\')">'+l+'</button>').join('');
   applyMenu();
   el('view').innerHTML=(VIEWS[ui.route]||viewDashboard)();
   afterRenderFocus(); updateImgChip();
@@ -1065,6 +1068,8 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
   state.users.forEach(u=>{ if(!u.pass){ u.pass=hashPass('test'); u.mustChange=true; } if(u.secQ===undefined)u.secQ=''; if(u.secA===undefined)u.secA='';
     if(!u.username)u.username=(u.name||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'')||('user'+Math.floor(Math.random()*9000+1000));
     if(u.email===undefined)u.email=''; if(u.subscription===undefined)u.subscription={status:'owner',since:0}; });
+  if(state.settings.menuOpen===undefined)state.settings.menuOpen=(window.innerWidth>=760);
+  ui.menuOpen=state.settings.menuOpen;
   save();
   render();
 })();
