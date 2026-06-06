@@ -55,11 +55,17 @@ CSV IMPORT  ->  the "Import CSV" tab
       go to intake so you can add photo/barcode before selling).
 - You get a summary (X updated / Y added / Z skipped) before it's done.
 
+CAMERA SCANNING
+There's a "📷 Scan" button next to every barcode box (Sell, Trades). It uses
+your device camera. NOTE: browsers only allow the camera on a "secure" page
+(https or localhost). When you just double-click index.html the browser BLOCKS
+the camera, so the button will tell you to type it in / use a USB or Bluetooth
+scanner. Camera scanning works fully on the hosted (web) version we deploy later.
+
 NOT YET (comes after beta / when we go live)
-Cloud sync across multiple tablets, real camera scanning (here you type/scan the
-barcode into the box — a Bluetooth/USB scanner also types into it), live price
-feeds (TCGplayer/eBay/Collectr/etc.), social friends, subscriptions.
-These are in the spec and come in later phases.
+Cloud sync across multiple tablets, live price feeds (TCGplayer/eBay/Collectr/
+etc.), social friends, subscriptions. These are in the spec and come in later
+phases.
 
 NOTE
 Because data lives in this browser, using a different browser or clearing browser
