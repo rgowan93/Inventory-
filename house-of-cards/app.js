@@ -238,9 +238,9 @@ function afterRenderFocus(){ if(ui.focusId){ const f=el(ui.focusId); if(f){ f.fo
 
 /* -------- Landing page (huge bouncing logo + Login/Sign up) -------- */
 function landingLogo(){
-  if(cloudOn() && state&&state.settings&&state.settings.cloudLogoV) return cloudLogoUrl(); // shared across devices
-  if(state&&state.settings&&state.settings.logo) return state.settings.logo;               // local copy
-  return 'logo.png';                                                                        // bundled fallback
+  if(cloudOn()) return cloudLogoUrl();                         // shared across devices (falls back via onerror if absent)
+  if(state&&state.settings&&state.settings.logo) return state.settings.logo;  // local copy
+  return 'logo.png';                                           // bundled fallback
 }
 function viewLanding(){
   return '<div class="landing">'+
