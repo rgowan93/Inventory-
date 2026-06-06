@@ -51,6 +51,22 @@ async function cloudLoginByKey(key,pass){
   try{ await loadSocial(); fui.loaded=true; }catch(e){}
   return { ok:true, profile: myProfile || { email, handle:key, name:key } };
 }
+/* Keep the cloud session in lock-step with whoever is logged into the app.
+   Called at login / signup / user-switch with the password the user just typed,
+   so the Friends side connects automatically (and Supabase persists it across reloads). */
+async function syncCloudToAppUser(u, pass){
+  if(!cloudOn()||!u) return;
+  try{
+    const key=u.email||u.username||'';
+    let r = key ? await cloudLoginByKey(key, pass) : { error:'no key' };
+    if(!r.ok && u.email){                                   // no cloud account yet → create one on the fly
+      const su = await cloudSignUp(u.email, pass, u.name||u.username, u.username||'');
+      if(!su.error && !su.needsConfirm){ try{ await loadSocial(); fui.loaded=true; }catch(e){} r={ok:true}; }
+    }
+    if(!r.ok && cloudUser){ await cloudSignOut(); }         // avoid showing a stale/wrong cloud identity
+  }catch(e){ console.warn('[HoC] cloud auto-connect', e); }
+  render();
+}
 
 /* -------- profile -------- */
 async function loadMyProfile(){
@@ -180,6 +196,11 @@ async function cloudConnect(){
   }
   fui.loaded=false; await loadSocial(); fui.loaded=true; render();
 }
+/* one-tap reconnect — uses the account you're already logged into the app with */
+async function reconnectCloud(){ const pass=val('cl_pass'); if(!pass){ toast('Enter your password.'); return; }
+  const u=(typeof me==='function')?me():null; if(!u){ toast('Log into the app first.'); return; }
+  toast('Connecting…'); await syncCloudToAppUser(u,pass);
+  if(socialReady()) toast('Connected.'); else toast('Couldn’t connect — check your password, and that your account has an email (Settings → My account).'); }
 async function cloudDisconnect(){ await cloudSignOut(); toast('Disconnected from the cloud.'); render(); }
 async function saveProfile(){
   const fields={ name:val('pf_name'), handle:val('pf_handle').toLowerCase(), company:val('pf_company'), bio:val('pf_bio'), city:val('pf_city') };
@@ -327,17 +348,15 @@ function friendRow(p,action,relId){
 function onAvatarPick(input){ const f=input.files[0]; if(!f)return; toast('Uploading photo…');
   uploadAvatar(f).then(r=>{ if(r.error)toast('Upload failed: '+r.error); else toast('Profile picture updated & synced.'); render(); }); }
 
+/* Rare fallback — cloud normally connects automatically when you log into the app.
+   Shown only if the auto-connect didn't go through (e.g. password changed or no email on file). */
 function viewCloudConnect(){
-  const su=fui.mode==='signup';
-  const pre=(typeof me==='function'&&state&&me())?me():{};
-  return '<h2 class="page">Friends <small>connect to the cloud to sync your profile &amp; find other sellers</small></h2>'+
+  const u=(typeof me==='function'&&state&&me())?me():{};
+  return '<h2 class="page">Friends <small>connecting your cloud profile…</small></h2>'+
     '<div class="login" style="max-width:440px"><div class="card">'+
-    '<div class="subtabs"><button class="'+(!su?'on':'')+'" onclick="fui.mode=\'signin\';render()">Sign in</button>'+
-      '<button class="'+(su?'on':'')+'" onclick="fui.mode=\'signup\';render()">Create cloud account</button></div>'+
-    (su?fld('Display name',inp('cl_name',pre.name||'','your name or shop'))+fld('Username',inp('cl_handle',pre.username||'','letters & numbers')):'')+
-    fld('Email',inp('cl_email',pre.email||'','you@example.com','email'))+
+    '<div class="banner">You’re signed in as <b>'+esc(u.name||'')+'</b>. Your cloud profile normally connects on its own — if it didn’t, re-enter your password to connect now.</div>'+
     fld('Password',inp('cl_pass','','','password'))+
-    '<div class="row"><button class="gold" onclick="cloudConnect()">'+(su?'Create account':'Sign in')+'</button></div>'+
-    '<div class="muted" style="margin-top:8px">Your cloud profile (photo, company, location) and friends sync across every device you sign in on. This is separate from your local team login.</div>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" onclick="reconnectCloud()">Connect</button></div>'+
+    '<div class="muted" style="margin-top:8px">This connects the same account you log into the app with. If you keep seeing this, make sure your account has an email (Settings → My account) and that Supabase “Confirm email” is OFF.</div>'+
     '</div></div>';
 }

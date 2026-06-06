@@ -357,7 +357,9 @@ async function doSignup(){ const name=val('su_name').trim(); if(!name){ toast('E
   const u={id:uid('u'),name,username,email,pass:hashPass(p),secQ:val('su_q'),secA:val('su_a')?hashPass(val('su_a').toLowerCase()):'',mustChange:false,subscription:{status:'pending',since:0}};
   state.users.push(u); ui.newUserId=u.id; ui.authView='subscribe'; save(); render();
   // also create the matching cloud account so this login works on every device and is searchable
-  if(cloudOn()&&typeof cloudSignUp==='function'){ try{ const r=await cloudSignUp(email,p,name,username); if(r&&r.error&&!/registered|already|exists/i.test(r.error)) console.warn('[HoC] cloud signup',r.error); }catch(e){ console.warn(e); } } }
+  if(cloudOn()&&typeof cloudSignUp==='function'){ try{ const r=await cloudSignUp(email,p,name,username);
+    if(r&&r.needsConfirm) toast('Heads up: turn OFF “Confirm email” in Supabase so friends/cloud connect automatically.');
+    else if(r&&r.error&&!/registered|already|exists/i.test(r.error)) console.warn('[HoC] cloud signup',r.error); }catch(e){ console.warn(e); } } }
 
 /* -------- Subscription portal -------- */
 function viewSubscribe(){
@@ -409,7 +411,7 @@ async function doLogin(){ const key=val('lg_username'), pass=val('lg_pass');
   if(u && u.pass===hashPass(pass)){
     state.currentUserId=u.id; ui.authed=true; ui.route='dashboard'; save();
     if(u.mustChange||u.pass===hashPass('test')){ toast('Tip: set your own password in Settings → My account.'); }
-    if(cloudOn()&&typeof cloudLoginByKey==='function'&&u.email){ cloudLoginByKey(u.email,pass).then(()=>render()).catch(()=>{}); } // also connect cloud
+    if(cloudOn()&&typeof syncCloudToAppUser==='function'){ syncCloudToAppUser(u,pass); } // auto-connect cloud in the background
     render(); return;
   }
   // cloud account created on another device or on the Friends tab — recognize it here too
@@ -431,11 +433,15 @@ function doReset(){ const u=ui.forgotUser?state.users.find(x=>x.id===ui.forgotUs
   const np=val('lg_new'); if(np.length<3){ toast('Pick a password of at least 3 characters.'); return; }
   u.pass=hashPass(np); u.mustChange=false; save(); ui.loginMode='login'; ui.forgotUser=null; toast('Password reset — sign in now.'); render();
 }
-function logout(){ ui.authed=false; ui.loginMode='login'; ui.authView='landing'; stopImgJob(); render(); }
+function logout(){ ui.authed=false; ui.loginMode='login'; ui.authView='landing'; stopImgJob();
+  if(typeof cloudSignOut==='function'){ try{ cloudSignOut(); }catch(e){} }   // clear cloud session so the next login connects fresh
+  render(); }
 function switchUserPrompt(id){ if(id===state.currentUserId)return; const u=state.users.find(x=>x.id===id); if(!u)return;
   const p=prompt('Password for '+u.name+' (each person signs into their own account):'); if(p===null){ render(); return; }
   if(u.pass!==hashPass(p)){ toast('Wrong password — staying as '+me().name+'.'); render(); return; }
-  state.currentUserId=u.id; save(); toast('Now acting as '+u.name); render();
+  state.currentUserId=u.id; save(); toast('Now acting as '+u.name);
+  if(cloudOn()&&typeof syncCloudToAppUser==='function'){ syncCloudToAppUser(u,p); }   // reconnect cloud as the switched-to user
+  render();
 }
 
 /* -------- Dashboard -------- */
