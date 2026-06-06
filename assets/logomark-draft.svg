@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- House of Cards — simplified vector logomark (DRAFT) -->
+  <defs>
+    <style>
+      .ink { fill:none; stroke:#000; stroke-width:10; stroke-linejoin:round; stroke-linecap:round; }
+      .inkthin { fill:none; stroke:#000; stroke-width:7; stroke-linejoin:round; stroke-linecap:round; }
+    </style>
+  </defs>
+
+  <!-- background -->
+  <rect x="0" y="0" width="512" height="512" rx="64" fill="#15161A"/>
+
+  <!-- booster pack -->
+  <g>
+    <rect x="156" y="56" width="200" height="270" rx="22" fill="#2160B0" stroke="#000" stroke-width="12"/>
+    <rect x="176" y="76" width="160" height="230" rx="14" fill="#2160B0" stroke="#F4B400" stroke-width="12"/>
+
+    <!-- pokeball -->
+    <g transform="translate(256,176)">
+      <circle r="74" fill="#F3E9D6" stroke="#000" stroke-width="12"/>
+      <path d="M -74 0 A 74 74 0 0 1 74 0 Z" fill="#E23B2E" stroke="#000" stroke-width="12"/>
+      <line x1="-74" y1="0" x2="-26" y2="0" stroke="#000" stroke-width="12"/>
+      <line x1="26" y1="0" x2="74" y2="0" stroke="#000" stroke-width="12"/>
+      <circle r="26" fill="#F3E9D6" stroke="#000" stroke-width="12"/>
+      <circle r="11" fill="#fff" stroke="#000" stroke-width="7"/>
+    </g>
+  </g>
+
+  <!-- banner ribbon -->
+  <g>
+    <!-- ribbon tails -->
+    <path d="M 92 372 L 64 356 L 64 428 L 92 412 Z" fill="#1a4e8c" stroke="#000" stroke-width="10"/>
+    <path d="M 420 372 L 448 356 L 448 428 L 420 412 Z" fill="#1a4e8c" stroke="#000" stroke-width="10"/>
+    <!-- main banner -->
+    <rect x="80" y="352" width="352" height="104" rx="16" fill="#2160B0" stroke="#000" stroke-width="12"/>
+
+    <!-- wordmark -->
+    <text x="256" y="398" text-anchor="middle"
+          font-family="Arial Black, Arial, sans-serif" font-weight="900"
+          font-size="56" fill="#F4B400" stroke="#000" stroke-width="3"
+          letter-spacing="2">HOUSE</text>
+    <text x="256" y="440" text-anchor="middle"
+          font-family="Arial Black, Arial, sans-serif" font-weight="900"
+          font-size="30" fill="#F3E9D6" stroke="#000" stroke-width="2"
+          letter-spacing="3">OF CARDS</text>
+  </g>
+</svg>
