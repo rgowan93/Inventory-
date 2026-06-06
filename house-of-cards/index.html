@@ -58,7 +58,15 @@ nav.tabs button.active{background:var(--gold);color:#1a1300;border-color:#000}
 .avatar-ph{display:flex;align-items:center;justify-content:center;font-weight:900;color:var(--gold)}
 .avatar-lg.avatar-ph{font-size:24px}.avatar-sm.avatar-ph{font-size:13px}
 .badge{display:inline-block;min-width:18px;text-align:center;background:var(--red);color:#fff;border-radius:999px;font-size:11px;font-weight:900;padding:1px 6px;margin-left:6px}
-main{padding:16px 14px 90px;flex:1}
+/* Collectr-style bottom navigation for the main destinations */
+.botnav{position:fixed;left:0;right:0;bottom:0;z-index:38;display:flex;background:var(--bg2);border-top:3px solid #000;
+  padding:6px 4px;padding-bottom:calc(6px + env(safe-area-inset-bottom));box-shadow:0 -4px 16px rgba(0,0,0,.4)}
+.botnav button{flex:1;background:transparent;box-shadow:none;border:none;border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;gap:2px;font-size:11px;font-weight:700;color:var(--muted);padding:6px 2px}
+.botnav button.on{color:var(--gold)}
+.botnav .ic{font-size:21px;line-height:1;position:relative}
+.botnav .nbadge{position:absolute;top:-5px;right:-10px;min-width:15px;height:15px;background:var(--red);color:#fff;border-radius:999px;font-size:9px;font-weight:900;display:flex;align-items:center;justify-content:center;padding:0 3px}
+main{padding:16px 14px 110px;flex:1}
 h2.page{margin:2px 0 14px;font-size:24px;font-weight:900}
 h2.page small{display:block;font-size:13px;color:var(--muted);font-weight:600;margin-top:3px}
 .card{background:var(--bg2);border:3px solid #000;border-radius:16px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}
@@ -104,7 +112,7 @@ hr.sep{border:none;border-top:1px solid #2a2e40;margin:12px 0}
 .tag{font-size:11px;background:#2a2e40;color:var(--cream);padding:2px 7px;border-radius:6px;font-weight:800}
 header.top .who{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px}
 header.top .who select{width:auto}
-.imgchip{position:fixed;right:14px;bottom:20px;z-index:120;background:#000;border:3px solid var(--blue);color:var(--cream);
+.imgchip{position:fixed;right:14px;bottom:82px;z-index:120;background:#000;border:3px solid var(--blue);color:var(--cream);
   padding:10px 14px;border-radius:12px;box-shadow:var(--shadow);font-weight:800;font-size:13px;display:flex;gap:10px;align-items:center;max-width:90vw}
 .imgchip button{padding:5px 9px;font-size:12px;border-radius:8px}
 .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -150,7 +158,7 @@ button.lg{font-size:16px;padding:14px 26px}
 .plan-tbd{font-size:15px;font-weight:700;color:var(--muted)}
 .plan-blurb{color:var(--muted);font-size:12px;line-height:1.4}
 @media print{
-  header.top,nav.tabs,.noprint,.imgchip{display:none!important}
+  header.top,nav.tabs,.botnav,.noprint,.imgchip{display:none!important}
   body{background:#fff;color:#000}
   main{padding:0}
   .card{box-shadow:none;border:1px solid #999;background:#fff;color:#000}
@@ -169,6 +177,7 @@ button.lg{font-size:16px;padding:14px 26px}
   <nav class="tabs" id="tabs"></nav>
   <main id="view"></main>
 </div>
+<nav class="botnav" id="botnav" style="display:none"></nav>
 <div id="toast"></div>
 <div id="imgchip" class="imgchip" style="display:none"></div>
 <script>
@@ -178,8 +187,8 @@ window.addEventListener('error',function(e){var d=box();if(d)d.textContent+='ERR
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260606l"></script>
-<script src="social.js?v=20260606l"></script>
-<script src="app.js?v=20260606l"></script>
+<script src="config.js?v=20260606m"></script>
+<script src="social.js?v=20260606m"></script>
+<script src="app.js?v=20260606m"></script>
 </body>
 </html>

@@ -254,8 +254,16 @@ function render(){
     else if(av==='signup'){ stopBounce(); el('view').innerHTML=viewSignup(); }
     else if(av==='subscribe'){ stopBounce(); el('view').innerHTML=viewSubscribe(); }
     else { el('view').innerHTML=viewLanding(); startBounce(); }
+    const bn0=el('botnav'); if(bn0)bn0.style.display='none';
     afterRenderFocus(); updateImgChip(); return; }
   stopBounce();
+  // first-time setup: walk new users through setting their email + own password
+  if(me() && me().mustChange){
+    el('whoBar').innerHTML='<button class="sm ghost" onclick="logout()">Log out</button>';
+    el('tabs').innerHTML=''; document.body.classList.remove('menu-open');
+    const bn1=el('botnav'); if(bn1)bn1.style.display='none';
+    el('view').innerHTML=viewOnboard(); afterRenderFocus(); return;
+  }
   el('whoBar').innerHTML=currentAvatarTag('sm')+'<span class="muted">'+esc(me().name)+'</span>'+
     '<select id="userSwitch" onchange="switchUserPrompt(this.value)">'+state.users.map(u=>'<option value="'+u.id+'"'+(u.id===state.currentUserId?' selected':'')+'>'+u.name+'</option>').join('')+'</select>'+
     '<button class="sm ghost" onclick="logout()">Log out</button>';
@@ -266,9 +274,15 @@ function render(){
       if(r==='friends'&&typeof fui!=='undefined'&&fui.incoming&&fui.incoming.length) label+=' <span class="badge">'+fui.incoming.length+'</span>';
       return '<button class="'+(active===r?'active':'')+'" onclick="go(\''+r+'\')">'+label+'</button>'; }).join('');
   applyMenu();
+  const bn=el('botnav'); if(bn){ bn.style.display='flex';
+    bn.innerHTML=BOTNAV.map(([r,ic,l])=>{ let badge='';
+      if(r==='friends'&&typeof fui!=='undefined'&&fui.incoming&&fui.incoming.length) badge='<span class="nbadge">'+fui.incoming.length+'</span>';
+      return '<button class="'+(active===r?'on':'')+'" onclick="go(\''+r+'\')"><span class="ic">'+ic+badge+'</span>'+l+'</button>'; }).join(''); }
   el('view').innerHTML=(VIEWS[ui.route]||viewDashboard)();
   afterRenderFocus(); updateImgChip();
 }
+/* Collectr-style primary destinations (the ☰ menu still has everything) */
+const BOTNAV=[['dashboard','🏠','Home'],['inventory','🃏','Cards'],['sell','🛒','Sell'],['friends','👥','Social'],['settings','⚙️','Profile']];
 function afterRenderFocus(){ if(ui.focusId){ const f=el(ui.focusId); if(f){ f.focus(); try{const n=f.value.length;f.setSelectionRange(n,n);}catch(e){} } } }
 
 /* -------- Landing page (huge bouncing logo + Login/Sign up) -------- */
@@ -379,7 +393,7 @@ function doSubscribe(){ const u=state.users.find(x=>x.id===ui.newUserId); if(!u)
   else { toast('Billing isn’t connected yet — starting your free trial.'); enterAfterSignup('trial'); } }
 function enterAfterSignup(status){ const u=state.users.find(x=>x.id===ui.newUserId); if(!u)return;
   u.subscription={status:status||'trial',plan:ui.planPick||'monthly',since:Date.now()};
-  state.currentUserId=u.id; ui.authed=true; ui.authView='landing'; ui.route='dashboard'; ui.newUserId=null;
+  state.currentUserId=u.id; ui.authed=true; ui.authView='landing'; ui.route='dashboard'; ui.newUserId=null; state.session={userId:u.id,since:Date.now()};
   logChange('account','signed up ('+u.subscription.status+')'); save(); toast('Welcome, '+u.name+'!'); render(); }
 
 /* -------- Login -------- */
@@ -409,8 +423,7 @@ function viewLogin(){
 async function doLogin(){ const key=val('lg_username'), pass=val('lg_pass');
   const u=findUser(key);
   if(u && u.pass===hashPass(pass)){
-    state.currentUserId=u.id; ui.authed=true; ui.route='dashboard'; save();
-    if(u.mustChange||u.pass===hashPass('test')){ toast('Tip: set your own password in Settings → My account.'); }
+    state.currentUserId=u.id; ui.authed=true; ui.route='dashboard'; state.session={userId:u.id,since:Date.now()}; save();
     if(cloudOn()&&typeof syncCloudToAppUser==='function'){ syncCloudToAppUser(u,pass); } // auto-connect cloud in the background
     render(); return;
   }
@@ -421,7 +434,7 @@ async function doLogin(){ const key=val('lg_username'), pass=val('lg_pass');
       let lu=findUser(pr.handle)||findUser(pr.email)||findUser(key);
       if(!lu){ lu={id:uid('u'),name:pr.name||pr.handle||key,username:(pr.handle||'').toLowerCase(),email:pr.email||'',pass:hashPass(pass),secQ:'',secA:'',mustChange:false,subscription:{status:'cloud',since:Date.now()}}; state.users.push(lu); }
       else { lu.pass=hashPass(pass); if(pr.email)lu.email=pr.email; }
-      state.currentUserId=lu.id; ui.authed=true; ui.route='dashboard'; save(); toast('Welcome, '+lu.name+'!'); render(); return;
+      state.currentUserId=lu.id; ui.authed=true; ui.route='dashboard'; state.session={userId:lu.id,since:Date.now()}; save(); toast('Welcome, '+lu.name+'!'); render(); return;
     }
     if(r&&r.error&&!u){ toast(r.error); return; }
   }
@@ -433,14 +446,35 @@ function doReset(){ const u=ui.forgotUser?state.users.find(x=>x.id===ui.forgotUs
   const np=val('lg_new'); if(np.length<3){ toast('Pick a password of at least 3 characters.'); return; }
   u.pass=hashPass(np); u.mustChange=false; save(); ui.loginMode='login'; ui.forgotUser=null; toast('Password reset — sign in now.'); render();
 }
-function logout(){ ui.authed=false; ui.loginMode='login'; ui.authView='landing'; stopImgJob();
+function logout(){ ui.authed=false; ui.loginMode='login'; ui.authView='landing'; stopImgJob(); state.session=null; save();
   if(typeof cloudSignOut==='function'){ try{ cloudSignOut(); }catch(e){} }   // clear cloud session so the next login connects fresh
   render(); }
 function switchUserPrompt(id){ if(id===state.currentUserId)return; const u=state.users.find(x=>x.id===id); if(!u)return;
   const p=prompt('Password for '+u.name+' (each person signs into their own account):'); if(p===null){ render(); return; }
   if(u.pass!==hashPass(p)){ toast('Wrong password — staying as '+me().name+'.'); render(); return; }
-  state.currentUserId=u.id; save(); toast('Now acting as '+u.name);
+  state.currentUserId=u.id; state.session={userId:u.id,since:Date.now()}; save(); toast('Now acting as '+u.name);
   if(cloudOn()&&typeof syncCloudToAppUser==='function'){ syncCloudToAppUser(u,p); }   // reconnect cloud as the switched-to user
+  render();
+}
+
+/* -------- First-time setup (set your email + own password → also your cloud login) -------- */
+function viewOnboard(){ const u=me();
+  return '<div class="login" style="max-width:440px"><h2 class="page">Welcome, '+esc(u.name)+'! <small>finish setting up your account</small></h2><div class="card">'+
+    '<div class="banner">Set your email and a password you’ll remember. You’ll use these to sign in here — and they automatically connect your cloud profile so friends &amp; sync just work.</div>'+
+    fld('Your email',inp('ob_email',u.email||'','you@example.com','email'))+
+    fld('Choose a password',inp('ob_pass','','at least 3 characters','password'))+
+    fld('Confirm password',inp('ob_pass2','','','password'))+
+    '<div class="row" style="margin-top:6px"><button class="gold lg" onclick="doOnboard()">Save & continue</button></div>'+
+    '<div class="muted" style="margin-top:8px">You can change these later in Settings → My account.</div>'+
+  '</div></div>'; }
+async function doOnboard(){ const u=me(); const email=val('ob_email').trim();
+  if(!/^\S+@\S+\.\S+$/.test(email)){ toast('Enter a valid email address.'); return; }
+  if(state.users.some(x=>x.id!==u.id&&String(x.email||'').toLowerCase()===email.toLowerCase())){ toast('That email is already used by another account here.'); return; }
+  const p=val('ob_pass'); if(p.length<3){ toast('Password needs at least 3 characters.'); return; }
+  if(p!==val('ob_pass2')){ toast('Passwords don’t match.'); return; }
+  u.email=email; u.pass=hashPass(p); u.mustChange=false; logChange('account','completed first-time setup'); save();
+  toast('All set — welcome aboard!');
+  if(cloudOn()&&typeof syncCloudToAppUser==='function'){ try{ await syncCloudToAppUser(u,p); }catch(e){} }
   render();
 }
 
@@ -1063,6 +1097,8 @@ function viewSettings(){ const s=state.settings;
         '<label class="fld" style="flex:1;min-width:180px;margin:0"><span>Profile picture</span><input type="file" accept="image/*" onchange="saveAvatar(this)"/></label>'+
         ((!socialReadySafe()&&me().avatar)?'<button class="ghost sm" onclick="removeAvatar()">Remove</button>':'')+'</div>'+
       '<div class="muted" style="margin-bottom:10px">'+(socialReadySafe()?'Synced to all your devices via your cloud profile (manage it on the Friends tab).':'Saved on this device. Connect on the <b>Friends</b> tab to sync it across devices.')+'</div><hr class="sep">'+
+      '<div class="row" style="align-items:flex-end"><label class="fld" style="flex:1;min-width:200px;margin:0"><span>Email (used to sign in &amp; for cloud)</span>'+inp('ac_email',me().email||'','you@example.com','email')+'</label><button class="blue" onclick="saveEmail()">Save email</button></div>'+
+      '<div class="muted" style="margin:6px 0 10px">After changing your email, sign in with it + your password and your cloud profile links automatically.</div><hr class="sep">'+
       '<div class="grid2">'+fld('Current password',inp('ac_cur','','','password'))+fld('New password',inp('ac_new','','at least 3 characters','password'))+'</div>'+
       '<button class="gold" onclick="changePassword()">Update my password</button>'+
       '<hr class="sep"><div class="muted" style="margin-bottom:6px">Security question (lets you reset your own password if you forget it):</div>'+
@@ -1082,6 +1118,9 @@ function saveAvatar(input){ const f=input.files[0]; if(!f)return;
   const r=new FileReader(); r.onload=()=>{ me().avatar=r.result; logChange('account','updated profile picture'); save(); toast('Profile picture updated.'); render(); }; r.readAsDataURL(f); }
 function removeAvatar(){ me().avatar=null; save(); toast('Profile picture removed.'); render(); }
 function changePassword(){ const u=me(); if(u.pass!==hashPass(val('ac_cur'))){ toast('Current password is wrong.'); return; } const np=val('ac_new'); if(np.length<3){ toast('New password needs at least 3 characters.'); return; } u.pass=hashPass(np); u.mustChange=false; logChange('account','changed own password'); save(); toast('Password updated.'); render(); }
+function saveEmail(){ const u=me(); const e=val('ac_email').trim(); if(!/^\S+@\S+\.\S+$/.test(e)){ toast('Enter a valid email address.'); return; }
+  if(state.users.some(x=>x.id!==u.id&&String(x.email||'').toLowerCase()===e.toLowerCase())){ toast('That email is already used by another account here.'); return; }
+  u.email=e; logChange('account','updated email'); save(); toast('Email saved. Sign in with it + your password to link your cloud login.'); render(); }
 function saveSecurityQ(){ const u=me(); const q=val('ac_q'); const a=val('ac_a'); if(!q){ toast('Enter a question.'); return; } u.secQ=q; if(a)u.secA=hashPass(a.toLowerCase()); save(); toast('Security question saved.'); render(); }
 function resetTestData(){ if(!confirm('Clear all inventory, sales, shows, trades and wish list? Team & settings stay.'))return; state.inventory=[];state.sales=[];state.shows=[];state.trades=[];state.wantlist=[];state.currentShowId=null;ui.cart=[];ui.cartPayments=[];save();toast('Test data cleared.');go('dashboard'); }
 function factoryReset(){ if(!confirm('FULL reset to factory defaults? Cannot be undone.'))return; stopImgJob(); state=freshState();ui={route:'dashboard',cart:[],cartPayments:[],focusId:null,sellPanel:null,showPanel:null,tradeDraft:null,inForm:{},authed:false,loginMode:'login'};save();toast('Factory reset done — sign in again.');render(); }
@@ -1117,6 +1156,10 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
     if(u.email===undefined)u.email=''; if(u.subscription===undefined)u.subscription={status:'owner',since:0}; });
   if(state.settings.menuOpen===undefined)state.settings.menuOpen=(window.innerWidth>=760);
   ui.menuOpen=state.settings.menuOpen;
+  // stay logged in across refreshes: restore the saved session
+  if(state.session && state.session.userId && state.users.some(u=>u.id===state.session.userId)){
+    state.currentUserId=state.session.userId; ui.authed=true; ui.route='dashboard';
+  }
   save();
   render();
   if(typeof cloudInitSession==='function'){ try{ await cloudInitSession(); }catch(e){ console.warn(e); } }
