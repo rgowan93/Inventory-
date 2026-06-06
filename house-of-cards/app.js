@@ -68,18 +68,31 @@ function dbSave(it,photo,source){ const k=cardKey(it); const e=state.imageDB[k]|
   e.photo=photo; e.source=source; e.updated=Date.now(); e.rejected=e.rejected||[]; state.imageDB[k]=e; }
 
 /* ============================== persistence (IndexedDB) ============================== */
-function idb(mode, fn){
+/* Reuse a single DB connection. iOS Safari throws "internal error / connection lost"
+   if you open a fresh connection on every write, so we cache one and reopen only if
+   it drops. Writes also swallow errors (logged to console) and retry on the next change. */
+let _db=null;
+function openDB(){
+  if(_db) return Promise.resolve(_db);
   return new Promise((resolve,reject)=>{
     const open=indexedDB.open('houseofcards',1);
     open.onupgradeneeded=()=>{ if(!open.result.objectStoreNames.contains('kv')) open.result.createObjectStore('kv'); };
-    open.onsuccess=()=>{ const db=open.result; const tx=db.transaction('kv',mode); const store=tx.objectStore('kv'); const req=fn(store);
-      tx.oncomplete=()=>resolve(req&&req.result); tx.onerror=()=>reject(tx.error); };
-    open.onerror=()=>reject(open.error);
+    open.onsuccess=()=>{ _db=open.result; _db.onclose=()=>{_db=null;}; _db.onversionchange=()=>{try{_db.close();}catch(e){} _db=null;}; resolve(_db); };
+    open.onerror=()=>{ _db=null; reject(open.error); };
   });
 }
-const loadState=()=>idb('readonly',s=>s.get('state'));
+function idb(mode, fn){
+  return openDB().then(db=>new Promise((resolve,reject)=>{
+    let req; try{ const tx=db.transaction('kv',mode); const store=tx.objectStore('kv'); req=fn(store);
+      tx.oncomplete=()=>resolve(req&&req.result); tx.onerror=()=>{_db=null;reject(tx.error);}; tx.onabort=()=>{_db=null;reject(tx.error);}; }
+    catch(e){ _db=null; reject(e); }
+  }));
+}
+const loadState=()=>idb('readonly',s=>s.get('state')).catch(()=>null);
 let saveTimer=null;
-function save(){ clearTimeout(saveTimer); saveTimer=setTimeout(()=>{ idb('readwrite',s=>s.put(JSON.parse(JSON.stringify(state)),'state')); },150); }
+function save(){ clearTimeout(saveTimer); saveTimer=setTimeout(()=>{
+  try{ idb('readwrite',s=>s.put(JSON.parse(JSON.stringify(state)),'state')).catch(e=>{ _db=null; console.warn('[HoC] save retry next change', e); }); }
+  catch(e){ console.warn('[HoC] save skipped', e); } },150); }
 
 /* ============================== helpers ============================== */
 let _c=0;
@@ -224,7 +237,9 @@ const PARENT={checkout:'sell',newtrade:'trades'};
 const VIEWS={dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,import:viewImport,labels:viewLabels,
   sell:viewSell,checkout:viewCheckout,trades:viewTrades,newtrade:viewNewTrade,wishlist:viewWishlist,history:viewHistory,reports:viewReports,
   friends:(typeof viewFriends==='function'?viewFriends:viewDashboard),activity:viewActivity,settings:viewSettings};
-function go(route){ ui.route=route; ui.focusId=null; render(); window.scrollTo(0,0); }
+function go(route){ ui.route=route; ui.focusId=null;
+  if(window.innerWidth<760){ ui.menuOpen=false; }   // on phones the menu overlays content, so collapse it once you pick a destination
+  render(); window.scrollTo(0,0); }
 function setMenu(open){ ui.menuOpen=open; if(state&&state.settings)state.settings.menuOpen=open; applyMenu(); if(state)save(); }
 function toggleMenu(){ setMenu(!ui.menuOpen); }
 function closeMenu(){ setMenu(false); }

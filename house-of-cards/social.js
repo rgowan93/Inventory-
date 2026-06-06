@@ -224,7 +224,7 @@ function viewFriends(){
   if(!cloudUser) return viewCloudConnect();
 
   // lazy-load friends/requests the first time the tab opens
-  if(!fui.loaded){ fui.loaded=true; loadSocial().then(()=>render()); }
+  if(!fui.loaded){ fui.loaded=true; loadSocial().then(()=>render()).catch(e=>console.warn('[HoC] loadSocial',e)); }
   const p=myProfile||{};
   const loc = fui.loc ? ('GPS set ('+fui.loc.lat.toFixed(3)+', '+fui.loc.lng.toFixed(3)+') — Save to keep')
             : (p.lat!=null ? ('on the map'+(p.city?' · '+esc(p.city):'')) : 'not set — add a city/ZIP or use GPS');
