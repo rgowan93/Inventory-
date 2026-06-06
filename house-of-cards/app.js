@@ -190,7 +190,7 @@ const VIEWS={dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,import:
   sell:viewSell,checkout:viewCheckout,trades:viewTrades,newtrade:viewNewTrade,wishlist:viewWishlist,history:viewHistory,reports:viewReports,settings:viewSettings};
 function go(route){ ui.route=route; ui.focusId=null; render(); window.scrollTo(0,0); }
 function render(){
-  const logo=el('brandLogo'); if(logo && !logo.dataset.set){ logo.dataset.set='1'; logo.src='logo.png'; logo.onerror=()=>{logo.onerror=null;logo.src='logo.svg';}; }
+  const logo=el('brandLogo'); if(logo){ if(state&&state.settings&&state.settings.logo){ logo.src=state.settings.logo; } else if(!logo.dataset.set){ logo.dataset.set='1'; logo.src='logo.png'; logo.onerror=()=>{logo.onerror=null;logo.src='logo.svg';}; } }
   if(!ui.authed){ el('whoBar').innerHTML=''; el('tabs').innerHTML=''; el('view').innerHTML=viewLogin(); afterRenderFocus(); return; }
   el('whoBar').innerHTML='<span class="muted">'+esc(me().name)+'</span>'+
     '<select id="userSwitch" onchange="switchUserPrompt(this.value)">'+state.users.map(u=>'<option value="'+u.id+'"'+(u.id===state.currentUserId?' selected':'')+'>'+u.name+'</option>').join('')+'</select>'+
@@ -460,18 +460,40 @@ async function ocrCardImage(dataUrl){ toast('Reading the card… (first time dow
     await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
     if(!window.Tesseract)throw new Error('no ocr');
     const res=await window.Tesseract.recognize(dataUrl,'eng'); text=(res&&res.data&&res.data.text)||'';
-  }catch(e){ toast('Couldn\'t auto-read (need internet first time) — saved photo to Review to fill in.'); }
+  }catch(e){ toast('Couldn\'t auto-read (need internet the first time) — saved photo to Review to fill in.'); }
   const p=parseCardText(text);
-  const data={category:'Pokemon',set:p.set||'',name:p.name||'',number:p.number||'',rarity:'',variance:'Normal',language:'EN',grade:'Ungraded',condition:'NM',ownerId:state.currentUserId,costBasis:0,listPrice:0,priceOverride:false};
+  // The collector number is the reliable read. Use it (+ the "/total" = set size) to LOOK UP the real card.
+  let name=p.name||'', set='', number=p.number||'', rarity='', matched=false;
+  if(p.number){ const info=await identifyCard(parseInt(p.number,10), p.total, p.name);
+    if(info){ name=info.name; set=info.set; number=info.number||p.number; rarity=info.rarity; matched=true; } }
+  const data={category:'Pokemon',set,name,number,rarity,variance:'Normal',language:'EN',grade:'Ungraded',condition:'NM',ownerId:state.currentUserId,costBasis:0,listPrice:0,priceOverride:false};
   const item=Object.assign({id:uid('item'),barcode:genBarcodeId(),photo:dataUrl,stock:false,realImage:true,imgSrc:'manual',suggestedPrice:0,status:'intake',needsReview:true,dateAdded:Date.now()},data);
   state.inventory.push(item); save();
-  toast(p.name?('Read "'+p.name+'"'+(p.number?(' #'+p.number):'')+' → review & confirm.'):'Saved to Review — add details.');
+  toast(matched?('Identified: '+name+(set?(' · '+set):'')+(number?(' #'+number):'')+' → review & confirm.'):(name?('Read "'+name+'" — couldn\'t match a set, please confirm.'):'Saved to Review — add the details.'));
   editItem(item.id);
 }
-function parseCardText(text){ const lines=String(text||'').split(/\n/).map(s=>s.trim()).filter(Boolean);
-  let number=''; const m=String(text||'').match(/(\d{1,3}\s*\/\s*\d{1,3})/); if(m)number=m[1].replace(/\s+/g,'');
-  let name='',best=0; lines.slice(0,Math.max(3,Math.ceil(lines.length/2))).forEach(l=>{ const a=l.replace(/[^A-Za-z .'-]/g,'').trim(); if(a.length>best&&a.length>=3){best=a.length;name=a;} });
-  return {name,number,set:''};
+/* look up the real card by collector number + set total (and a rough name) via pokemontcg.io */
+async function identifyCard(number,total,nameGuess){
+  if(!number||navigator.onLine===false)return null;
+  const headers=state.settings.ptcgKey?{'X-Api-Key':state.settings.ptcgKey}:{};
+  const tryq=async q=>{ try{ const r=await fetch('https://api.pokemontcg.io/v2/cards?pageSize=60&q='+encodeURIComponent(q),{headers}); if(!r.ok)return []; const j=await r.json(); return j.data||[]; }catch(e){ return []; } };
+  let data=[]; if(nameGuess)data=await tryq('number:'+number+' name:"'+nameGuess.replace(/"/g,'')+'"');
+  if(!data.length)data=await tryq('number:'+number);
+  if(!data.length)return null;
+  let cands=data;
+  if(total){ const t=data.filter(c=>c.set&&(c.set.printedTotal===total||c.set.total===total)); if(t.length)cands=t; } // "/078" pins the set (Pokémon GO = 78 cards)
+  let pick=cands[0];
+  if(nameGuess){ const ng=norm(nameGuess); const m=cands.find(c=>norm(c.name).includes(ng)||ng.includes(norm(c.name))); if(m)pick=m; }
+  return {name:pick.name||'',set:(pick.set&&pick.set.name)||'',number:(pick.number||number)+(pick.set&&pick.set.printedTotal?('/'+pick.set.printedTotal):''),rarity:pick.rarity||''};
+}
+function parseCardText(text){ text=String(text||'');
+  const m=text.match(/(\d{1,3})\s*\/\s*(\d{1,3})/); let number='',total=0;
+  if(m){ number=m[1]+'/'+m[2]; total=parseInt(m[2],10)||0; }
+  const NOISE=/(evolves|stage|basic|weakness|resist|retreat|illus|pok[eé]mon|nintendo|creatures|game freak|ability|energy|trainer|flip a coin|damage|^no\.|©|\bhp\b|\bgo\b|wild|pigeon|put|attach|search|coin)/i;
+  const lines=text.split(/\n/).map(s=>s.trim()).filter(Boolean);
+  let name='',best=0;
+  lines.slice(0,7).forEach(l=>{ if(NOISE.test(l))return; const a=l.replace(/[^A-Za-z .'\-]/g,'').trim(); const letters=a.replace(/[^A-Za-z]/g,''); if(letters.length>best&&letters.length>=4){best=letters.length;name=a;} });
+  return {name,number,total};
 }
 
 /* -------- Graded slab: blur the certification number before saving -------- */
@@ -792,6 +814,10 @@ function viewSettings(){ const s=state.settings;
   return '<h2 class="page">Settings</h2>'+
     '<div class="card"><h3>Payment accounts — who receives each method</h3><table><tbody>'+acctRows+'</tbody></table><div class="muted" style="margin-top:8px">Default: Cash→drawer · Venmo→Manny · Cash App/PayPal/Square→Reggie · Zelle→ask per sale.</div></div>'+
     '<div class="card"><h3>Show defaults</h3><div class="grid3">'+fld('Cash float',inp('s_float',s.cashFloat,'','number'))+fld('Prize price',inp('s_prize',s.prizePrice,'','number'))+fld('Prize plays/show',inp('s_plays',s.prizePlaysPerShow,'','number'))+'</div><button class="gold" onclick="saveSettings()">Save defaults</button><div class="muted" style="margin-top:6px">Prize machine splits 50/50 Reggie ↔ Manny.</div></div>'+
+    '<div class="card"><h3>Branding / logo</h3>'+(s.logo?'<img src="'+s.logo+'" style="height:60px;border-radius:10px;border:2px solid var(--gold);background:#000;margin-bottom:8px"/><br>':'')+
+      '<label class="fld"><span>Upload your House of Cards logo (shows top-left)</span><input type="file" accept="image/*" onchange="saveLogo(this)"/></label>'+
+      (s.logo?'<button class="ghost" onclick="state.settings.logo=null;save();render();toast(\'Logo removed.\')">Remove logo</button>':'')+
+      '<div class="muted" style="margin-top:6px">Saved on this device. To show it on every device automatically, also drop the file as <b>logo.png</b> in the app folder.</div></div>'+
     '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
     '<div class="card"><h3>My account — '+esc(me().name)+'</h3>'+
       '<div class="muted" style="margin-bottom:8px">Each person signs into their own account. You can only change your own password.</div>'+
@@ -807,6 +833,7 @@ function viewSettings(){ const s=state.settings;
 function setAcct(m,v){state.paymentAccounts[m]=v;save();toast('Updated.');}
 function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.prizePrice=num('s_prize');state.settings.prizePlaysPerShow=num('s_plays');save();toast('Saved.');}
 function savePtcg(){state.settings.ptcgKey=val('s_ptcg');save();toast('Image API key saved.');}
+function saveLogo(input){ const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ state.settings.logo=r.result; save(); toast('Logo updated.'); render(); }; r.readAsDataURL(f); }
 function changePassword(){ const u=me(); if(u.pass!==hashPass(val('ac_cur'))){ toast('Current password is wrong.'); return; } const np=val('ac_new'); if(np.length<3){ toast('New password needs at least 3 characters.'); return; } u.pass=hashPass(np); u.mustChange=false; save(); toast('Password updated.'); render(); }
 function saveSecurityQ(){ const u=me(); const q=val('ac_q'); const a=val('ac_a'); if(!q){ toast('Enter a question.'); return; } u.secQ=q; if(a)u.secA=hashPass(a.toLowerCase()); save(); toast('Security question saved.'); render(); }
 function resetTestData(){ if(!confirm('Clear all inventory, sales, shows, trades and wish list? Team & settings stay.'))return; state.inventory=[];state.sales=[];state.shows=[];state.trades=[];state.wantlist=[];state.currentShowId=null;ui.cart=[];ui.cartPayments=[];save();toast('Test data cleared.');go('dashboard'); }
