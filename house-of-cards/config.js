@@ -9,7 +9,7 @@
    Leave them empty to keep running fully offline (browser-only) like before.
 ---------------------------------------------------------------------------- */
 window.HOC_CONFIG = {
-  SUPABASE_URL: "",
-  SUPABASE_ANON_KEY: "",
+  SUPABASE_URL: "https://wbgtchvyuhwnhbzsumpn.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_Gq94rEU04A8lYMg-d76QoQ_cbZnULQ3",
   LOGO_BUCKET: "branding"   // public Storage bucket that holds the shared logo
 };
