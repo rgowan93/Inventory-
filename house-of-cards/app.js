@@ -270,11 +270,11 @@ let invFilter={q:'',owner:'',tab:'available'};
 function viewInventory(){
   const all=state.inventory;
   const cnt={available:0,intake:0,sold:0,review:0};
-  all.forEach(i=>{ if(i.status==='available')cnt.available++; else if(i.status==='intake')cnt.intake++; if(i.status==='sold'||i.status==='traded')cnt.sold++; if(i.needsReview)cnt.review++; });
+  all.forEach(i=>{ if(i.status==='available')cnt.available++; else if(i.status==='intake'&&!i.needsReview)cnt.intake++; if(i.status==='sold'||i.status==='traded')cnt.sold++; if(i.needsReview)cnt.review++; });
   let items=all.slice().reverse();
   const tab=invFilter.tab;
   if(tab==='available')items=items.filter(i=>i.status==='available');
-  else if(tab==='intake')items=items.filter(i=>i.status==='intake');
+  else if(tab==='intake')items=items.filter(i=>i.status==='intake'&&!i.needsReview); // review items live only on the Review tab
   else if(tab==='review')items=items.filter(i=>i.needsReview);
   else if(tab==='sold')items=items.filter(i=>i.status==='sold'||i.status==='traded');
   const q=invFilter.q;
@@ -294,20 +294,29 @@ function viewInventory(){
     '<td><div class="muted" style="font-family:monospace">'+esc(i.barcode)+'</div><div class="row" style="margin-top:6px">'+
       '<button class="sm" onclick="editItem(\''+i.id+'\')">Edit</button>'+
       (i.status==='available'?'<button class="sm gold" onclick="addBarcodeToCart(\''+i.barcode+'\')">Add to cart</button>':'')+
-      (i.status==='intake'?'<button class="sm blue" onclick="finishIntake(\''+i.id+'\')">Finish intake</button>':'')+
+      ((i.status==='intake'&&i.needsReview)?'<button class="sm blue" onclick="finishIntake(\''+i.id+'\')">Confirm</button>':'')+
+      ((i.status==='intake'&&!i.needsReview)?'<button class="sm blue" onclick="finishIntake(\''+i.id+'\')">Finish intake</button>':'')+
       '<button class="sm ghost" onclick="markWrongImage(\''+i.id+'\')" title="fetch a different image">🚫 Wrong pic</button>'+
+      ((i.status==='available'||i.status==='intake')?'<button class="sm red" onclick="deleteItem(\''+i.id+'\')">Delete</button>':'')+
       '</div></td></tr>').join('');
   return '<h2 class="page">Inventory <small>'+items.length+' shown · each copy has its own barcode</small></h2>'+
     '<div class="card">'+subtabs+'<div class="grid2">'+
       '<label class="fld"><span>Search (partial — "char" finds Charizard)</span><input id="invSearch" value="'+esc(invFilter.q)+'" oninput="invFilter.q=this.value;ui.focusId=\'invSearch\';render()" placeholder="name, set, number, barcode"/></label>'+
       '<label class="fld"><span>Owner</span><select onchange="invFilter.owner=this.value;render()">'+ownerOpts+'</select></label>'+
-    '</div><div class="row"><button onclick="go(\'add\')">＋ Add item</button><button class="ghost" onclick="go(\'labels\')">Print labels</button>'+
+    '</div><div class="row">'+(invFilter.q?'<button class="sm ghost" onclick="invFilter.q=\'\';render()">✕ clear search</button>':'')+
+      '<button class="sm blue" onclick="searchByImage()">📷 Search by photo</button></div>'+
+    '<div class="row" style="margin-top:8px"><button onclick="go(\'add\')">＋ Add item</button><button class="ghost" onclick="go(\'labels\')">Print labels</button>'+
       '<button class="blue" onclick="startImgJob()">🖼 Fetch real card images'+(stockCount?' ('+stockCount+')':'')+'</button>'+
-      '</div><div class="muted" style="margin-top:6px">Image fetch runs in the background — you can keep working or switch tabs. Wrong picture? Tap “🚫 Wrong pic” to grab the next match.</div></div>'+
+      '</div><div class="muted" style="margin-top:6px">Tap a card image to zoom. Image fetch runs in the background — keep working or switch tabs. Wrong picture? Tap “🚫 Wrong pic” for the next match.</div></div>'+
     (items.length?'<div class="card"><table><thead><tr><th>Item</th><th>Owner</th><th>Price</th><th>Barcode / actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       :'<div class="empty">Nothing here. <a onclick="go(\'add\')">Add an item</a> or <a onclick="loadSample()">load sample data</a>.</div>');
 }
-function photoThumb(i){return i.photo?'<img class="ph" src="'+i.photo+'"/>':'<div class="ph">no photo</div>';}
+function photoThumb(i){return i.photo?'<img class="ph" style="cursor:zoom-in" onclick="zoomItem(\''+i.id+'\')" src="'+i.photo+'"/>':'<div class="ph">no photo</div>';}
+function zoomItem(id){ const it=state.inventory.find(x=>x.id===id); if(!it||!it.photo)return;
+  const w=document.createElement('div'); w.className='scanmodal'; w.style.cursor='zoom-out';
+  w.innerHTML='<img src="'+it.photo+'" style="max-width:94vw;max-height:82vh;border-radius:14px;border:3px solid var(--gold)"/>'+
+    '<div class="hint">'+esc(it.name||'')+(it.number?' · #'+esc(it.number):'')+(it.set?' · '+esc(it.set):'')+'</div>';
+  w.onclick=()=>w.remove(); document.body.appendChild(w); }
 
 /* ===== card images: shared DB + background fetch (pokemontcg.io → TCGdex), free ===== */
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -455,23 +464,32 @@ function scanOnAdd(){ openScanner(code=>{ code=(code||'').trim(); if(!code)retur
 /* -------- Scan card FRONT → OCR (free, on-device) → Review tab -------- */
 function scanCardFront(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
   inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>ocrCardImage(r.result); r.readAsDataURL(f); }; inp.click(); }
-async function ocrCardImage(dataUrl){ toast('Reading the card… (first time downloads the reader)'); let text='';
+/* OCR a card image then identify it via the collector number + set total. Shared by add-scan and image-search. */
+async function readCardFromImage(dataUrl){ let text='';
   try{ if(navigator.onLine===false)throw new Error('offline');
     await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
     if(!window.Tesseract)throw new Error('no ocr');
     const res=await window.Tesseract.recognize(dataUrl,'eng'); text=(res&&res.data&&res.data.text)||'';
-  }catch(e){ toast('Couldn\'t auto-read (need internet the first time) — saved photo to Review to fill in.'); }
+  }catch(e){}
   const p=parseCardText(text);
-  // The collector number is the reliable read. Use it (+ the "/total" = set size) to LOOK UP the real card.
   let name=p.name||'', set='', number=p.number||'', rarity='', matched=false;
   if(p.number){ const info=await identifyCard(parseInt(p.number,10), p.total, p.name);
     if(info){ name=info.name; set=info.set; number=info.number||p.number; rarity=info.rarity; matched=true; } }
-  const data={category:'Pokemon',set,name,number,rarity,variance:'Normal',language:'EN',grade:'Ungraded',condition:'NM',ownerId:state.currentUserId,costBasis:0,listPrice:0,priceOverride:false};
+  return {name,set,number,rarity,matched};
+}
+async function ocrCardImage(dataUrl){ toast('Reading the card… (first time downloads the reader)');
+  const c=await readCardFromImage(dataUrl);
+  const data={category:'Pokemon',set:c.set,name:c.name,number:c.number,rarity:c.rarity,variance:'Normal',language:'EN',grade:'Ungraded',condition:'NM',ownerId:state.currentUserId,costBasis:0,listPrice:0,priceOverride:false};
   const item=Object.assign({id:uid('item'),barcode:genBarcodeId(),photo:dataUrl,stock:false,realImage:true,imgSrc:'manual',suggestedPrice:0,status:'intake',needsReview:true,dateAdded:Date.now()},data);
   state.inventory.push(item); save();
-  toast(matched?('Identified: '+name+(set?(' · '+set):'')+(number?(' #'+number):'')+' → review & confirm.'):(name?('Read "'+name+'" — couldn\'t match a set, please confirm.'):'Saved to Review — add the details.'));
+  toast(c.matched?('Identified: '+c.name+(c.set?(' · '+c.set):'')+(c.number?(' #'+c.number):'')+' → review & confirm.'):(c.name?('Read "'+c.name+'" — couldn\'t match a set, please confirm.'):'Saved to Review — add the details.'));
   editItem(item.id);
 }
+/* upload a photo of a card → identify it → search inventory for it */
+function searchByImage(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
+  inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; const r=new FileReader(); r.onload=async()=>{ toast('Reading the card to search…'); const c=await readCardFromImage(r.result);
+    if(!c.name){ toast('Couldn\'t read the card — try a clearer, straight-on photo.'); return; }
+    invFilter.q=c.name; invFilter.tab='all'; render(); toast('Searching inventory for "'+c.name+'".'); }; r.readAsDataURL(f); }; inp.click(); }
 /* look up the real card by collector number + set total (and a rough name) via pokemontcg.io */
 async function identifyCard(number,total,nameGuess){
   if(!number||navigator.onLine===false)return null;
@@ -525,7 +543,7 @@ function pixelate(ctx,x,y,w,h){ x=Math.round(x);y=Math.round(y);w=Math.round(w);
 }
 function editItem(id){editingId=id;pendingPhoto=null;go('add');}
 function cancelEdit(){editingId=null;pendingPhoto=null;go('inventory');}
-function deleteItem(id){ if(!confirm('Delete this item permanently?'))return; state.inventory=state.inventory.filter(i=>i.id!==id);save();toast('Deleted.');editingId=null;go('inventory'); }
+function deleteItem(id){ const it=state.inventory.find(i=>i.id===id); const nm=it?(it.name||'this item'):'this item'; if(!confirm('Delete "'+nm+'" permanently? This cannot be undone.'))return; state.inventory=state.inventory.filter(i=>i.id!==id);save();toast('Deleted.');editingId=null;go('inventory'); }
 function finishIntake(id){ const it=state.inventory.find(i=>i.id===id); if(needsPhoto(it.condition)&&(!it.photo||it.stock)){editItem(id);toast('Condition '+it.condition+' needs a real photo before selling.');return;} it.status='available';save();toast('Item is now available.');render(); }
 
 /* -------- Import CSV -------- */
