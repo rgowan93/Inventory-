@@ -293,8 +293,8 @@ function stopBounce(){ if(bounceRAF){ cancelAnimationFrame(bounceRAF); bounceRAF
 
 /* -------- accounts: helpers + plans -------- */
 const PLANS=[
-  {id:'monthly',name:'Monthly',price:'$14.99',per:'/mo',blurb:'Full access, billed monthly. Cancel anytime.'},
-  {id:'yearly', name:'Yearly', price:'$149',  per:'/yr',blurb:'Two months free vs. monthly — best value.'}];
+  {id:'monthly',name:'Monthly',price:'',per:'',blurb:'Full access, billed monthly. Cancel anytime.'},
+  {id:'yearly', name:'Yearly', price:'',per:'',blurb:'Best value — save vs. paying monthly.'}];
 function findUser(key){ key=String(key||'').trim().toLowerCase(); if(!key)return null;
   return state.users.find(u=>String(u.username||'').toLowerCase()===key)
       || state.users.find(u=>String(u.email||'').toLowerCase()===key)
@@ -327,7 +327,7 @@ function doSignup(){ const name=val('su_name').trim(); if(!name){ toast('Enter y
 function viewSubscribe(){
   const u=state.users.find(x=>x.id===ui.newUserId)||{}; const sel=ui.planPick||'monthly';
   const plans=PLANS.map(p=>'<button class="plan'+(p.id===sel?' on':'')+'" onclick="ui.planPick=\''+p.id+'\';render()">'+
-      '<div class="plan-name">'+p.name+'</div><div class="plan-price">'+p.price+'<span>'+p.per+'</span></div><div class="plan-blurb">'+p.blurb+'</div></button>').join('');
+      '<div class="plan-name">'+p.name+'</div>'+(p.price?'<div class="plan-price">'+p.price+'<span>'+p.per+'</span></div>':'<div class="plan-price plan-tbd">Pricing soon</div>')+'<div class="plan-blurb">'+p.blurb+'</div></button>').join('');
   return '<div class="login"><h2 class="page">Choose your plan <small>welcome, '+esc(u.name||'')+'</small></h2><div class="card">'+
     '<div class="plans">'+plans+'</div>'+
     '<div class="row" style="margin-top:12px"><button class="gold lg" onclick="doSubscribe()">Subscribe & enter</button>'+
