@@ -87,8 +87,26 @@ tr:hover td{background:#1c1f2b}
 .pickrow{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #2a2e40}
 hr.sep{border:none;border-top:1px solid #2a2e40;margin:12px 0}
 .tag{font-size:11px;background:#2a2e40;color:var(--cream);padding:2px 7px;border-radius:6px;font-weight:800}
+header.top .who{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px}
+header.top .who select{width:auto}
+.imgchip{position:fixed;right:14px;bottom:20px;z-index:120;background:#000;border:3px solid var(--blue);color:var(--cream);
+  padding:10px 14px;border-radius:12px;box-shadow:var(--shadow);font-weight:800;font-size:13px;display:flex;gap:10px;align-items:center;max-width:90vw}
+.imgchip button{padding:5px 9px;font-size:12px;border-radius:8px}
+.subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.subtabs button{background:transparent;box-shadow:none;border-color:#2c3043;font-size:13px;padding:7px 12px}
+.subtabs button.on{background:var(--blue);color:#fff;border-color:#000}
+.login{max-width:380px;margin:6vh auto}
+.login .card{padding:18px}
+.candrow{display:flex;gap:8px;overflow-x:auto;padding:6px 0}
+.candrow .cand{flex:0 0 auto;text-align:center;cursor:pointer;border:3px solid #2a2e40;border-radius:10px;padding:4px;background:#0b0c11}
+.candrow .cand img{width:90px;height:124px;object-fit:cover;border-radius:6px;display:block}
+.candrow .cand.sel{border-color:var(--gold)}
+.blurwrap{position:relative;display:inline-block;touch-action:none}
+.blurwrap canvas{max-width:90vw;border:3px solid var(--gold);border-radius:10px;background:#000}
+.blurbox{position:absolute;border:2px dashed var(--gold);background:rgba(244,180,0,.12);cursor:move}
+.reviewbadge{background:var(--gold);color:#1a1300;font-size:10px;font-weight:900;padding:2px 6px;border-radius:6px}
 @media print{
-  header.top,nav.tabs,.noprint{display:none!important}
+  header.top,nav.tabs,.noprint,.imgchip{display:none!important}
   body{background:#fff;color:#000}
   main{padding:0}
   .card{box-shadow:none;border:1px solid #999;background:#fff;color:#000}
@@ -101,15 +119,13 @@ hr.sep{border:none;border-top:1px solid #2a2e40;margin:12px 0}
   <header class="top">
     <img id="brandLogo" alt="logo" />
     <div class="ttl"><b>HOUSE</b> OF CARDS</div>
-    <div class="who">
-      <span class="muted">Acting as</span>
-      <select id="userSwitch" onchange="setUser(this.value)"></select>
-    </div>
+    <div class="who" id="whoBar"></div>
   </header>
   <nav class="tabs" id="tabs"></nav>
   <main id="view"></main>
 </div>
 <div id="toast"></div>
+<div id="imgchip" class="imgchip" style="display:none"></div>
 <script src="app.js"></script>
 </body>
 </html>

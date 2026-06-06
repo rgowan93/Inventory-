@@ -14,19 +14,30 @@ const LANGUAGES = ['EN','JP','CN','Other'];
 /* ============================== state ============================== */
 let state = null;
 let ui = { route:'dashboard', cart:[], cartPayments:[], focusId:null, sellPanel:null, showPanel:null,
-           tradeDraft:null, inForm:{}, zellePick:null };
+           tradeDraft:null, inForm:{}, zellePick:null, authed:false, loginUser:null, loginMode:'login' };
+
+/* simple local password hash (this is a trusted-team local app, not bank-grade) */
+function hashPass(s){ s=String(s==null?'':s); let h=5381; for(let i=0;i<s.length;i++){ h=((h<<5)+h+s.charCodeAt(i))>>>0; } return 'h'+h.toString(36); }
+function freshUser(id,name){ return {id,name,pass:hashPass('test'),secQ:'',secA:'',mustChange:true}; }
 
 function freshState(){
-  const reggie={id:'u_reggie',name:'Reggie'}, manny={id:'u_manny',name:'Manny'}, hailey={id:'u_hailey',name:'Hailey'};
+  const reggie=freshUser('u_reggie','Reggie'), manny=freshUser('u_manny','Manny'), hailey=freshUser('u_hailey','Hailey');
   return {
-    version:2,
+    version:3,
     users:[reggie,manny,hailey],
     currentUserId:reggie.id,
     paymentAccounts:{cash:'drawer',venmo:manny.id,cashapp:reggie.id,paypal:reggie.id,square:reggie.id,zelle:'prompt'},
     settings:{ cashFloat:200, floatOwnerId:reggie.id, prizePrice:10, prizePlaysPerShow:400, prizeSplit:[reggie.id,manny.id] },
-    inventory:[], shows:[], currentShowId:null, trades:[], wantlist:[], sales:[]
+    inventory:[], shows:[], currentShowId:null, trades:[], wantlist:[], sales:[], imageDB:{}
   };
 }
+/* identity key for the shared image database (so re-adding the same card reuses its image) */
+function cardKey(it){ const graded=(it.grade&&it.grade.toLowerCase()!=='ungraded')?'graded':'raw';
+  return [norm(it.category),norm(it.set),norm(it.number),norm(it.name),norm(it.variance),norm(it.language||'EN'),graded,(it.upc?norm(it.upc):'')].join('|'); }
+function dbEntry(it){ const e=state.imageDB[cardKey(it)]; return (e&&e.photo)?e:null; }
+function dbSave(it,photo,source){ const k=cardKey(it); const e=state.imageDB[k]||{rejected:[]};
+  if(e.source==='manual'&&source==='fetch')return; // never let a fetch overwrite a human-picked image
+  e.photo=photo; e.source=source; e.updated=Date.now(); e.rejected=e.rejected||[]; state.imageDB[k]=e; }
 
 /* ============================== persistence (IndexedDB) ============================== */
 function idb(mode, fn){
@@ -84,22 +95,37 @@ function stockImage(item){
 }
 const escx=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-/* ============================== camera scanner ============================== */
+/* ============================== camera scanner (works in Safari via ZXing) ============================== */
+function loadScript(src){ return new Promise((res,rej)=>{ if(document.querySelector('script[data-src="'+src+'"]')){res();return;} const s=document.createElement('script'); s.src=src; s.dataset.src=src; s.onload=()=>res(); s.onerror=()=>rej(new Error('load '+src)); document.head.appendChild(s); }); }
 async function openScanner(onCode){
-  if(!window.isSecureContext){ toast('Camera needs the hosted version (https/localhost). On a double-clicked file the browser blocks the camera — type or use a USB/Bluetooth scanner for now.'); return; }
+  if(!window.isSecureContext){ toast('Camera needs the hosted version (https). On a double-clicked file the browser blocks the camera — type the code or use a USB/Bluetooth scanner.'); return; }
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ toast('No camera available here.'); return; }
   const wrap=document.createElement('div'); wrap.className='scanmodal';
-  wrap.innerHTML='<video autoplay playsinline></video><div class="hint">Point the camera at the barcode…</div><div class="row"><button class="red" id="scanClose">Cancel</button></div>';
+  wrap.innerHTML='<video autoplay playsinline muted></video><div class="hint">Point the camera at the barcode…</div>'+
+    '<div class="scanbar" style="max-width:520px;width:100%;margin-top:6px"><input id="scanManual" placeholder="…or type the code and press Add"/><button class="gold" id="scanAdd">Add</button></div>'+
+    '<div class="row" style="margin-top:10px"><button class="red" id="scanClose">Cancel</button></div>';
   document.body.appendChild(wrap);
-  const video=wrap.querySelector('video'); let stream=null, stop=false;
-  const cleanup=()=>{ stop=true; if(stream)stream.getTracks().forEach(t=>t.stop()); wrap.remove(); };
+  const video=wrap.querySelector('video'); let stream=null, stop=false, zx=null;
+  const cleanup=()=>{ stop=true; try{if(zx&&zx.reset)zx.reset();}catch(e){} if(stream)stream.getTracks().forEach(t=>t.stop()); wrap.remove(); };
+  const done=code=>{ cleanup(); onCode(code); };
   wrap.querySelector('#scanClose').onclick=cleanup;
-  try{ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}); video.srcObject=stream; }
+  wrap.querySelector('#scanAdd').onclick=()=>{ const v=wrap.querySelector('#scanManual').value.trim(); if(v)done(v); };
+  wrap.querySelector('#scanManual').onkeydown=e=>{ if(e.key==='Enter'){ const v=e.target.value.trim(); if(v)done(v); } };
+  try{ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}); video.srcObject=stream; await video.play().catch(()=>{}); }
   catch(e){ cleanup(); toast('Could not open camera (permission denied?).'); return; }
-  if(!('BarcodeDetector' in window)){ wrap.querySelector('.hint').textContent='This browser can\'t auto-detect barcodes. Use Chrome/Edge, or type it in.'; return; }
-  let detector; try{ detector=new window.BarcodeDetector({formats:['code_39','qr_code','code_128','ean_13','ean_8']}); }catch(e){ wrap.querySelector('.hint').textContent='Scanner unsupported here — type it in.'; return; }
-  const tick=async()=>{ if(stop)return; try{ const codes=await detector.detect(video); if(codes&&codes.length){ const code=codes[0].rawValue; cleanup(); onCode(code); return; } }catch(e){} setTimeout(tick,250); };
-  tick();
+  // Path A: native BarcodeDetector (Chrome/Edge/Android)
+  if('BarcodeDetector' in window){ try{ const det=new window.BarcodeDetector({formats:['code_39','qr_code','code_128','ean_13','ean_8','upc_a','upc_e']});
+      const tick=async()=>{ if(stop)return; try{ const codes=await det.detect(video); if(codes&&codes.length){ done(codes[0].rawValue); return; } }catch(e){} setTimeout(tick,250); }; tick(); return; }catch(e){} }
+  // Path B: ZXing from CDN (Safari / iOS and everywhere else)
+  wrap.querySelector('.hint').textContent='Starting scanner…';
+  try{ await loadScript('https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js');
+    const ZX=window.ZXing; if(!ZX){throw new Error('no zxing');}
+    if(stop)return;
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; video.srcObject=null; } // let ZXing drive the camera
+    zx=new ZX.BrowserMultiFormatReader();
+    wrap.querySelector('.hint').textContent='Point the camera at the barcode…';
+    zx.decodeFromVideoDevice(null,video,(result,err)=>{ if(stop)return; if(result){ done(result.getText()); } });
+  }catch(e){ wrap.querySelector('.hint').textContent='Auto-scan needs internet the first time — type the code below instead.'; }
 }
 
 /* ============================== settlement engine ============================== */
@@ -163,14 +189,55 @@ const PARENT={checkout:'sell',newtrade:'trades'};
 const VIEWS={dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,import:viewImport,labels:viewLabels,
   sell:viewSell,checkout:viewCheckout,trades:viewTrades,newtrade:viewNewTrade,wishlist:viewWishlist,history:viewHistory,reports:viewReports,settings:viewSettings};
 function go(route){ ui.route=route; ui.focusId=null; render(); window.scrollTo(0,0); }
-function setUser(id){ state.currentUserId=id; save(); render(); }
 function render(){
   const logo=el('brandLogo'); if(logo && !logo.dataset.set){ logo.dataset.set='1'; logo.src='logo.png'; logo.onerror=()=>{logo.onerror=null;logo.src='logo.svg';}; }
-  el('userSwitch').innerHTML=state.users.map(u=>'<option value="'+u.id+'"'+(u.id===state.currentUserId?' selected':'')+'>'+u.name+'</option>').join('');
+  if(!ui.authed){ el('whoBar').innerHTML=''; el('tabs').innerHTML=''; el('view').innerHTML=viewLogin(); afterRenderFocus(); return; }
+  el('whoBar').innerHTML='<span class="muted">'+esc(me().name)+'</span>'+
+    '<select id="userSwitch" onchange="switchUserPrompt(this.value)">'+state.users.map(u=>'<option value="'+u.id+'"'+(u.id===state.currentUserId?' selected':'')+'>'+u.name+'</option>').join('')+'</select>'+
+    '<button class="sm ghost" onclick="logout()">Log out</button>';
   const active=PARENT[ui.route]||ui.route;
   el('tabs').innerHTML=TABS.map(([r,l])=>'<button class="'+(active===r?'active':'')+'" onclick="go(\''+r+'\')">'+l+'</button>').join('');
   el('view').innerHTML=(VIEWS[ui.route]||viewDashboard)();
-  if(ui.focusId){ const f=el(ui.focusId); if(f){ f.focus(); try{const n=f.value.length;f.setSelectionRange(n,n);}catch(e){} } }
+  afterRenderFocus(); updateImgChip();
+}
+function afterRenderFocus(){ if(ui.focusId){ const f=el(ui.focusId); if(f){ f.focus(); try{const n=f.value.length;f.setSelectionRange(n,n);}catch(e){} } } }
+
+/* -------- Login / accounts -------- */
+function viewLogin(){
+  const u=ui.loginUser||state.users[0].id;
+  const usel='<select id="lg_user">'+state.users.map(x=>'<option value="'+x.id+'"'+(x.id===u?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select>';
+  if(ui.loginMode==='forgot'){ const usr=state.users.find(x=>x.id===u)||state.users[0];
+    return '<div class="login"><h2 class="page">Reset password</h2><div class="card">'+
+      fld('Account',usel.replace('id="lg_user"','id="lg_user" onchange="ui.loginUser=this.value;render()"'))+
+      (usr.secQ?fld('Security question',('<div class="banner">'+esc(usr.secQ)+'</div>'))+fld('Your answer',inp('lg_ans','',''))+
+        fld('New password',inp('lg_new','','','password'))+
+        '<div class="row"><button class="gold" onclick="doReset()">Reset password</button><button class="ghost" onclick="ui.loginMode=\'login\';render()">Back</button></div>'
+        :'<div class="banner">'+esc(usr.name)+' hasn\'t set a security question yet, so self-reset isn\'t available. Ask an admin, or log in with the default password <b>test</b> if it was never changed.</div><div class="row" style="margin-top:10px"><button class="ghost" onclick="ui.loginMode=\'login\';render()">Back</button></div>')+
+      '</div></div>'; }
+  return '<div class="login"><h2 class="page">Sign in <small>House of Cards</small></h2><div class="card">'+
+    fld('Who are you?',usel.replace('id="lg_user"','id="lg_user" onchange="ui.loginUser=this.value"'))+
+    fld('Password',inp('lg_pass','','default is: test','password'))+
+    '<div class="row"><button class="gold" onclick="doLogin()">Sign in</button>'+
+    '<button class="ghost" onclick="ui.loginMode=\'forgot\';ui.loginUser=val(\'lg_user\');render()">Forgot password?</button></div>'+
+    '<div class="muted" style="margin-top:8px">First time? Everyone\'s password starts as <b>test</b> — change it under Settings → My account.</div>'+
+    '</div></div>';
+}
+function doLogin(){ const id=val('lg_user'); const u=state.users.find(x=>x.id===id); if(!u)return;
+  if(u.pass!==hashPass(val('lg_pass'))){ toast('Wrong password.'); return; }
+  state.currentUserId=u.id; ui.authed=true; ui.route='dashboard'; save();
+  if(u.mustChange||u.pass===hashPass('test')){ toast('Tip: set your own password in Settings → My account.'); }
+  render();
+}
+function doReset(){ const id=val('lg_user'); const u=state.users.find(x=>x.id===id); if(!u||!u.secQ)return;
+  if(u.secA!==hashPass(val('lg_ans').toLowerCase())){ toast('That answer doesn\'t match.'); return; }
+  const np=val('lg_new'); if(np.length<3){ toast('Pick a password of at least 3 characters.'); return; }
+  u.pass=hashPass(np); u.mustChange=false; save(); ui.loginMode='login'; toast('Password reset — sign in now.'); render();
+}
+function logout(){ ui.authed=false; ui.loginMode='login'; stopImgJob(); render(); }
+function switchUserPrompt(id){ if(id===state.currentUserId)return; const u=state.users.find(x=>x.id===id); if(!u)return;
+  const p=prompt('Password for '+u.name+' (each person signs into their own account):'); if(p===null){ render(); return; }
+  if(u.pass!==hashPass(p)){ toast('Wrong password — staying as '+me().name+'.'); render(); return; }
+  state.currentUserId=u.id; save(); toast('Now acting as '+u.name); render();
 }
 
 /* -------- Dashboard -------- */
@@ -199,17 +266,27 @@ function kpi(label,v){return '<div class="card"><div class="big">'+v+'</div><div
 function countSold(show){let n=0;state.sales.filter(s=>s.showId===show.id&&s.status!=='voided').forEach(s=>s.lines.forEach(l=>{if(l.type!=='prize')n+=(l.qty||1);}));return n;}
 
 /* -------- Inventory -------- */
-let invFilter={q:'',owner:'',status:'',cond:''};
+let invFilter={q:'',owner:'',tab:'available'};
 function viewInventory(){
-  let items=state.inventory.slice().reverse();
-  const q=invFilter.q.toLowerCase();
-  if(q)items=items.filter(i=>(i.name+' '+i.set+' '+i.number+' '+i.barcode).toLowerCase().includes(q));
+  const all=state.inventory;
+  const cnt={available:0,intake:0,sold:0,review:0};
+  all.forEach(i=>{ if(i.status==='available')cnt.available++; else if(i.status==='intake')cnt.intake++; if(i.status==='sold'||i.status==='traded')cnt.sold++; if(i.needsReview)cnt.review++; });
+  let items=all.slice().reverse();
+  const tab=invFilter.tab;
+  if(tab==='available')items=items.filter(i=>i.status==='available');
+  else if(tab==='intake')items=items.filter(i=>i.status==='intake');
+  else if(tab==='review')items=items.filter(i=>i.needsReview);
+  else if(tab==='sold')items=items.filter(i=>i.status==='sold'||i.status==='traded');
+  const q=invFilter.q;
+  if(q)items=items.filter(i=>smatch(i.name+' '+i.set+' '+i.number+' '+i.barcode+' '+(i.rarity||'')+' '+(i.grade||''),q));
   if(invFilter.owner)items=items.filter(i=>i.ownerId===invFilter.owner);
-  if(invFilter.status)items=items.filter(i=>i.status===invFilter.status);
   const ownerOpts='<option value="">All owners</option>'+state.users.map(u=>'<option value="'+u.id+'"'+(invFilter.owner===u.id?' selected':'')+'>'+u.name+'</option>').join('');
-  const noPhoto=state.inventory.filter(i=>!i.photo).length;
+  const stockCount=all.filter(i=>(!i.photo||i.stock)&&!i.realImage).length;
+  const sub=(id,label)=>'<button class="'+(tab===id?'on':'')+'" onclick="invFilter.tab=\''+id+'\';render()">'+label+'</button>';
+  const subtabs='<div class="subtabs">'+sub('available','In stock ('+cnt.available+')')+sub('intake','Intake ('+cnt.intake+')')+
+    (cnt.review?sub('review','🔍 Review ('+cnt.review+')'):'')+sub('sold','Sold/Traded ('+cnt.sold+')')+sub('all','All ('+all.length+')')+'</div>';
   const rows=items.map(i=>'<tr>'+
-    '<td><div class="invitem">'+photoThumb(i)+'<div><div>'+esc(i.name||'(unnamed)')+'</div>'+
+    '<td><div class="invitem">'+photoThumb(i)+'<div><div>'+esc(i.name||'(unnamed)')+(i.needsReview?' <span class="reviewbadge">review</span>':'')+'</div>'+
       '<div class="muted">'+esc(i.set||'')+(i.number?' · #'+esc(i.number):'')+(i.language&&i.language!=='EN'?' · '+i.language:'')+(i.variance&&i.variance!=='Normal'?' · '+esc(i.variance):'')+'</div>'+
       '<div style="margin-top:3px">'+condPill(i.condition)+' '+(i.grade&&i.grade!=='Ungraded'?'<span class="tag">'+esc(i.grade)+'</span> ':'')+statusPill(i.status)+'</div></div></div></td>'+
     '<td><span class="pill owner">'+userName(i.ownerId)+'</span></td>'+
@@ -218,54 +295,101 @@ function viewInventory(){
       '<button class="sm" onclick="editItem(\''+i.id+'\')">Edit</button>'+
       (i.status==='available'?'<button class="sm gold" onclick="addBarcodeToCart(\''+i.barcode+'\')">Add to cart</button>':'')+
       (i.status==='intake'?'<button class="sm blue" onclick="finishIntake(\''+i.id+'\')">Finish intake</button>':'')+
+      '<button class="sm ghost" onclick="markWrongImage(\''+i.id+'\')" title="fetch a different image">🚫 Wrong pic</button>'+
       '</div></td></tr>').join('');
   return '<h2 class="page">Inventory <small>'+items.length+' shown · each copy has its own barcode</small></h2>'+
-    '<div class="card"><div class="grid3">'+
-      '<label class="fld"><span>Search</span><input id="invSearch" value="'+esc(invFilter.q)+'" oninput="invFilter.q=this.value;ui.focusId=\'invSearch\';render()" placeholder="name, set, number, barcode"/></label>'+
+    '<div class="card">'+subtabs+'<div class="grid2">'+
+      '<label class="fld"><span>Search (partial — "char" finds Charizard)</span><input id="invSearch" value="'+esc(invFilter.q)+'" oninput="invFilter.q=this.value;ui.focusId=\'invSearch\';render()" placeholder="name, set, number, barcode"/></label>'+
       '<label class="fld"><span>Owner</span><select onchange="invFilter.owner=this.value;render()">'+ownerOpts+'</select></label>'+
-      '<label class="fld"><span>Status</span><select onchange="invFilter.status=this.value;render()">'+['','available','intake','sold','traded','hold'].map(s=>'<option'+(invFilter.status===s?' selected':'')+'>'+s+'</option>').join('')+'</select></label>'+
     '</div><div class="row"><button onclick="go(\'add\')">＋ Add item</button><button class="ghost" onclick="go(\'labels\')">Print labels</button>'+
-      '<button class="blue" onclick="fetchCardImages()">🖼 Fetch real card images (online)</button>'+
-      (noPhoto?'<button class="ghost" onclick="fillStockImages()">Placeholder images ('+noPhoto+')</button>':'')+'</div></div>'+
+      '<button class="blue" onclick="startImgJob()">🖼 Fetch real card images'+(stockCount?' ('+stockCount+')':'')+'</button>'+
+      '</div><div class="muted" style="margin-top:6px">Image fetch runs in the background — you can keep working or switch tabs. Wrong picture? Tap “🚫 Wrong pic” to grab the next match.</div></div>'+
     (items.length?'<div class="card"><table><thead><tr><th>Item</th><th>Owner</th><th>Price</th><th>Barcode / actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
-      :'<div class="empty">No items yet. <a onclick="go(\'add\')">Add one</a> or <a onclick="loadSample()">load sample data</a>.</div>');
+      :'<div class="empty">Nothing here. <a onclick="go(\'add\')">Add an item</a> or <a onclick="loadSample()">load sample data</a>.</div>');
 }
 function photoThumb(i){return i.photo?'<img class="ph" src="'+i.photo+'"/>':'<div class="ph">no photo</div>';}
-function fillStockImages(){ let n=0; state.inventory.forEach(i=>{ if(!i.photo){ i.photo=stockImage(i); i.stock=true; n++; } }); save(); toast('Added stock images to '+n+' item(s).'); render(); }
 
-/* fetch real card images (free): pokemontcg.io first, TCGdex fallback, cached for offline */
+/* ===== card images: shared DB + background fetch (pokemontcg.io → TCGdex), free ===== */
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-async function fetchCardImages(){
+let imgJob={running:false,done:0,total:0,found:0,stop:false};
+function startImgJob(){
+  if(imgJob.running){ toast('Image fetch already running.'); return; }
+  if(navigator.onLine===false){ toast('You look offline — connect to wifi to fetch images.'); return; }
   const items=state.inventory.filter(i=>(!i.photo||i.stock)&&!i.realImage);
-  if(!items.length){toast('All items already have real images.');return;}
-  if(navigator.onLine===false){toast('You look offline — connect to wifi to fetch images.');return;}
-  let done=0,found=0; el('toast').innerHTML='<div class="toast">Fetching images for '+items.length+' item(s)…</div>';
-  for(const it of items){
-    try{ const url=await lookupImage(it); if(url){ it.photo=await toDataURL(url); it.stock=true; it.realImage=true; found++; } }catch(e){}
-    done++; if(done%4===0){ save(); el('toast').innerHTML='<div class="toast">Fetched '+done+'/'+items.length+' ('+found+' found)…</div>'; }
-    await sleep(160);
-  }
-  save(); toast('Done — found '+found+' image(s) of '+items.length+'.'); render();
+  if(!items.length){ toast('All items already have real images.'); return; }
+  imgJob={running:true,done:0,total:items.length,found:0,stop:false};
+  toast('Fetching '+items.length+' image(s) in the background — keep working.');
+  runImgJob(items);
 }
-async function lookupImage(it){
-  const number=(it.number||'').split('/')[0].trim();
+function stopImgJob(){ imgJob.stop=true; }
+async function runImgJob(items){
+  updateImgChip();
+  for(const it of items){
+    if(imgJob.stop)break;
+    try{ const got=await fetchOneItem(it); if(got)imgJob.found++; }catch(e){}
+    imgJob.done++;
+    if(imgJob.done%3===0){ save(); if(ui.authed&&ui.route==='inventory'){ /* light repaint of thumbs only via chip */ } }
+    updateImgChip();
+    await sleep(150);
+  }
+  imgJob.running=false; save(); updateImgChip();
+  if(!imgJob.stop){ toast('Image fetch done — '+imgJob.found+' found of '+imgJob.total+'.'); }
+  if(ui.authed&&ui.route==='inventory')render();
+}
+function updateImgChip(){ const c=el('imgchip'); if(!c)return;
+  if(!imgJob.running){ c.style.display='none'; return; }
+  c.style.display='flex';
+  c.innerHTML='<span>🖼 Fetching images '+imgJob.done+'/'+imgJob.total+' · '+imgJob.found+' found</span><button class="red sm" onclick="stopImgJob()">Stop</button>';
+}
+/* fetch (or reuse) one item's image; returns true if an image was set */
+async function fetchOneItem(it){
+  // 1) reuse from our own image database first (instant, offline)
+  const e=dbEntry(it);
+  if(e && !(it.rejected||[]).includes(e.source==='fetch'?e.srcUrl:'manual')){
+    it.photo=e.photo; it.stock=(e.source!=='manual'); it.realImage=true; it.imgSrc=e.srcUrl||'db'; return true;
+  }
+  if(navigator.onLine===false) return false;
+  const rejected=new Set([...(it.rejected||[]), ...((state.imageDB[cardKey(it)]||{}).rejected||[])]);
+  const cands=await lookupCandidates(it);
+  const pick=cands.find(u=>!rejected.has(u));
+  if(!pick) return false;
+  const data=await toDataURL(pick);
+  it.photo=data; it.stock=true; it.realImage=true; it.imgSrc=pick;
+  dbSave(it,data,'fetch'); state.imageDB[cardKey(it)].srcUrl=pick;
+  return true;
+}
+/* returns an ordered list of candidate image URLs (best match first) */
+async function lookupCandidates(it){
+  const out=[]; const number=(it.number||'').split('/')[0].trim();
   try{ const headers=state.settings.ptcgKey?{'X-Api-Key':state.settings.ptcgKey}:{};
     const q='name:"'+(it.name||'').replace(/"/g,'')+'"'+(number?(' number:'+number):'');
-    const r=await fetch('https://api.pokemontcg.io/v2/cards?pageSize=8&q='+encodeURIComponent(q),{headers});
-    if(r.ok){ const j=await r.json(); if(j.data&&j.data.length){ let best=j.data[0];
-      if(it.set){ const m=j.data.find(c=>c.set&&norm(c.set.name)===norm(it.set)); if(m)best=m; }
-      if(best.images&&(best.images.large||best.images.small)) return best.images.large||best.images.small; } }
+    const r=await fetch('https://api.pokemontcg.io/v2/cards?pageSize=12&q='+encodeURIComponent(q),{headers});
+    if(r.ok){ const j=await r.json(); let data=(j.data||[]);
+      if(it.set){ data=data.slice().sort((a,b)=>(b.set&&norm(b.set.name)===norm(it.set)?1:0)-(a.set&&norm(a.set.name)===norm(it.set)?1:0)); }
+      data.forEach(c=>{ const u=c.images&&(c.images.large||c.images.small); if(u)out.push(u); }); }
   }catch(e){}
   try{ const lang=(it.language==='JP')?'ja':(it.language==='CN'?'zh-tw':'en');
     const r=await fetch('https://api.tcgdex.net/v2/'+lang+'/cards?name='+encodeURIComponent(it.name||''));
-    if(r.ok){ const arr=await r.json(); if(arr&&arr.length){ let pick=arr[0];
-      if(number){ const m=arr.find(c=>String(c.localId)===number); if(m)pick=m; }
-      if(pick.image) return pick.image+'/high.png'; } }
+    if(r.ok){ let arr=await r.json(); if(Array.isArray(arr)){
+      if(number)arr=arr.slice().sort((a,b)=>(String(b.localId)===number?1:0)-(String(a.localId)===number?1:0));
+      arr.slice(0,12).forEach(c=>{ if(c.image)out.push(c.image+'/high.png'); }); } }
   }catch(e){}
-  return null;
+  return out;
+}
+/* user says the picture is wrong → remember it as rejected, pull the next candidate */
+async function markWrongImage(id){ const it=state.inventory.find(x=>x.id===id); if(!it)return;
+  const bad=it.imgSrc||(it.photo&&it.photo.slice(0,40));
+  it.rejected=it.rejected||[]; if(bad&&!it.rejected.includes(bad))it.rejected.push(bad);
+  const k=cardKey(it); const dbe=state.imageDB[k]; if(dbe){ dbe.rejected=dbe.rejected||[]; if(bad&&!dbe.rejected.includes(bad))dbe.rejected.push(bad); if(dbe.srcUrl===bad){ delete dbe.photo; delete dbe.srcUrl; } }
+  it.realImage=false; it.photo=stockImage(it); it.stock=true;
+  save(); toast('Looking for a different picture…'); render();
+  if(navigator.onLine===false){ toast('Offline — reconnect, then it will refetch.'); return; }
+  const got=await fetchOneItem(it); save(); toast(got?'Got a different image.':'No other match found — upload one via Edit.'); if(ui.route==='inventory')render();
 }
 async function toDataURL(url){ try{ const r=await fetch(url); if(!r.ok)return url; const b=await r.blob();
   return await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>res(url);fr.readAsDataURL(b);}); }catch(e){ return url; } }
+/* image fields for a brand-new item: reuse our saved DB image if we have one, else a placeholder */
+function imageForNew(data){ const e=dbEntry(data); if(e)return {photo:e.photo,stock:(e.source!=='manual'),realImage:true,imgSrc:e.srcUrl||'db'}; return {photo:stockImage(data),stock:true}; }
 
 /* -------- Add / Edit item (intake) -------- */
 let editingId=null, pendingPhoto=null;
@@ -275,7 +399,9 @@ function viewAdd(){
   const sel=(id,opts,cur)=>'<select id="'+id+'">'+opts.map(o=>'<option'+(o===cur?' selected':'')+'>'+o+'</option>').join('')+'</select>';
   const ownerSel='<select id="f_owner">'+state.users.map(u=>'<option value="'+u.id+'"'+((g('ownerId',state.currentUserId))===u.id?' selected':'')+'>'+u.name+'</option>').join('')+'</select>';
   return '<h2 class="page">'+(it?'Edit item':'Add item')+' <small>Photo only required if condition is NOT Near Mint · barcode auto-created</small></h2>'+
-    '<div class="card"><div class="row noprint" style="margin-bottom:10px"><button class="blue" onclick="scanOnAdd()">📷 Scan barcode / UPC</button><span class="muted">scan an existing label to edit it, or a sealed product\'s UPC</span></div>'+
+    '<div class="card"><div class="row noprint" style="margin-bottom:10px"><button class="blue" onclick="scanOnAdd()">📷 Scan barcode / UPC</button>'+
+      '<button class="blue" onclick="scanCardFront()">🃏 Scan card front (auto-read)</button>'+
+      '<span class="muted">barcode/UPC opens an existing label or fills the UPC; card-front reads the name/number for you to review</span></div>'+
     '<div class="grid2">'+
       fld('Category',sel('f_cat',CATEGORIES,g('category','Pokemon')))+
       fld('Set',inp('f_set',g('set',''),'e.g. Surging Sparks'))+
@@ -291,7 +417,7 @@ function viewAdd(){
       fld('List price',inp('f_price',g('listPrice',''),'sale price','number'))+
       fld('UPC / scanned code',inp('f_upc',g('upc',''),'sealed product (optional)'))+
     '</div>'+
-    '<label class="fld"><span>Photo (required only if condition is worse than NM)</span><input id="f_photo" type="file" accept="image/*" onchange="previewPhoto(this)"/></label>'+
+    '<label class="fld"><span>Photo (required only if condition is worse than NM · graded slabs get the cert number blurred)</span><input id="f_photo" type="file" accept="image/*" onchange="previewPhoto(this)"/></label>'+
     '<div id="photoPrev">'+(g('photo','')?'<img class="ph" style="width:80px;height:110px" src="'+g('photo','')+'"/>':'')+'</div>'+
     '<label class="fld"><span><input type="checkbox" id="f_override" style="width:auto;display:inline" '+(g('priceOverride',false)?'checked':'')+'/> Lock price (manual override — CSV/feeds won\'t change it; auto-on for graded)</span></label>'+
     '<hr class="sep"><div class="row">'+
@@ -301,22 +427,80 @@ function viewAdd(){
       (it?'<button class="red right" onclick="deleteItem(\''+it.id+'\')">Delete</button>':'')+
     '</div></div>';
 }
-function previewPhoto(input){ const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ pendingPhoto=r.result; el('photoPrev').innerHTML='<img class="ph" style="width:80px;height:110px" src="'+pendingPhoto+'"/>'; }; r.readAsDataURL(f); }
+function previewPhoto(input){ const f=input.files[0]; if(!f)return; const r=new FileReader();
+  r.onload=()=>{ const grade=val('f_grade'); const graded=grade&&grade.toLowerCase()!=='ungraded';
+    if(graded){ openCertBlur(r.result, out=>setPendingPhoto(out)); } else { setPendingPhoto(r.result); } };
+  r.readAsDataURL(f); }
+function setPendingPhoto(dataUrl){ pendingPhoto=dataUrl; const p=el('photoPrev'); if(p)p.innerHTML='<img class="ph" style="width:80px;height:110px" src="'+pendingPhoto+'"/>'; }
 function collectItem(){ return {category:val('f_cat'),set:val('f_set'),name:val('f_name'),number:val('f_number'),rarity:val('f_rarity'),variance:val('f_var'),language:val('f_lang'),grade:val('f_grade'),condition:val('f_cond'),ownerId:val('f_owner'),costBasis:num('f_cost'),listPrice:num('f_price'),priceOverride:el('f_override').checked,upc:val('f_upc')}; }
 function needsPhoto(cond){ return cond && cond!=='NM'; }
 function saveItem(makeAvailable){
   const data=collectItem(); if(!data.name){toast('Card name is required');return;}
   if(data.grade&&data.grade.toLowerCase()!=='ungraded')data.priceOverride=true;
-  if(editingId){ const it=state.inventory.find(i=>i.id===editingId); Object.assign(it,data); if(pendingPhoto){it.photo=pendingPhoto;it.stock=false;} save();toast('Saved.');editingId=null;pendingPhoto=null;go('inventory');return; }
-  let photo=pendingPhoto;
-  if(makeAvailable && needsPhoto(data.condition) && !photo){ toast('Condition '+data.condition+' requires a photo. Add one, or use "Save to intake".'); return; }
-  if(!photo){ photo=stockImage(data); data.stock=true; } // auto stock image when none provided
+  if(editingId){ const it=state.inventory.find(i=>i.id===editingId); const oldKey=cardKey(it); Object.assign(it,data); it.needsReview=false;
+    if(pendingPhoto){ it.photo=pendingPhoto; it.stock=false; it.realImage=true; it.imgSrc='manual'; dbSave(it,pendingPhoto,'manual'); }
+    save();toast('Saved.');editingId=null;pendingPhoto=null;go('inventory');return; }
+  let photo=pendingPhoto, fromDB=false;
+  if(!photo){ const e=dbEntry(data); if(e){ photo=e.photo; data.stock=(e.source!=='manual'); data.realImage=true; data.imgSrc=e.srcUrl||'db'; fromDB=true; } } // reuse our saved image
+  if(makeAvailable && needsPhoto(data.condition) && (!photo||data.stock)){ toast('Condition '+data.condition+' needs a real photo of THIS copy. Add one, or use "Save to intake".'); return; }
+  if(!photo){ photo=stockImage(data); data.stock=true; } // generated placeholder as last resort
   const item=Object.assign({id:uid('item'),barcode:genBarcodeId(),photo:photo,stock:data.stock||false,suggestedPrice:0,status:makeAvailable?'available':'intake',dateAdded:Date.now()},data);
+  if(pendingPhoto){ item.realImage=true; item.imgSrc='manual'; dbSave(item,pendingPhoto,'manual'); } // a real photo becomes this card's saved image
   state.inventory.push(item); save(); pendingPhoto=null;
-  if(makeAvailable){ toast('Added & ready. Printing label…'); printLabels([item.id]); } else toast('Saved to intake.');
+  if(makeAvailable){ toast('Added & ready'+(fromDB?' (reused saved image)':'')+'. Printing label…'); printLabels([item.id]); } else toast('Saved to intake'+(fromDB?' (reused saved image)':'')+'.');
   go('inventory');
 }
 function scanOnAdd(){ openScanner(code=>{ code=(code||'').trim(); if(!code)return; const it=state.inventory.find(i=>i.barcode.toUpperCase()===code.toUpperCase()); if(it){ toast('Found existing item — opening to edit.'); editItem(it.id); } else { const f=el('f_upc'); if(f)f.value=code; toast('Scanned '+code+' → added to UPC field.'); } }); }
+
+/* -------- Scan card FRONT → OCR (free, on-device) → Review tab -------- */
+function scanCardFront(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
+  inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>ocrCardImage(r.result); r.readAsDataURL(f); }; inp.click(); }
+async function ocrCardImage(dataUrl){ toast('Reading the card… (first time downloads the reader)'); let text='';
+  try{ if(navigator.onLine===false)throw new Error('offline');
+    await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    if(!window.Tesseract)throw new Error('no ocr');
+    const res=await window.Tesseract.recognize(dataUrl,'eng'); text=(res&&res.data&&res.data.text)||'';
+  }catch(e){ toast('Couldn\'t auto-read (need internet first time) — saved photo to Review to fill in.'); }
+  const p=parseCardText(text);
+  const data={category:'Pokemon',set:p.set||'',name:p.name||'',number:p.number||'',rarity:'',variance:'Normal',language:'EN',grade:'Ungraded',condition:'NM',ownerId:state.currentUserId,costBasis:0,listPrice:0,priceOverride:false};
+  const item=Object.assign({id:uid('item'),barcode:genBarcodeId(),photo:dataUrl,stock:false,realImage:true,imgSrc:'manual',suggestedPrice:0,status:'intake',needsReview:true,dateAdded:Date.now()},data);
+  state.inventory.push(item); save();
+  toast(p.name?('Read "'+p.name+'"'+(p.number?(' #'+p.number):'')+' → review & confirm.'):'Saved to Review — add details.');
+  editItem(item.id);
+}
+function parseCardText(text){ const lines=String(text||'').split(/\n/).map(s=>s.trim()).filter(Boolean);
+  let number=''; const m=String(text||'').match(/(\d{1,3}\s*\/\s*\d{1,3})/); if(m)number=m[1].replace(/\s+/g,'');
+  let name='',best=0; lines.slice(0,Math.max(3,Math.ceil(lines.length/2))).forEach(l=>{ const a=l.replace(/[^A-Za-z .'-]/g,'').trim(); if(a.length>best&&a.length>=3){best=a.length;name=a;} });
+  return {name,number,set:''};
+}
+
+/* -------- Graded slab: blur the certification number before saving -------- */
+function openCertBlur(dataUrl,cb){ const img=new Image();
+  img.onload=()=>{ const maxW=Math.min(window.innerWidth*0.9,420); const scale=Math.min(1,maxW/img.width); const cw=Math.round(img.width*scale), ch=Math.round(img.height*scale);
+    const wrap=document.createElement('div'); wrap.className='scanmodal';
+    wrap.innerHTML='<div class="hint">Graded slab — drag the box over the certification number, then Apply.</div>'+
+      '<div class="blurwrap" id="bw"><canvas id="bcv" width="'+cw+'" height="'+ch+'"></canvas><div class="blurbox" id="bbox"></div></div>'+
+      '<div class="row" style="margin-top:12px"><button class="gold" id="bApply">Apply blur &amp; use</button><button class="ghost" id="bSkip">Use without blur</button><button class="red" id="bCancel">Cancel</button></div>';
+    document.body.appendChild(wrap);
+    const cv=wrap.querySelector('#bcv'), ctx=cv.getContext('2d'); ctx.drawImage(img,0,0,cw,ch);
+    const box=wrap.querySelector('#bbox');
+    let bx=cw*0.18, by=ch*0.03, bw=cw*0.64, bh=Math.max(20,ch*0.10);
+    const place=()=>{ box.style.left=bx+'px'; box.style.top=by+'px'; box.style.width=bw+'px'; box.style.height=bh+'px'; }; place();
+    let drag=false,ox=0,oy=0; const pt=e=>{ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top}; };
+    box.addEventListener('pointerdown',e=>{ drag=true; const p=pt(e); ox=p.x-bx; oy=p.y-by; try{box.setPointerCapture(e.pointerId);}catch(_){ } e.preventDefault(); });
+    box.addEventListener('pointermove',e=>{ if(!drag)return; const p=pt(e); bx=Math.max(0,Math.min(cw-bw,p.x-ox)); by=Math.max(0,Math.min(ch-bh,p.y-oy)); place(); });
+    box.addEventListener('pointerup',e=>{ drag=false; try{box.releasePointerCapture(e.pointerId);}catch(_){ } });
+    const cleanup=()=>wrap.remove();
+    wrap.querySelector('#bCancel').onclick=cleanup;
+    wrap.querySelector('#bSkip').onclick=()=>{ cleanup(); cb(dataUrl); };
+    wrap.querySelector('#bApply').onclick=()=>{ pixelate(ctx,bx,by,bw,bh); const out=cv.toDataURL('image/jpeg',0.9); cleanup(); cb(out); };
+  };
+  img.onerror=()=>cb(dataUrl); img.src=dataUrl;
+}
+function pixelate(ctx,x,y,w,h){ x=Math.round(x);y=Math.round(y);w=Math.round(w);h=Math.round(h); if(w<2||h<2)return; const block=Math.max(6,Math.round(w/14));
+  for(let yy=y; yy<y+h; yy+=block){ for(let xx=x; xx<x+w; xx+=block){ try{ const d=ctx.getImageData(xx,yy,1,1).data; ctx.fillStyle='rgb('+d[0]+','+d[1]+','+d[2]+')'; ctx.fillRect(xx,yy,Math.min(block,x+w-xx),Math.min(block,y+h-yy)); }catch(e){} } }
+  ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(x,y,w,h);
+}
 function editItem(id){editingId=id;pendingPhoto=null;go('add');}
 function cancelEdit(){editingId=null;pendingPhoto=null;go('inventory');}
 function deleteItem(id){ if(!confirm('Delete this item permanently?'))return; state.inventory=state.inventory.filter(i=>i.id!==id);save();toast('Deleted.');editingId=null;go('inventory'); }
@@ -375,7 +559,7 @@ function commitCSV(mode){ if(!csvRows)return; let updated=0,added=0,skipped=0,su
   csvRows.forEach(r=>{ if(r.removed){skipped++;return;}
     if(r.matches.length){ r.matches.forEach(it=>{ it.suggestedPrice=r.csvMarket; if(r.locked){suggestedOnly++;return;} if(r.action==='use'){it.listPrice=r.newPrice;updated++;} else if(r.action==='skip'){skipped++;} }); }
     else { if(mode==='add'&&r.action!=='skip'){ const data={category:'Pokemon',set:r.set,name:r.name,number:r.number,rarity:'',variance:r.variance,language:r.language,grade:r.grade,condition:r.condition,ownerId:state.currentUserId,costBasis:0,listPrice:r.newPrice};
-      state.inventory.push(Object.assign({id:uid('item'),barcode:genBarcodeId(),suggestedPrice:r.csvMarket,priceOverride:(r.grade&&r.grade.toLowerCase()!=='ungraded'),photo:stockImage(data),stock:true,status:'intake',dateAdded:Date.now()},data)); added++; } else skipped++; } });
+      state.inventory.push(Object.assign({id:uid('item'),barcode:genBarcodeId(),suggestedPrice:r.csvMarket,priceOverride:(r.grade&&r.grade.toLowerCase()!=='ungraded'),status:'intake',dateAdded:Date.now()},imageForNew(data),data)); added++; } else skipped++; } });
   save(); csvSummary=updated+' price(s) updated · '+added+' new item(s) added to intake · '+suggestedOnly+' locked/graded (suggested only) · '+skipped+' skipped.';
   csvRows=null; toast('Import complete.'); go('import');
 }
@@ -473,7 +657,7 @@ function startTrade(){ const show=openShow(); ui.tradeDraft={out:[],in:[],keeper
 function viewNewTrade(){ const d=ui.tradeDraft; if(!d){go('trades');return '';}
   const q=d.search.toLowerCase();
   let pool=state.inventory.filter(i=>i.status==='available'&&!d.out.some(o=>o.itemId===i.id));
-  if(q)pool=pool.filter(i=>(i.name+' '+i.set+' '+i.number).toLowerCase().includes(q));
+  if(q)pool=pool.filter(i=>smatch(i.name+' '+i.set+' '+i.number,q));
   const poolRows=pool.slice(0,40).map(i=>'<div class="pickrow"><div style="flex:1">'+esc(i.name)+' '+esc(i.number)+' <span class="muted">'+esc(i.set)+' · '+i.condition+' · '+userName(i.ownerId)+'</span></div><div class="money">'+money(i.listPrice)+'</div><button class="sm gold" onclick="tradeAddOut(\''+i.id+'\')">Add</button></div>').join('');
   const outRows=d.out.map((o,idx)=>'<div class="pickrow"><div style="flex:1">'+esc(o.desc)+' <span class="muted">'+userName(o.ownerId)+'</span></div><div class="money">'+money(o.value)+'</div><button class="sm red" onclick="ui.tradeDraft.out.splice('+idx+',1);render()">✕</button></div>').join('');
   const inRows=d.in.map((it,idx)=>'<div class="pickrow"><div style="flex:1">'+esc(it.name)+' '+esc(it.number)+' <span class="muted">'+esc(it.set)+(it.language!=='EN'?' · '+it.language:'')+'</span></div><div class="muted">credit '+money(it.tradeValue)+' / market '+money(it.marketPrice)+'</div><button class="sm red" onclick="ui.tradeDraft.in.splice('+idx+',1);render()">✕</button></div>').join('');
@@ -504,7 +688,7 @@ function saveTrade(){ const d=ui.tradeDraft; if(!d.out.length&&!d.in.length){toa
   if(owners.length>1){ keeperId=val('t_keeper')||d.keeperId; const payees={}; owners.filter(o=>o!==keeperId).forEach(o=>{ payees[o]=d.out.filter(x=>x.ownerId===o).reduce((a,x)=>a+x.value,0); }); buyout={payerId:keeperId,payees}; }
   const outItemIds=d.out.map(o=>o.itemId); const inItemIds=[];
   d.in.forEach(it=>{ const data={category:'Pokemon',set:it.set,name:it.name,number:it.number,rarity:'',variance:'Normal',language:it.language,grade:'Ungraded',condition:it.condition||'NM',ownerId:keeperId,costBasis:Number(it.tradeValue)||0,listPrice:Number(it.marketPrice)||0};
-    const inv=Object.assign({id:uid('item'),barcode:genBarcodeId(),suggestedPrice:Number(it.marketPrice)||0,priceOverride:false,photo:stockImage(data),stock:true,status:'intake',dateAdded:Date.now(),fromTrade:true},data); state.inventory.push(inv); inItemIds.push(inv.id); });
+    const inv=Object.assign({id:uid('item'),barcode:genBarcodeId(),suggestedPrice:Number(it.marketPrice)||0,priceOverride:false,status:'intake',dateAdded:Date.now(),fromTrade:true},imageForNew(data),data); state.inventory.push(inv); inItemIds.push(inv.id); });
   d.out.forEach(o=>{ const it=state.inventory.find(i=>i.id===o.itemId); if(it)it.status='traded'; });
   const show=openShow();
   state.trades.push({id:uid('trade'),showId:show?show.id:null,createdAt:Date.now(),outItems:d.out.slice(),inItems:d.in.slice(),buyout,keeperId,outItemIds,inItemIds});
@@ -517,19 +701,36 @@ function deleteTrade(id){ const t=state.trades.find(x=>x.id===id); if(!t)return;
 }
 
 /* -------- Wish list -------- */
-function pingWantList(item){ state.wantlist.forEach(w=>{ if(item.name.toLowerCase().includes(w.text.toLowerCase())&&w.userId!==state.currentUserId){ toast('🔔 '+userName(w.userId)+' wants this: '+w.text); } }); }
-function viewWishlist(){ const rows=state.wantlist.slice().reverse().map(w=>'<div class="cart-line"><div style="flex:1"><b>'+esc(w.text)+'</b><div class="muted">'+userName(w.userId)+(w.note?' · '+esc(w.note):'')+'</div></div><button class="sm red" onclick="delWant(\''+w.id+'\')">✕</button></div>').join('');
-  return '<h2 class="page">Wish list <small>when anyone scans a match, the wanter gets pinged</small></h2>'+
-    '<div class="card"><div class="grid2"><label class="fld"><span>Card you\'re hunting</span><input id="w_text" placeholder="e.g. Umbreon VMAX"/></label><label class="fld"><span>Note (optional)</span><input id="w_note" placeholder="condition, budget…"/></label></div><button class="gold" onclick="addWant()">Add to my wish list</button></div>'+
-    (state.wantlist.length?'<div class="card">'+rows+'</div>':'<div class="empty">Nothing on the wish list yet.</div>'); }
-function addWant(){const t=val('w_text');if(!t){toast('Enter a card.');return;}state.wantlist.push({id:uid('want'),userId:state.currentUserId,text:t,note:val('w_note')});save();toast('Added.');render();}
+function pingWantList(item){ state.wantlist.forEach(w=>{ const hay=item.name+' '+(item.set||'')+' '+(item.number||''); const needle=w.text+' '+(w.set||'')+' '+(w.number||'');
+  if(smatch(hay,w.text)&&(!w.number||norm(w.number)===norm(item.number))&&w.userId!==state.currentUserId){ toast('🔔 '+userName(w.userId)+' wants this: '+w.text); } }); }
+let wishQ='';
+function viewWishlist(){ let list=state.wantlist.slice().reverse();
+  if(wishQ)list=list.filter(w=>smatch((w.text+' '+(w.set||'')+' '+(w.number||'')+' '+userName(w.userId)),wishQ));
+  const rows=list.map(w=>'<div class="cart-line"><div style="flex:1"><b>'+esc(w.text)+'</b>'+(w.qty&&w.qty>1?' <span class="tag">×'+w.qty+'</span>':'')+
+      '<div class="muted">'+(w.category?esc(w.category)+' · ':'')+(w.set?esc(w.set)+' ':'')+(w.number?'#'+esc(w.number)+' ':'')+'· wanted by '+userName(w.userId)+(w.maxPrice?' · up to '+money(w.maxPrice):'')+(w.note?' · '+esc(w.note):'')+'</div></div>'+
+      '<button class="sm red" onclick="delWant(\''+w.id+'\')">✕</button></div>').join('');
+  return '<h2 class="page">Wish list <small>when anyone scans/sells a match, the wanter gets pinged</small></h2>'+
+    '<div class="card"><h3>Add a card you\'re hunting</h3><div class="grid3">'+
+      fld('Card name',inp('w_text','','e.g. Umbreon VMAX'))+
+      fld('Set (optional)',inp('w_set','','e.g. Evolving Skies'))+
+      fld('Card number (optional)',inp('w_number','','e.g. 215/203'))+
+      fld('Category',('<select id="w_cat">'+CATEGORIES.map(c=>'<option'+(c==='Pokemon'?' selected':'')+'>'+c+'</option>').join('')+'</select>'))+
+      fld('How many',inp('w_qty','1','','number'))+
+      fld('Max price (optional)',inp('w_max','','budget','number'))+
+    '</div><label class="fld"><span>Note (optional)</span><input id="w_note" placeholder="condition, foil only, etc."/></label>'+
+    '<button class="gold" onclick="addWant()">Add to my wish list</button></div>'+
+    '<div class="card"><label class="fld"><span>Search wish list (partial)</span><input id="wishSearch" value="'+esc(wishQ)+'" oninput="wishQ=this.value;ui.focusId=\'wishSearch\';render()" placeholder="name, set, number"/></label></div>'+
+    (list.length?'<div class="card">'+rows+'</div>':'<div class="empty">Nothing on the wish list yet.</div>'); }
+function addWant(){ const t=val('w_text'); if(!t){toast('Enter a card name.');return;}
+  state.wantlist.push({id:uid('want'),userId:state.currentUserId,text:t,set:val('w_set'),number:val('w_number'),category:val('w_cat'),qty:parseInt(val('w_qty'))||1,maxPrice:num('w_max'),note:val('w_note')});
+  save();toast('Added to wish list.');render(); }
 function delWant(id){state.wantlist=state.wantlist.filter(w=>w.id!==id);save();render();}
 
 /* -------- Sold history -------- */
 let histQ='';
 function viewHistory(){ const sold=[];
   state.sales.filter(s=>s.status!=='voided').forEach(s=>s.lines.forEach(l=>{ if(l.type!=='prize') sold.push({...l,when:s.createdAt,payMethods:s.payments.map(p=>METHOD_LABEL[p.method]).join('+')}); }));
-  let rows=sold.sort((a,b)=>b.when-a.when); const q=histQ.toLowerCase(); if(q)rows=rows.filter(r=>r.desc.toLowerCase().includes(q));
+  let rows=sold.sort((a,b)=>b.when-a.when); if(histQ)rows=rows.filter(r=>smatch(r.desc+' '+userName(r.ownerId),histQ));
   const freq={}; sold.forEach(r=>{const k=r.desc.replace(/\s+\(.*\)$/,'').trim();freq[k]=(freq[k]||0)+1;}); const top=Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,6);
   const trh=top.map(([k,n])=>'<span class="tag" style="margin:3px">'+esc(k)+' ×'+n+'</span>').join(' ');
   const body=rows.map(r=>'<tr><td>'+new Date(r.when).toLocaleDateString()+'</td><td>'+esc(r.desc)+'</td><td>'+userName(r.ownerId)+'</td><td class="money">'+money(r.soldPrice)+'</td><td class="muted">'+(r.discountReason?'↓ '+esc(r.discountReason):'')+'</td><td class="muted">'+r.payMethods+'</td></tr>').join('');
@@ -592,15 +793,24 @@ function viewSettings(){ const s=state.settings;
     '<div class="card"><h3>Payment accounts — who receives each method</h3><table><tbody>'+acctRows+'</tbody></table><div class="muted" style="margin-top:8px">Default: Cash→drawer · Venmo→Manny · Cash App/PayPal/Square→Reggie · Zelle→ask per sale.</div></div>'+
     '<div class="card"><h3>Show defaults</h3><div class="grid3">'+fld('Cash float',inp('s_float',s.cashFloat,'','number'))+fld('Prize price',inp('s_prize',s.prizePrice,'','number'))+fld('Prize plays/show',inp('s_plays',s.prizePlaysPerShow,'','number'))+'</div><button class="gold" onclick="saveSettings()">Save defaults</button><div class="muted" style="margin-top:6px">Prize machine splits 50/50 Reggie ↔ Manny.</div></div>'+
     '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
-    '<div class="card"><h3>Team</h3>'+state.users.map(u=>'• '+u.name).join('<br>')+'<div class="muted" style="margin-top:6px">(House of Cards — all free, all can finalize.)</div></div>'+
+    '<div class="card"><h3>My account — '+esc(me().name)+'</h3>'+
+      '<div class="muted" style="margin-bottom:8px">Each person signs into their own account. You can only change your own password.</div>'+
+      '<div class="grid2">'+fld('Current password',inp('ac_cur','','','password'))+fld('New password',inp('ac_new','','at least 3 characters','password'))+'</div>'+
+      '<button class="gold" onclick="changePassword()">Update my password</button>'+
+      '<hr class="sep"><div class="muted" style="margin-bottom:6px">Security question (lets you reset your own password if you forget it):</div>'+
+      '<div class="grid2">'+fld('Question',inp('ac_q',me().secQ||'','e.g. First pet\'s name'))+fld('Answer',inp('ac_a','',me().secA?'(saved — type to change)':'your answer'))+'</div>'+
+      '<button class="blue" onclick="saveSecurityQ()">Save security question</button></div>'+
+    '<div class="card"><h3>Team</h3>'+state.users.map(u=>'• '+esc(u.name)+(u.id===state.currentUserId?' (you)':'')+(u.pass===hashPass('test')?' <span class="muted">— still using default password</span>':'')).join('<br>')+'<div class="muted" style="margin-top:6px">Everyone\'s password starts as <b>test</b> until they change it.</div></div>'+
     '<div class="card"><h3>Beta — reset data</h3><div class="banner">Clear everything you entered while testing so you start clean for your first real show.</div><div class="row" style="margin-top:10px"><button class="red" onclick="resetTestData()">Clear test data (keep team & settings)</button><button class="red ghost" onclick="factoryReset()">Full factory reset</button><button class="ghost right" onclick="loadSample()">Load sample data</button></div></div>'+
-    '<div class="card"><h3>About</h3><div class="muted">Local beta — data stored only in this browser, works offline. Camera scanning works on the hosted (https/localhost) version; on a double-clicked file the browser blocks the camera, so type or use a USB/Bluetooth scanner.</div></div>';
+    '<div class="card"><h3>About</h3><div class="muted">Local beta — data stored only in this browser, works offline. Camera scanning works on the hosted (https) version in Safari and Chrome (the first scan downloads the scanner, so it needs internet once). Card-front auto-read and online image fetching need internet; reused/saved images and everything else work offline.</div></div>';
 }
 function setAcct(m,v){state.paymentAccounts[m]=v;save();toast('Updated.');}
 function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.prizePrice=num('s_prize');state.settings.prizePlaysPerShow=num('s_plays');save();toast('Saved.');}
 function savePtcg(){state.settings.ptcgKey=val('s_ptcg');save();toast('Image API key saved.');}
+function changePassword(){ const u=me(); if(u.pass!==hashPass(val('ac_cur'))){ toast('Current password is wrong.'); return; } const np=val('ac_new'); if(np.length<3){ toast('New password needs at least 3 characters.'); return; } u.pass=hashPass(np); u.mustChange=false; save(); toast('Password updated.'); render(); }
+function saveSecurityQ(){ const u=me(); const q=val('ac_q'); const a=val('ac_a'); if(!q){ toast('Enter a question.'); return; } u.secQ=q; if(a)u.secA=hashPass(a.toLowerCase()); save(); toast('Security question saved.'); render(); }
 function resetTestData(){ if(!confirm('Clear all inventory, sales, shows, trades and wish list? Team & settings stay.'))return; state.inventory=[];state.sales=[];state.shows=[];state.trades=[];state.wantlist=[];state.currentShowId=null;ui.cart=[];ui.cartPayments=[];save();toast('Test data cleared.');go('dashboard'); }
-function factoryReset(){ if(!confirm('FULL reset to factory defaults? Cannot be undone.'))return; state=freshState();ui={route:'dashboard',cart:[],cartPayments:[],focusId:null,sellPanel:null,showPanel:null,tradeDraft:null,inForm:{}};save();toast('Factory reset done.');render(); }
+function factoryReset(){ if(!confirm('FULL reset to factory defaults? Cannot be undone.'))return; stopImgJob(); state=freshState();ui={route:'dashboard',cart:[],cartPayments:[],focusId:null,sellPanel:null,showPanel:null,tradeDraft:null,inForm:{},authed:false,loginMode:'login'};save();toast('Factory reset done — sign in again.');render(); }
 
 /* -------- sample data -------- */
 function loadSample(){ if(state.inventory.length&&!confirm('Add sample items on top of existing data?'))return;
@@ -615,6 +825,8 @@ function loadSample(){ if(state.inventory.length&&!confirm('Add sample items on 
 }
 
 /* ============================== utils ============================== */
+/* partial search: every typed word must appear somewhere (so "char base" finds a Base-Set Charizard) */
+function smatch(text,q){ text=String(text==null?'':text).toLowerCase(); const terms=String(q||'').toLowerCase().split(/\s+/).filter(Boolean); return terms.every(t=>text.includes(t)); }
 function fld(label,inner){return '<label class="fld"><span>'+label+'</span>'+inner+'</label>';}
 function inp(id,v,ph,type){return '<input id="'+id+'" type="'+(type||'text')+'" value="'+(v==null?'':esc(String(v)))+'" placeholder="'+(ph||'')+'"/>';}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -623,6 +835,9 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
 (async function init(){
   try{ state=await loadState(); }catch(e){ state=null; }
   if(!state){ state=freshState(); save(); }
-  state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];
+  state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];state.imageDB=state.imageDB||{};
+  // migrate users to have passwords/security questions (default password "test")
+  state.users.forEach(u=>{ if(!u.pass){ u.pass=hashPass('test'); u.mustChange=true; } if(u.secQ===undefined)u.secQ=''; if(u.secA===undefined)u.secA=''; });
+  save();
   render();
 })();
