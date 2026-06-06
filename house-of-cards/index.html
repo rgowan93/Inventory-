@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>House of Cards</title>
+<style>
+:root{
+  --gold:#F4B400; --blue:#2160B0; --blue-d:#1a4e8c; --red:#E23B2E;
+  --cream:#F3E9D6; --bg:#101117; --bg2:#171922; --bg3:#1f2230;
+  --line:#000; --muted:#9aa0b5; --ok:#34c759; --shadow:0 6px 18px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--cream); font-weight:600;
+  font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;
+  -webkit-text-size-adjust:100%;
+}
+button{font-family:inherit;font-weight:800;cursor:pointer;border:3px solid #000;border-radius:12px;
+  padding:11px 14px;background:var(--bg3);color:var(--cream);box-shadow:var(--shadow);font-size:15px}
+button:active{transform:translateY(1px)}
+button.gold{background:var(--gold);color:#1a1300}
+button.blue{background:var(--blue);color:#fff}
+button.red{background:var(--red);color:#fff}
+button.ghost{background:transparent;box-shadow:none;border-color:#333}
+button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
+input,select,textarea{font-family:inherit;font-weight:700;background:#0b0c11;color:var(--cream);
+  border:2px solid #2a2e40;border-radius:10px;padding:10px 11px;font-size:15px;width:100%}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold)}
+label.fld{display:block;margin:9px 0}
+label.fld span{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+a{color:var(--gold)}
+.app{max-width:1100px;margin:0 auto;min-height:100%;display:flex;flex-direction:column}
+header.top{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg2);
+  border-bottom:4px solid #000;position:sticky;top:0;z-index:30}
+header.top img{height:46px;width:46px;object-fit:contain;border-radius:10px;background:#000;border:2px solid var(--gold)}
+header.top .ttl{font-size:20px;font-weight:900;letter-spacing:.5px}
+header.top .ttl b{color:var(--gold)}
+header.top .who{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px}
+header.top .who select{width:auto}
+nav.tabs{display:flex;gap:6px;overflow-x:auto;padding:9px 10px;background:var(--bg2);border-bottom:3px solid #000;
+  position:sticky;top:71px;z-index:25}
+nav.tabs button{white-space:nowrap;background:transparent;box-shadow:none;border-color:#2c3043;font-size:13px;padding:8px 12px}
+nav.tabs button.active{background:var(--gold);color:#1a1300;border-color:#000}
+main{padding:16px 14px 90px;flex:1}
+h2.page{margin:2px 0 14px;font-size:24px;font-weight:900}
+h2.page small{display:block;font-size:13px;color:var(--muted);font-weight:600;margin-top:3px}
+.card{background:var(--bg2);border:3px solid #000;border-radius:16px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}
+.card h3{margin:0 0 10px;font-size:16px;color:var(--gold)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+@media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr}}
+.pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:800;border:2px solid #000}
+.pill.nm{background:#1f7a3d;color:#fff}.pill.lp{background:#3a6ea5;color:#fff}
+.pill.mp{background:#a5862f;color:#1a1300}.pill.hp{background:#a5532f;color:#fff}.pill.dmg{background:#8a2f2f;color:#fff}
+.pill.owner{background:var(--blue);color:#fff}
+.pill.avail{background:#1f7a3d;color:#fff}.pill.intake{background:#7a5a1f;color:#fff}
+.pill.sold{background:#8a2f2f;color:#fff}.pill.hold{background:#555;color:#fff}.pill.cart{background:var(--gold);color:#1a1300}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #2a2e40}
+th{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+tr:hover td{background:#1c1f2b}
+.invitem{display:flex;gap:12px;align-items:center}
+.invitem .ph{width:54px;height:74px;border-radius:8px;object-fit:cover;background:#0b0c11;border:2px solid #2a2e40;display:flex;align-items:center;justify-content:center;color:#3b3f55;font-size:10px;text-align:center}
+.money{font-variant-numeric:tabular-nums;font-weight:900}
+.big{font-size:30px;font-weight:900;color:var(--gold);font-variant-numeric:tabular-nums}
+.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:760px){.kpi{grid-template-columns:1fr 1fr}}
+.kpi .card{margin:0;text-align:center}
+.muted{color:var(--muted);font-size:13px}
+.right{margin-left:auto}
+.cart-line{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #2a2e40}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#000;border:3px solid var(--gold);
+  color:var(--cream);padding:12px 18px;border-radius:12px;z-index:100;box-shadow:var(--shadow);font-weight:800;max-width:90%}
+.empty{text-align:center;color:var(--muted);padding:40px 10px}
+.scanbar{display:flex;gap:8px;align-items:center}
+.scanbar input{font-size:18px;font-weight:900;letter-spacing:1px}
+.barcode-label{background:#fff;color:#000;border:1px solid #000;border-radius:6px;padding:6px 8px;width:230px;text-align:center;display:inline-block;margin:5px;page-break-inside:avoid}
+.barcode-label .nm{font-size:11px;font-weight:800;line-height:1.15;margin-bottom:2px;font-family:Arial}
+.barcode-label .id{font-size:10px;letter-spacing:1px;font-family:monospace}
+.banner{background:var(--blue-d);border:2px solid #000;border-radius:10px;padding:10px 12px;color:var(--cream);font-size:13px}
+hr.sep{border:none;border-top:1px solid #2a2e40;margin:12px 0}
+.tag{font-size:11px;background:#2a2e40;color:var(--cream);padding:2px 7px;border-radius:6px;font-weight:800}
+@media print{
+  header.top,nav.tabs,.noprint{display:none!important}
+  body{background:#fff;color:#000}
+  main{padding:0}
+  .card{box-shadow:none;border:1px solid #999;background:#fff;color:#000}
+  .barcode-label{border:1px dashed #000}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <img id="brandLogo" alt="logo" />
+    <div class="ttl"><b>HOUSE</b> OF CARDS</div>
+    <div class="who">
+      <span class="muted">Acting as</span>
+      <select id="userSwitch" onchange="setUser(this.value)"></select>
+    </div>
+  </header>
+  <nav class="tabs" id="tabs"></nav>
+  <main id="view"></main>
+</div>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
