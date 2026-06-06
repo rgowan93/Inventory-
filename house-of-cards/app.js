@@ -215,11 +215,14 @@ function afterRenderFocus(){ if(ui.focusId){ const f=el(ui.focusId); if(f){ f.fo
 function landingLogo(){ return (state&&state.settings&&state.settings.logo)?state.settings.logo:'logo.png'; }
 function viewLanding(){
   return '<div class="landing">'+
-    '<div class="landing-top"><button class="gold" onclick="ui.authView=\'login\';render()">Login</button>'+
+    '<div class="landing-top"><button class="ghost" onclick="uploadLogoPrompt()" title="set your logo for this device">⚙ Set logo</button>'+
+      '<span class="right"></span><button class="gold" onclick="ui.authView=\'login\';render()">Login</button>'+
       '<button class="blue" onclick="ui.authView=\'signup\';render()">Sign up</button></div>'+
     '<div class="bounce-area" id="bounceArea"><img id="bounceLogo" class="bounce-logo" src="'+landingLogo()+'" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/></div>'+
     '<div class="landing-cap"><b>HOUSE</b> OF CARDS</div>'+
   '</div>'; }
+function uploadLogoPrompt(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
+  inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ state.settings.logo=r.result; save(); toast('Logo set!'); render(); }; r.readAsDataURL(f); }; inp.click(); }
 let bounceRAF=null;
 function startBounce(){ const area=el('bounceArea'), logo=el('bounceLogo'); if(!area||!logo)return; stopBounce();
   let x=24,y=24,dx=2.4,dy=2.0;
