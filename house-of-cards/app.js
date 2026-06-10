@@ -768,17 +768,39 @@ function scanCardForPrice(){ const inp=document.createElement('input'); inp.type
 
 async function priceFromImage(dataUrl){
   if(navigator.onLine===false){ toast('You\'re offline — a price check needs internet.'); return; }
-  toast('Reading the card… (first scan downloads the reader)');
-  let text='';
-  try{ await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
-    if(window.Tesseract){ const res=await window.Tesseract.recognize(dataUrl,'eng'); text=(res&&res.data&&res.data.text)||''; }
-  }catch(e){}
-  const p=parseCardText(text);
-  if(!p.number && (!p.name || p.name.length<4)){ toast('Couldn\'t read the card — try a straight-on, well-lit photo with the number (e.g. 065/086) showing.'); return; }
-  toast('Looking up '+(p.name||('#'+p.number))+'…');
-  const card=await identifyCardFull(p.number?parseInt(p.number,10):0, p.total, p.name);
-  if(!card){ showPriceQuote({name:p.name||'',number:p.number||'',set:'',rarity:'',ungraded:0,unknown:true}, dataUrl); return; }
+  let name='',number='',total=0;
+  // Preferred: read the card with Claude vision (accurate on foil/stylized fonts).
+  const v=await visionIdentify(dataUrl);
+  if(v){ name=v.name||''; number=v.number||''; total=Number(v.setTotal)||0; }
+  else {
+    // Fallback: on-device OCR (works without the vision function configured).
+    toast('Reading the card… (first scan downloads the reader)');
+    let text='';
+    try{ await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+      if(window.Tesseract){ const res=await window.Tesseract.recognize(dataUrl,'eng'); text=(res&&res.data&&res.data.text)||''; }
+    }catch(e){}
+    const p=parseCardText(text); name=p.name||''; number=p.number||''; total=p.total||0;
+  }
+  if(!number && (!name || name.length<3)){ toast('Couldn\'t read the card — try a straight-on, well-lit photo with the number (e.g. 065/086) showing.'); return; }
+  toast('Looking up '+(name||('#'+number))+'…');
+  const card=await identifyCardFull(number?parseInt(number,10):0, total, name);
+  if(!card){ showPriceQuote({name:name||'',number:number||'',set:'',rarity:'',ungraded:0,unknown:true}, dataUrl); return; }
   showPriceQuote(card, dataUrl);
+}
+/* Read the card with Claude vision via the Supabase edge function (if configured). Returns null on any failure. */
+async function visionIdentify(dataUrl){
+  const cfg=window.HOC_CONFIG||{}; const base=(cfg.SUPABASE_URL||'').replace(/\/$/,''); const key=cfg.SUPABASE_ANON_KEY||'';
+  if(!base) return null;
+  toast('Reading the card with AI…');
+  try{
+    const r=await fetch(base+'/functions/v1/identify-card',{ method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+key,'apikey':key},
+      body:JSON.stringify({image:dataUrl}) });
+    if(!r.ok) return null;
+    const j=await r.json();
+    if(j&&!j.error&&(j.name||j.number)) return j;
+    return null;
+  }catch(e){ return null; }
 }
 
 /* resolve the real card (and its ungraded market price) from pokemontcg.io */
