@@ -772,7 +772,7 @@ async function priceFromImage(dataUrl){
   let name='',number='',total=0;
   if(geminiKey()){
     toast('Reading the card with AI…');
-    try{ const v=await geminiIdentify(dataUrl,geminiKey()); name=v.name||''; number=v.number||''; total=Number(v.setTotal)||0; }
+    try{ const v=await aiIdentify(dataUrl); name=v.name||''; number=v.number||''; total=Number(v.setTotal)||0; }
     catch(e){ toast('Card reader failed: '+((e&&e.message)||e)); return; }   // loud, not silent — no garbage fallback when a key is set
   } else {
     toast('Reading the card… (no AI key set — add one free in Profile for accuracy)');
@@ -789,13 +789,32 @@ async function priceFromImage(dataUrl){
   showPriceQuote(card, dataUrl);
 }
 function geminiKey(){ return (state.settings&&state.settings.geminiKey)||(window.HOC_CONFIG&&window.HOC_CONFIG.GEMINI_API_KEY)||''; }
-/* Google Gemini vision (free tier) — reads the card straight from the browser. THROWS a descriptive
-   error on failure so the caller can show the real reason instead of silently producing garbage. */
-async function geminiIdentify(dataUrl,key){
+/* Different keys/regions have free quota on different models — try several and remember the one that works. */
+const GEMINI_MODELS=['gemini-2.5-flash','gemini-2.0-flash','gemini-flash-latest','gemini-1.5-flash','gemini-1.5-flash-8b'];
+async function aiIdentify(dataUrl){
+  const key=geminiKey(); if(!key) throw new Error('no AI key — add a free one in Profile');
+  const saved=(state.settings&&state.settings.geminiModel)||(window.HOC_CONFIG&&window.HOC_CONFIG.GEMINI_MODEL)||'';
+  const list=[]; if(saved)list.push(saved); GEMINI_MODELS.forEach(m=>{ if(!list.includes(m))list.push(m); });
+  let lastErr=null;
+  for(const model of list){
+    try{ const o=await geminiCall(dataUrl,key,model);
+      if(state.settings && state.settings.geminiModel!==model){ state.settings.geminiModel=model; save(); }  // pin the working model
+      return o;
+    }catch(e){ lastErr=e; const msg=((e&&e.message)||'')+'';
+      if(/\b(429|404)\b|quota|limit|not\s*found|not\s*available|unsupported|model/i.test(msg)) continue;  // model-specific → try next
+      throw e;  // key/auth/other → stop
+    }
+  }
+  const lm=((lastErr&&lastErr.message)||'')+'';
+  if(/429|quota|limit/i.test(lm)) throw new Error('Your Google key has no free quota for these models right now. In Google AI Studio (aistudio.google.com) make sure the free tier is enabled, or pick a model under Profile → Card reader.');
+  throw lastErr||new Error('AI reader failed');
+}
+/* Single Google Gemini vision call. THROWS a descriptive error on failure (so callers show the real reason). */
+async function geminiCall(dataUrl,key,model){
   let media='image/jpeg', data=String(dataUrl||'');
   const m=data.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s); if(m){ media=m[1]; data=m[2]; }
   if(!data) throw new Error('no image');
-  const model=(state.settings&&state.settings.geminiModel)||(window.HOC_CONFIG&&window.HOC_CONFIG.GEMINI_MODEL)||'gemini-2.0-flash';
+  model=model||'gemini-2.0-flash';
   const url='https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key);
   const prompt='This is a photo of a trading card (usually Pokémon). Identify it and return JSON with these fields: '+
     'name = the printed card name exactly (e.g. "Mega Greninja ex"); '+
@@ -952,7 +971,7 @@ function addScanItem(photo){
 async function processScanItem(it){
   try{
     let name='',number='',total=0;
-    if(geminiKey()){ const v=await geminiIdentify(it.photo,geminiKey()); name=v.name||''; number=v.number||''; total=Number(v.setTotal)||0; }
+    if(geminiKey()){ const v=await aiIdentify(it.photo); name=v.name||''; number=v.number||''; total=Number(v.setTotal)||0; }
     else { const c=await readCardFromImage(it.photo); name=c.name||''; const parts=(c.number||'').split('/'); number=(parts[0]||'').replace(/\D/g,''); total=parseInt(parts[1]||'0',10)||0; }
     it.read={name,number,total};
     const cands=await identifyCandidates(number?parseInt(number,10):0,total,name);
