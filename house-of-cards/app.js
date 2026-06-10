@@ -784,7 +784,7 @@ async function priceFromImage(dataUrl){
   }
   if(!number && (!name || name.length<3)){ toast('Couldn\'t read the card — try a straight-on, well-lit photo with the number (e.g. 065/086) showing.'); return; }
   toast('Looking up '+(name||('#'+number))+'…');
-  const card=await identifyCardFull(number?parseInt(number,10):0, total, name);
+  const cands0=await lookupCard(name, number?parseInt(number,10):0, total); const card=cands0.length?cands0[0]:null;
   if(!card){ showPriceQuote({name:name||'',number:number||'',set:'',rarity:'',ungraded:0,unknown:true}, dataUrl); return; }
   showPriceQuote(card, dataUrl);
 }
@@ -876,6 +876,56 @@ function cardFromPtcg(pick,number){
     ungraded:Math.round((ungraded||0)*100)/100, variant,
     tcgUrl:(pick.tcgplayer&&pick.tcgplayer.url)||'', unknown:false };
 }
+/* ===== Scrydex (pro card DB + real graded prices) via the secure proxy; falls back to pokemontcg.io ===== */
+function scrydexOn(){ return !!(window.HOC_CONFIG&&window.HOC_CONFIG.SUPABASE_URL) && (!state.settings || state.settings.useScrydex!==false); }
+async function scrydexGet(path,params){
+  const cfg=window.HOC_CONFIG||{}; const base=(cfg.SUPABASE_URL||'').replace(/\/$/,''); const key=cfg.SUPABASE_ANON_KEY||'';
+  if(!base) throw new Error('no supabase url');
+  const qs=new URLSearchParams(Object.assign({path:path},params||{})).toString();
+  const r=await fetch(base+'/functions/v1/scrydex?'+qs,{headers:{'Authorization':'Bearer '+key,'apikey':key}});
+  const j=await r.json().catch(()=>null);
+  if(!r.ok) throw new Error('Scrydex '+r.status+((j&&j.error)?(' — '+j.error):''));
+  return j;
+}
+function scTotal(c){ const e=c.expansion||c.set||{}; return e.total||e.printed_total||e.printedTotal||0; }
+async function scrydexCandidates(name,number,total){
+  const q=[]; if(number)q.push('number:'+number); if(name)q.push('name:"'+String(name).replace(/"/g,'')+'"');
+  const j=await scrydexGet('cards',{q:q.join(' '),include:'prices',pageSize:30});
+  const data=(j&&(j.data||j.cards||(Array.isArray(j)?j:null)))||[];
+  if(!Array.isArray(data)||!data.length) return [];
+  const ng=name?norm(name):'';
+  data.sort((a,b)=>{ const at=total&&scTotal(a)===total?1:0, bt=total&&scTotal(b)===total?1:0; if(at!==bt)return bt-at;
+    const an=ng&&(norm(a.name||'').includes(ng)||ng.includes(norm(a.name||'')))?1:0;
+    const bn=ng&&(norm(b.name||'').includes(ng)||ng.includes(norm(b.name||'')))?1:0; return bn-an; });
+  return data.slice(0,8).map(scrydexCard);
+}
+function scrydexCard(c){
+  const e=c.expansion||c.set||{};
+  let img=c.image||c.image_url||''; const ims=c.images;
+  if(!img&&ims){ img=ims.large||ims.small||(Array.isArray(ims)?(ims[0]&&(ims[0].large||ims[0].url||ims[0])):'')||''; }
+  const pr=scrydexPrices(c);
+  return { name:c.name||'', set:e.name||'', number:(c.number||'')+(scTotal(c)?('/'+scTotal(c)):''),
+    rarity:c.rarity||'', image:typeof img==='string'?img:(img&&(img.large||img.url))||'',
+    ungraded:pr.ungraded, graded:pr.graded, tcgUrl:'', unknown:false, source:'scrydex', _raw:c };
+}
+/* Best-effort price extraction — defensive across likely shapes; refined once we see your real card JSON. */
+function scrydexPrices(c){
+  let ungraded=0; const graded={}; const num=v=>{ const n=Number(v&&typeof v==='object'?(v.market||v.value||v.price||v.mid):v); return isFinite(n)&&n>0?n:0; };
+  const p=c.prices||c.pricing||c.market||null; if(!p) return {ungraded:0,graded:{}};
+  if(Array.isArray(p)){
+    p.forEach(row=>{ const comp=(row.company||row.grader||row.type||'').toString().toUpperCase(); const g=(row.grade!=null?String(row.grade):''); const val=num(row.market||row.price||row.value||row);
+      if(!val)return; if(!comp&&!g){ if(!ungraded)ungraded=val; } else if(/RAW|UNGRADED/.test(comp)&&!g){ if(!ungraded)ungraded=val; } else { graded[(comp?comp+' ':'')+g]=val; } });
+  } else if(typeof p==='object'){
+    ['raw','ungraded','market','nm','near_mint'].forEach(k=>{ if(!ungraded&&p[k]!=null) ungraded=num(p[k]); });
+    const g=p.graded||p.grades; if(g&&typeof g==='object'){ Object.keys(g).forEach(comp=>{ const gg=g[comp]; if(gg&&typeof gg==='object'){ Object.keys(gg).forEach(gr=>{ const val=num(gg[gr]); if(val)graded[comp.toUpperCase()+' '+gr]=val; }); } else { const val=num(gg); if(val)graded[comp.toUpperCase()]=val; } }); }
+  }
+  return { ungraded:Math.round(ungraded*100)/100, graded };
+}
+/* unified lookup: Scrydex first (if on), else pokemontcg.io */
+async function lookupCard(name,number,total){
+  if(scrydexOn()){ try{ const a=await scrydexCandidates(name,number,total); if(a.length)return a; }catch(e){ console.warn('[HoC] scrydex',e); } }
+  return await identifyCandidates(number,total,name);
+}
 /* search links so the user can verify against real sold listings */
 function ebaySold(q){ return 'https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(q+' pokemon')+'&LH_Sold=1&LH_Complete=1'; }
 function priceChartingLink(q){ return 'https://www.pricecharting.com/search-products?q='+encodeURIComponent(q+' pokemon')+'&type=prices'; }
@@ -893,9 +943,11 @@ function showPriceQuote(card,dataUrl){
     body='<div class="banner" style="margin:10px 0">'+reason+' Use the links below to check real sold prices, or add it manually.</div>';
   } else {
     const offer=u*buyPct()/100;
+    const gmap=(card.graded)||{};
     const rows=GRADE_LADDER.map(([label,mult])=>{
-      const val=label==='Ungraded'?u:u*mult;
-      const est=label!=='Ungraded';
+      const real=(label==='Ungraded')?u:gmap[label];
+      const val=(real!=null)?real:(label==='Ungraded'?u:u*mult);
+      const est=(label!=='Ungraded')&&(real==null);
       return '<tr><td>'+label+(est?' <span class="muted">est.</span>':'')+'</td><td class="money" style="text-align:right">'+money(val)+'</td></tr>';
     }).join('');
     body='<table style="width:100%;margin:8px 0"><tbody>'+rows+'</tbody></table>'+
@@ -974,7 +1026,7 @@ async function processScanItem(it){
     if(geminiKey()){ const v=await aiIdentify(it.photo); name=v.name||''; number=v.number||''; total=Number(v.setTotal)||0; }
     else { const c=await readCardFromImage(it.photo); name=c.name||''; const parts=(c.number||'').split('/'); number=(parts[0]||'').replace(/\D/g,''); total=parseInt(parts[1]||'0',10)||0; }
     it.read={name,number,total};
-    const cands=await identifyCandidates(number?parseInt(number,10):0,total,name);
+    const cands=await lookupCard(name, number?parseInt(number,10):0, total);
     if(cands.length){ it.candidates=cands; it.card=cands[0]; it.status='done'; }
     else { it.card={name:name,number:number,set:'',rarity:'',ungraded:0,unknown:true}; it.status='nomatch'; }
   }catch(e){ it.status='error'; it.error=(e&&e.message)||'failed'; }
@@ -985,7 +1037,8 @@ function renderScanStrip(){ const m=el('cardScanModal'); if(!m)return;
   const rv=m.querySelector('#csReview'); if(rv)rv.textContent='Review ('+(ui.scanQueue||[]).length+')'; }
 function scanThumb(it){ const tag=it.status==='reading'?'⏳':(it.status==='done'?'✓':(it.status==='nomatch'?'?':'⚠'));
   return '<div class="csitem"><img src="'+it.photo+'"/><span class="cstag">'+tag+'</span></div>'; }
-function scanItemPrice(it){ const u=Number(it.card&&it.card.ungraded)||0; if(!u)return 0; const g=GRADE_LADDER.find(x=>x[0]===it.grade); return u*((g&&g[1])||1); }
+function scanItemPrice(it){ const c=it.card||{}; if(c.graded&&c.graded[it.grade]!=null) return c.graded[it.grade];  // real Scrydex graded price
+  const u=Number(c.ungraded)||0; if(!u)return 0; const g=GRADE_LADDER.find(x=>x[0]===it.grade); return u*((g&&g[1])||1); }  // else estimate from raw
 /* ---- Scan review screen ---- */
 function viewScanReview(){
   const q=ui.scanQueue||[];
@@ -1036,7 +1089,7 @@ async function relookupScan(i){ const it=(ui.scanQueue||[])[i]; if(!it)return;
   const nm=(val('sc_name'+i)||'').trim(); const num=(val('sc_num'+i)||'').replace(/\D/g,'');
   if(!nm && !num){ toast('Type a name or number first.'); return; }
   toast('Looking up '+(nm||('#'+num))+'…');
-  const cands=await identifyCandidates(num?parseInt(num,10):0, it.read&&it.read.total, nm);
+  const cands=await lookupCard(nm, num?parseInt(num,10):0, it.read&&it.read.total);
   if(cands.length){ it.candidates=cands; it.card=cands[0]; it.status='done'; }
   else { it.card={name:nm,number:num,set:'',rarity:'',ungraded:0,unknown:true}; it.status='nomatch'; toast('Still no match — you can add it manually.'); }
   render();
@@ -1393,6 +1446,7 @@ function viewSettings(){ const s=state.settings;
       (s.logo?'<button class="ghost" onclick="state.settings.logo=null;save();render();toast(\'Logo removed.\')">Remove logo</button>':'')+
       '<div class="muted" style="margin-top:6px">Saved on this device. To show it on every device automatically, also drop the file as <b>logo.png</b> in the app folder.</div></div>'+
     '<div class="card"><h3>Card reader (AI vision) — free</h3><label class="fld"><span>Google Gemini API key — lets the scanner read cards as well as a human (free tier)</span>'+inp('s_gemini',(s.geminiKey||''),'paste your free key from aistudio.google.com')+'</label><button class="gold" onclick="saveGeminiKey()">Save key</button>'+(s.geminiKey?' <span class="tag">✓ key saved</span>':'')+'<div class="muted" style="margin-top:6px">Get a free key at <b>aistudio.google.com/apikey</b> → "Create API key" → paste it here. Stored only on this device. Without a key, scanning falls back to basic on-device reading.</div></div>'+
+    '<div class="card"><h3>Pro pricing (Scrydex)</h3><label class="fld" style="display:flex;align-items:center;gap:8px"><input type="checkbox" style="width:auto" '+(s.useScrydex!==false?'checked':'')+' onchange="setUseScrydex(this.checked)"><span style="margin:0">Use Scrydex for identification &amp; real graded prices (falls back to free pokemontcg.io)</span></label><button class="blue" onclick="testScrydex()">Test connection</button><div class="muted" style="margin-top:6px">Keys live in your Supabase Edge Function secrets (SCRYDEX_API_KEY / SCRYDEX_TEAM_ID), not in the app. Deploy the <b>scrydex</b> function, then tap Test.</div></div>'+
     '<div class="card"><h3>Scan &amp; pricing</h3><label class="fld"><span>Cash offer % — when buying, offer this share of the ungraded market price</span>'+inp('s_buypct',(s.buyPct||70),'e.g. 70','number')+'</label><button class="gold" onclick="saveBuyPct()">Save %</button><div class="muted" style="margin-top:6px">Used by the "Scan a card → price" cash-offer line. Graded ladder values are estimates from the live ungraded market price (TCGplayer via pokemontcg.io); always confirm big cards against real sold listings.</div></div>'+
     '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
     '<div class="card"><h3>My account — '+esc(me().name)+'</h3>'+
@@ -1417,6 +1471,18 @@ function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.p
 function savePtcg(){state.settings.ptcgKey=val('s_ptcg');save();toast('Image API key saved.');}
 function saveBuyPct(){ let p=Math.round(num('s_buypct')); if(!(p>0&&p<=100))p=70; state.settings.buyPct=p; save(); toast('Cash offer set to '+p+'%.'); }
 function saveGeminiKey(){ state.settings.geminiKey=(val('s_gemini')||'').trim(); save(); toast(state.settings.geminiKey?'Card reader key saved — scanning now uses AI.':'Key cleared.'); render(); }
+function setUseScrydex(on){ state.settings.useScrydex=!!on; save(); toast(on?'Scrydex enabled.':'Scrydex off — using free pokemontcg.io.'); }
+async function testScrydex(){ toast('Testing Scrydex…');
+  try{ const j=await scrydexGet('cards',{q:'name:"Charizard"',include:'prices',pageSize:1});
+    const card=(j&&(j.data||j.cards||j))||[]; const c=Array.isArray(card)?card[0]:card;
+    if(!c){ toast('Connected, but no card returned — check the query.'); return; }
+    const w=document.createElement('div'); w.className='scanmodal';
+    w.innerHTML='<div class="card" style="max-width:480px;width:100%;max-height:90vh;overflow:auto"><h3>Scrydex connected ✓</h3><div class="muted">Sample card JSON below — screenshot or copy it to me so I can lock in the exact graded-price fields.</div>'+
+      '<textarea readonly style="width:100%;height:46vh;font:11px monospace;margin-top:8px">'+esc(JSON.stringify(c,null,2))+'</textarea>'+
+      '<div class="row" style="margin-top:10px"><button class="ghost" onclick="this.closest(\'.scanmodal\').remove()">Close</button></div></div>';
+    document.body.appendChild(w);
+  }catch(e){ toast('Scrydex test failed: '+((e&&e.message)||e)); }
+}
 function saveLogo(input){ const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ state.settings.logo=r.result; save(); toast('Logo updated.'); render(); }; r.readAsDataURL(f); }
 function socialReadySafe(){ return typeof socialReady==='function' && socialReady(); }
 function saveAvatar(input){ const f=input.files[0]; if(!f)return;
