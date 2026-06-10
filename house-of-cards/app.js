@@ -44,20 +44,64 @@ let ui = { route:'dashboard', cart:[], cartPayments:[], focusId:null, sellPanel:
 /* audit trail — everyone on a company shares access, but every change is signed by who made it */
 function logChange(area,detail){ if(!state)return; state.audit=state.audit||[]; state.audit.push({id:uid('log'),at:Date.now(),userId:state.currentUserId,area,detail}); if(state.audit.length>3000)state.audit=state.audit.slice(-3000); }
 
-/* simple local password hash (this is a trusted-team local app, not bank-grade) */
-function hashPass(s){ s=String(s==null?'':s); let h=5381; for(let i=0;i<s.length;i++){ h=((h<<5)+h+s.charCodeAt(i))>>>0; } return 'h'+h.toString(36); }
-function freshUser(id,name){ return {id,name,pass:hashPass('test'),secQ:'',secA:'',mustChange:true}; }
-
 function freshState(){
-  const reggie=freshUser('u_reggie','Reggie'), manny=freshUser('u_manny','Manny'), hailey=freshUser('u_hailey','Hailey');
   return {
-    version:3,
-    users:[reggie,manny,hailey],
-    currentUserId:reggie.id,
-    paymentAccounts:{cash:'drawer',venmo:manny.id,cashapp:reggie.id,paypal:reggie.id,square:reggie.id,zelle:'prompt'},
-    settings:{ cashFloat:200, floatOwnerId:reggie.id, prizePrice:10, prizePlaysPerShow:400, prizeSplit:[reggie.id,manny.id] },
+    version:4,
+    users:[], currentUserId:null, cloudOwnerId:null,
+    paymentAccounts:{cash:'drawer',venmo:null,cashapp:null,paypal:null,square:null,zelle:null},
+    settings:{ cashFloat:200, floatOwnerId:null, prizePrice:10, prizePlaysPerShow:400, prizeSplit:[] },
     inventory:[], shows:[], currentShowId:null, trades:[], wantlist:[], sales:[], imageDB:{}, audit:[]
   };
+}
+
+/* ---- cloud-first account: your Supabase login IS the app login ---- */
+let _entering=false;
+async function enterCloudUser(){
+  if(typeof cloudUser==='undefined'||!cloudUser||_entering) return; _entering=true;
+  try{
+    try{ await loadMyProfile(); }catch(e){}
+    // a different person used this device before → start them clean
+    if(state.cloudOwnerId && state.cloudOwnerId!==cloudUser.id){ stopImgJob(); state=freshState(); }
+    state.cloudOwnerId=cloudUser.id;
+    ensureLocalUser();
+    const pulled=await pullCloud();                                   // cloud copy wins when it exists
+    if(pulled==='empty'){ remapStateToUser(cloudUser.id); cloudPushSoon(); } // first login: adopt this device's data
+    ensureLocalUser(); remapStateToUser(cloudUser.id);
+    try{ await loadSocial(); fui.loaded=true; }catch(e){}
+    ui.authed=true; ui.route='dashboard'; state.session={userId:cloudUser.id,since:Date.now()};
+    save(); render();
+  } finally { _entering=false; }
+}
+/* the local roster is just the signed-in cloud account */
+function ensureLocalUser(){
+  const p=(typeof myProfile!=='undefined'&&myProfile)||{}; const id=cloudUser.id;
+  let u=(state.users||[]).find(x=>x.id===id)||{id};
+  state.users=[u];
+  u.name=p.name||u.name||String(cloudUser.email||'').split('@')[0]||'Me';
+  u.username=p.handle||u.username||'';
+  u.email=cloudUser.email||u.email||'';
+  if(p.avatar_url)u.avatar=p.avatar_url;
+  if(!u.subscription)u.subscription={status:'cloud',since:Date.now()};
+  state.currentUserId=id;
+  const pa=state.paymentAccounts=state.paymentAccounts||{};
+  METHODS.forEach(m=>{ if(!pa[m])pa[m]=(m==='cash'?'drawer':id); });
+  const s=state.settings; if(!s.floatOwnerId)s.floatOwnerId=id;
+  if(!s.prizeSplit||!s.prizeSplit.length)s.prizeSplit=[id];
+}
+/* point every person-reference at the cloud account (migrates pre-cloud data; idempotent) */
+function remapStateToUser(id){
+  const known=new Set(state.users.map(u=>u.id));
+  const fix=v=>(!v||v==='drawer'||v==='prompt'||known.has(v))?v:id;
+  state.inventory.forEach(it=>{ it.ownerId=fix(it.ownerId)||id; });
+  state.sales.forEach(s=>{ s.createdById=fix(s.createdById); (s.lines||[]).forEach(l=>{ if(l.ownerId)l.ownerId=fix(l.ownerId); }); (s.payments||[]).forEach(p=>{ if(p.receivedById)p.receivedById=fix(p.receivedById); }); });
+  state.shows.forEach(sh=>(sh.cashOuts||[]).forEach(c=>{ c.userId=fix(c.userId); }));
+  state.trades.forEach(t=>{ t.keeperId=fix(t.keeperId); (t.outItems||[]).forEach(o=>{ o.ownerId=fix(o.ownerId); });
+    if(t.buyout){ t.buyout.payerId=fix(t.buyout.payerId); const np={}; Object.entries(t.buyout.payees||{}).forEach(([k,v])=>{ const nk=fix(k); np[nk]=(np[nk]||0)+(Number(v)||0); }); t.buyout.payees=np; } });
+  state.wantlist.forEach(w=>{ w.userId=fix(w.userId); });
+  (state.audit||[]).forEach(a=>{ a.userId=fix(a.userId); });
+  const pa=state.paymentAccounts||{}; Object.keys(pa).forEach(m=>{ pa[m]=fix(pa[m]); });
+  state.settings.floatOwnerId=fix(state.settings.floatOwnerId);
+  state.settings.prizeSplit=[...new Set((state.settings.prizeSplit||[]).map(fix).filter(Boolean))];
 }
 /* identity key for the shared image database (so re-adding the same card reuses its image) */
 function cardKey(it){ const graded=(it.grade&&it.grade.toLowerCase()!=='ungraded')?'graded':'raw';
@@ -92,7 +136,8 @@ const loadState=()=>idb('readonly',s=>s.get('state')).catch(()=>null);
 let saveTimer=null;
 function save(){ clearTimeout(saveTimer); saveTimer=setTimeout(()=>{
   try{ idb('readwrite',s=>s.put(JSON.parse(JSON.stringify(state)),'state')).catch(e=>{ _db=null; console.warn('[HoC] save retry next change', e); }); }
-  catch(e){ console.warn('[HoC] save skipped', e); } },150); }
+  catch(e){ console.warn('[HoC] save skipped', e); } },150);
+  if(typeof cloudPushSoon==='function') cloudPushSoon(); }   // every change also syncs to the cloud (debounced)
 
 /* ============================== helpers ============================== */
 let _c=0;
@@ -257,15 +302,7 @@ function render(){
     const bn0=el('botnav'); if(bn0)bn0.style.display='none';
     afterRenderFocus(); updateImgChip(); return; }
   stopBounce();
-  // first-time setup: walk new users through setting their email + own password
-  if(me() && me().mustChange){
-    el('whoBar').innerHTML='<button class="sm ghost" onclick="logout()">Log out</button>';
-    el('tabs').innerHTML=''; document.body.classList.remove('menu-open');
-    const bn1=el('botnav'); if(bn1)bn1.style.display='none';
-    el('view').innerHTML=viewOnboard(); afterRenderFocus(); return;
-  }
   el('whoBar').innerHTML=currentAvatarTag('sm')+'<span class="muted">'+esc(me().name)+'</span>'+
-    '<select id="userSwitch" onchange="switchUserPrompt(this.value)">'+state.users.map(u=>'<option value="'+u.id+'"'+(u.id===state.currentUserId?' selected':'')+'>'+u.name+'</option>').join('')+'</select>'+
     '<button class="sm ghost" onclick="logout()">Log out</button>';
   const active=PARENT[ui.route]||ui.route;
   el('tabs').innerHTML='<div class="menu-brand"><b>HOUSE</b> OF CARDS</div>'+
@@ -339,144 +376,95 @@ function startBounce(){ const area=el('bounceArea'), logo=el('bounceLogo'); if(!
   bounceRAF=requestAnimationFrame(step); }
 function stopBounce(){ if(bounceRAF){ cancelAnimationFrame(bounceRAF); bounceRAF=null; } }
 
-/* -------- accounts: helpers + plans -------- */
+/* -------- accounts: plans -------- */
 const PLANS=[
   {id:'monthly',name:'Monthly',price:'',per:'',blurb:'Full access, billed monthly. Cancel anytime.'},
   {id:'yearly', name:'Yearly', price:'',per:'',blurb:'Best value — save vs. paying monthly.'}];
-function findUser(key){ key=String(key||'').trim().toLowerCase(); if(!key)return null;
-  return state.users.find(u=>String(u.username||'').toLowerCase()===key)
-      || state.users.find(u=>String(u.email||'').toLowerCase()===key)
-      || state.users.find(u=>String(u.name||'').toLowerCase()===key) || null; }
 
-/* -------- Sign up (account details) -------- */
+/* -------- Sign up (creates your cloud account — one login for everything) -------- */
 function viewSignup(){
-  return '<div class="login"><h2 class="page">Create your account <small>start selling with House of Cards</small></h2><div class="card">'+
+  return '<div class="login"><h2 class="page">Create your account <small>one login — works on every device</small></h2><div class="card">'+
     fld('Full name',inp('su_name','','first & last'))+
     fld('Username',inp('su_username','','letters & numbers, no spaces'))+
     fld('Email address',inp('su_email','','you@example.com','email'))+
-    fld('Password',inp('su_pass','','at least 3 characters','password'))+
+    fld('Password',inp('su_pass','','at least 6 characters','password'))+
     fld('Confirm password',inp('su_pass2','','','password'))+
-    fld('Security question (for password reset)',inp('su_q','','e.g. First pet\'s name'))+
-    fld('Security answer',inp('su_a','','your answer'))+
     '<div class="row"><button class="gold" onclick="doSignup()">Continue to subscription →</button><button class="ghost" onclick="ui.authView=\'landing\';render()">Back</button></div>'+
-    '<div class="muted" style="margin-top:8px">Already have an account? <a href="#" onclick="ui.authView=\'login\';render();return false">Log in</a>. Everyone on a company shares full access; every change is signed by who made it.</div>'+
+    '<div class="muted" style="margin-top:8px">Already have an account? <a href="#" onclick="ui.authView=\'login\';render();return false">Log in</a>. Your inventory lives in your account and syncs to any device you sign in on.</div>'+
   '</div></div>'; }
 async function doSignup(){ const name=val('su_name').trim(); if(!name){ toast('Enter your name.'); return; }
   const username=val('su_username').trim().toLowerCase(); if(!/^[a-z0-9_]{3,}$/.test(username)){ toast('Username: 3+ letters/numbers, no spaces.'); return; }
-  if(state.users.some(u=>String(u.username||'').toLowerCase()===username)){ toast('That username is taken.'); return; }
   const email=val('su_email').trim(); if(!/^\S+@\S+\.\S+$/.test(email)){ toast('Enter a valid email address.'); return; }
-  if(state.users.some(u=>String(u.email||'').toLowerCase()===email.toLowerCase())){ toast('That email already has an account.'); return; }
-  const p=val('su_pass'); if(p.length<3){ toast('Password needs at least 3 characters.'); return; }
+  const p=val('su_pass'); if(p.length<6){ toast('Password needs at least 6 characters.'); return; }
   if(p!==val('su_pass2')){ toast('Passwords don’t match.'); return; }
-  const u={id:uid('u'),name,username,email,pass:hashPass(p),secQ:val('su_q'),secA:val('su_a')?hashPass(val('su_a').toLowerCase()):'',mustChange:false,subscription:{status:'pending',since:0}};
-  state.users.push(u); ui.newUserId=u.id; ui.authView='subscribe'; save(); render();
-  // also create the matching cloud account so this login works on every device and is searchable
-  if(cloudOn()&&typeof cloudSignUp==='function'){ try{ const r=await cloudSignUp(email,p,name,username);
-    if(r&&r.needsConfirm) toast('Heads up: turn OFF “Confirm email” in Supabase so friends/cloud connect automatically.');
-    else if(r&&r.error&&!/registered|already|exists/i.test(r.error)) console.warn('[HoC] cloud signup',r.error); }catch(e){ console.warn(e); } } }
+  if(!cloudOn()||typeof cloudSignUp!=='function'){ toast('Cloud isn’t configured — add your Supabase keys in config.js.'); return; }
+  toast('Creating your account…');
+  const r=await cloudSignUp(email,p,name,username);
+  if(r.error){ toast(/registered|already|exists/i.test(r.error)?'That email already has an account — sign in instead.':r.error); return; }
+  if(r.needsConfirm){ toast('Account made — check your email to confirm it, then sign in.'); ui.authView='login'; render(); return; }
+  ui.authView='subscribe'; render(); }
 
 /* -------- Subscription portal -------- */
 function viewSubscribe(){
-  const u=state.users.find(x=>x.id===ui.newUserId)||{}; const sel=ui.planPick||'monthly';
+  const nm=(typeof myProfile!=='undefined'&&myProfile&&myProfile.name)||(typeof cloudUser!=='undefined'&&cloudUser&&cloudUser.email)||'';
+  const sel=ui.planPick||'monthly';
   const plans=PLANS.map(p=>'<button class="plan'+(p.id===sel?' on':'')+'" onclick="ui.planPick=\''+p.id+'\';render()">'+
       '<div class="plan-name">'+p.name+'</div>'+(p.price?'<div class="plan-price">'+p.price+'<span>'+p.per+'</span></div>':'<div class="plan-price plan-tbd">Pricing soon</div>')+'<div class="plan-blurb">'+p.blurb+'</div></button>').join('');
-  return '<div class="login"><h2 class="page">Choose your plan <small>welcome, '+esc(u.name||'')+'</small></h2><div class="card">'+
+  return '<div class="login"><h2 class="page">Choose your plan <small>welcome, '+esc(nm)+'</small></h2><div class="card">'+
     '<div class="plans">'+plans+'</div>'+
     '<div class="row" style="margin-top:12px"><button class="gold lg" onclick="doSubscribe()">Subscribe & enter</button>'+
       '<button class="ghost" onclick="enterAfterSignup(\'trial\')">Start free trial instead</button></div>'+
     '<div class="muted" style="margin-top:10px">Your account is created. Subscribe to unlock everything, or start a free trial and add billing later from Settings.</div>'+
   '</div></div>'; }
-function doSubscribe(){ const u=state.users.find(x=>x.id===ui.newUserId); if(!u)return;
+function doSubscribe(){
   const url=(window.HOC_CONFIG&&window.HOC_CONFIG.SUBSCRIBE_URL)||'';
-  if(url){ const plan=ui.planPick||'monthly'; const full=url+(url.includes('?')?'&':'?')+'plan='+plan+'&email='+encodeURIComponent(u.email||'');
+  if(url){ const plan=ui.planPick||'monthly'; const email=(typeof cloudUser!=='undefined'&&cloudUser&&cloudUser.email)||'';
+    const full=url+(url.includes('?')?'&':'?')+'plan='+plan+'&email='+encodeURIComponent(email);
     window.open(full,'_blank'); toast('Finish checkout in the new tab, then come back.'); enterAfterSignup('subscribing'); }
   else { toast('Billing isn’t connected yet — starting your free trial.'); enterAfterSignup('trial'); } }
-function enterAfterSignup(status){ const u=state.users.find(x=>x.id===ui.newUserId); if(!u)return;
-  u.subscription={status:status||'trial',plan:ui.planPick||'monthly',since:Date.now()};
-  state.currentUserId=u.id; ui.authed=true; ui.authView='landing'; ui.route='dashboard'; ui.newUserId=null; state.session={userId:u.id,since:Date.now()};
-  logChange('account','signed up ('+u.subscription.status+')'); save(); toast('Welcome, '+u.name+'!'); render(); }
+async function enterAfterSignup(status){
+  await enterCloudUser();
+  const u=me(); if(u)u.subscription={status:status||'trial',plan:ui.planPick||'monthly',since:Date.now()};
+  ui.planPick=null; logChange('account','signed up ('+(status||'trial')+')'); save();
+  toast('Welcome'+(u?', '+u.name:'')+'!'); render(); }
 
-/* -------- Login -------- */
+/* -------- Login (Supabase is the only login — no more local passwords) -------- */
 function viewLogin(){
   if(ui.loginMode==='forgot'){
-    const usr=ui.forgotUser?state.users.find(x=>x.id===ui.forgotUser):null;
-    if(!usr){ return '<div class="login"><h2 class="page">Reset password</h2><div class="card">'+
-        fld('Username or email',inp('lg_fkey','','your username or email'))+
-        '<div class="row"><button class="gold" onclick="doForgotFind()">Find my account</button><button class="ghost" onclick="ui.loginMode=\'login\';render()">Back</button></div>'+
-      '</div></div>'; }
-    return '<div class="login"><h2 class="page">Reset password <small>'+esc(usr.name)+'</small></h2><div class="card">'+
-      (usr.secQ?fld('Security question',('<div class="banner">'+esc(usr.secQ)+'</div>'))+fld('Your answer',inp('lg_ans','',''))+
-        fld('New password',inp('lg_new','','','password'))+
-        '<div class="row"><button class="gold" onclick="doReset()">Reset password</button><button class="ghost" onclick="ui.forgotUser=null;render()">Back</button></div>'
-        :'<div class="banner">'+esc(usr.name)+' hasn\'t set a security question, so self-reset isn\'t available. If the password was never changed, sign in with <b>test</b>.</div><div class="row" style="margin-top:10px"><button class="ghost" onclick="ui.forgotUser=null;render()">Back</button></div>')+
-      '</div></div>'; }
+    return '<div class="login"><h2 class="page">Reset password</h2><div class="card">'+
+      '<div class="banner">Enter your account email — we’ll send a reset link. Open it on this device, then choose a new password.</div>'+
+      fld('Email',inp('lg_femail','','you@example.com','email'))+
+      '<div class="row"><button class="gold" onclick="doForgotSend()">Send reset email</button><button class="ghost" onclick="ui.loginMode=\'login\';render()">Back</button></div>'+
+    '</div></div>'; }
   return '<div class="login"><h2 class="page">Sign in <small>House of Cards</small></h2><div class="card">'+
-    fld('Username or email',inp('lg_username','','your username or email'))+
+    fld('Email or username',inp('lg_username','','your email or username'))+
     fld('Password',inp('lg_pass','','','password'))+
     '<div class="row"><button class="gold" onclick="doLogin()">Sign in</button>'+
-    '<button class="ghost" onclick="ui.loginMode=\'forgot\';ui.forgotUser=null;render()">Forgot password?</button>'+
+    '<button class="ghost" onclick="ui.loginMode=\'forgot\';render()">Forgot password?</button>'+
     '<button class="ghost" onclick="ui.authView=\'signup\';render()">Sign up</button>'+
     '<button class="ghost right" onclick="ui.authView=\'landing\';render()">← Home</button></div>'+
-    '<div class="muted" style="margin-top:8px">Tip: existing team members log in with their username and the default password <b>test</b> until they change it.</div>'+
+    '<div class="muted" style="margin-top:8px">One account for everything — your inventory follows you to any device you sign in on.</div>'+
     '</div></div>';
 }
 async function doLogin(){ const key=val('lg_username'), pass=val('lg_pass');
-  const u=findUser(key);
-  if(u && u.pass===hashPass(pass)){
-    state.currentUserId=u.id; ui.authed=true; ui.route='dashboard'; state.session={userId:u.id,since:Date.now()}; save();
-    if(cloudOn()&&typeof syncCloudToAppUser==='function'){ syncCloudToAppUser(u,pass); } // auto-connect cloud in the background
-    render(); return;
-  }
-  // cloud account created on another device or on the Friends tab — recognize it here too
-  if(cloudOn()&&typeof cloudLoginByKey==='function'){
-    const r=await cloudLoginByKey(key,pass);
-    if(r&&r.ok){ const pr=r.profile||{};
-      let lu=findUser(pr.handle)||findUser(pr.email)||findUser(key);
-      if(!lu){ lu={id:uid('u'),name:pr.name||pr.handle||key,username:(pr.handle||'').toLowerCase(),email:pr.email||'',pass:hashPass(pass),secQ:'',secA:'',mustChange:false,subscription:{status:'cloud',since:Date.now()}}; state.users.push(lu); }
-      else { lu.pass=hashPass(pass); if(pr.email)lu.email=pr.email; }
-      state.currentUserId=lu.id; ui.authed=true; ui.route='dashboard'; state.session={userId:lu.id,since:Date.now()}; save(); toast('Welcome, '+lu.name+'!'); render(); return;
-    }
-    if(r&&r.error&&!u){ toast(r.error); return; }
-  }
-  toast(u?'Wrong password.':'No account with that username or email.');
+  if(!key||!pass){ toast('Enter your login and password.'); return; }
+  if(!cloudOn()||typeof cloudLoginByKey!=='function'){ toast('Cloud isn’t configured — add your Supabase keys in config.js.'); return; }
+  toast('Signing in…');
+  const r=await cloudLoginByKey(key,pass);
+  if(!r||!r.ok){ toast((r&&r.error)||'Sign-in failed.'); return; }
+  await enterCloudUser();
+  toast('Welcome, '+(me()?me().name:'')+'!');
 }
-function doForgotFind(){ const u=findUser(val('lg_fkey')); if(!u){ toast('No account found for that.'); return; } ui.forgotUser=u.id; render(); }
-function doReset(){ const u=ui.forgotUser?state.users.find(x=>x.id===ui.forgotUser):null; if(!u||!u.secQ)return;
-  if(u.secA!==hashPass(val('lg_ans').toLowerCase())){ toast('That answer doesn\'t match.'); return; }
-  const np=val('lg_new'); if(np.length<3){ toast('Pick a password of at least 3 characters.'); return; }
-  u.pass=hashPass(np); u.mustChange=false; save(); ui.loginMode='login'; ui.forgotUser=null; toast('Password reset — sign in now.'); render();
+async function doForgotSend(){ const email=val('lg_femail').trim();
+  if(!/^\S+@\S+\.\S+$/.test(email)){ toast('Enter the email on your account.'); return; }
+  if(!cloudOn()){ toast('Cloud isn’t configured.'); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email);
+  toast(error?error.message:'Reset email sent — open the link, then set your new password.');
+  ui.loginMode='login'; render();
 }
 function logout(){ ui.authed=false; ui.loginMode='login'; ui.authView='landing'; stopImgJob(); state.session=null; save();
   if(typeof cloudSignOut==='function'){ try{ cloudSignOut(); }catch(e){} }   // clear cloud session so the next login connects fresh
   render(); }
-function switchUserPrompt(id){ if(id===state.currentUserId)return; const u=state.users.find(x=>x.id===id); if(!u)return;
-  const p=prompt('Password for '+u.name+' (each person signs into their own account):'); if(p===null){ render(); return; }
-  if(u.pass!==hashPass(p)){ toast('Wrong password — staying as '+me().name+'.'); render(); return; }
-  state.currentUserId=u.id; state.session={userId:u.id,since:Date.now()}; save(); toast('Now acting as '+u.name);
-  if(cloudOn()&&typeof syncCloudToAppUser==='function'){ syncCloudToAppUser(u,p); }   // reconnect cloud as the switched-to user
-  render();
-}
-
-/* -------- First-time setup (set your email + own password → also your cloud login) -------- */
-function viewOnboard(){ const u=me();
-  return '<div class="login" style="max-width:440px"><h2 class="page">Welcome, '+esc(u.name)+'! <small>finish setting up your account</small></h2><div class="card">'+
-    '<div class="banner">Set your email and a password you’ll remember. You’ll use these to sign in here — and they automatically connect your cloud profile so friends &amp; sync just work.</div>'+
-    fld('Your email',inp('ob_email',u.email||'','you@example.com','email'))+
-    fld('Choose a password',inp('ob_pass','','at least 3 characters','password'))+
-    fld('Confirm password',inp('ob_pass2','','','password'))+
-    '<div class="row" style="margin-top:6px"><button class="gold lg" onclick="doOnboard()">Save & continue</button></div>'+
-    '<div class="muted" style="margin-top:8px">You can change these later in Settings → My account.</div>'+
-  '</div></div>'; }
-async function doOnboard(){ const u=me(); const email=val('ob_email').trim();
-  if(!/^\S+@\S+\.\S+$/.test(email)){ toast('Enter a valid email address.'); return; }
-  if(state.users.some(x=>x.id!==u.id&&String(x.email||'').toLowerCase()===email.toLowerCase())){ toast('That email is already used by another account here.'); return; }
-  const p=val('ob_pass'); if(p.length<3){ toast('Password needs at least 3 characters.'); return; }
-  if(p!==val('ob_pass2')){ toast('Passwords don’t match.'); return; }
-  u.email=email; u.pass=hashPass(p); u.mustChange=false; logChange('account','completed first-time setup'); save();
-  toast('All set — welcome aboard!');
-  if(cloudOn()&&typeof syncCloudToAppUser==='function'){ try{ await syncCloudToAppUser(u,p); }catch(e){} }
-  render();
-}
 
 /* -------- Dashboard -------- */
 function viewDashboard(){
@@ -485,6 +473,7 @@ function viewDashboard(){
   const intake=inv.filter(i=>i.status==='intake').length;
   const show=openShow();
   const totalValue=inv.filter(i=>i.status==='available').reduce((a,i)=>a+(Number(i.listPrice)||0),0);
+  const marketValue=inv.filter(i=>i.status==='available').reduce((a,i)=>a+(Number(i.suggestedPrice)||Number(i.listPrice)||0),0);
   let showCard;
   if(show){ const st=computeSettlement(show);
     showCard='<div class="card"><h3>Current show: '+esc(show.name)+'</h3><div class="kpi" style="grid-template-columns:repeat(3,1fr)">'+
@@ -493,7 +482,7 @@ function viewDashboard(){
       '<button class="blue" onclick="go(\'reports\')">Finalize / Reports</button></div></div>';
   } else { showCard='<div class="card"><h3>No show running</h3><p class="muted">Start a show to begin selling (drawer opens with the '+money(state.settings.cashFloat)+' float).</p><button class="gold" onclick="go(\'reports\')">Go to Reports to start a show</button></div>'; }
   return '<h2 class="page">Dashboard <small>'+new Date().toLocaleDateString()+' · acting as '+me().name+'</small></h2>'+
-    '<div class="kpi">'+kpi('Available',avail)+kpi('In intake',intake)+kpi('Inventory value',money(totalValue))+kpi('Shows logged',state.shows.length)+'</div>'+
+    '<div class="kpi">'+kpi('Available',avail)+kpi('In intake',intake)+kpi('List value',money(totalValue))+kpi('Market value',money(marketValue))+'</div>'+
     '<div style="height:14px"></div>'+showCard+
     '<div class="card"><h3>Quick actions</h3><div class="row">'+
     '<button onclick="go(\'add\')">＋ Add item</button><button onclick="go(\'sell\')">Sell</button>'+
@@ -545,7 +534,8 @@ function viewInventory(){
       '<button class="sm blue" onclick="searchByImage()">📷 Search by photo</button></div>'+
     '<div class="row" style="margin-top:8px"><button onclick="go(\'add\')">＋ Add item</button><button class="ghost" onclick="go(\'labels\')">Print labels</button>'+
       '<button class="blue" onclick="startImgJob()">🖼 Fetch real card images'+(stockCount?' ('+stockCount+')':'')+'</button>'+
-      '</div><div class="muted" style="margin-top:6px">Tap a card image to zoom. Image fetch runs in the background — keep working or switch tabs. Wrong picture? Tap “🚫 Wrong pic” for the next match.</div></div>'+
+      '<button class="gold" onclick="startPriceJob()">💲 Update market prices'+(priceJob.running?' ('+priceJob.done+'/'+priceJob.total+')':'')+'</button>'+
+      '</div><div class="muted" style="margin-top:6px">Tap a card image to zoom. Image fetch and market repricing run in the background — keep working. 💲 uses PriceCharting (eBay sold data); locked/graded prices only get their <i>suggested</i> price refreshed. Wrong picture? Tap “🚫 Wrong pic”.</div></div>'+
     (items.length?'<div class="card"><table><thead><tr><th>Item</th><th>Owner</th><th>Price</th><th>Barcode / actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       :'<div class="empty">Nothing here. <a onclick="go(\'add\')">Add an item</a> or <a onclick="loadSample()">load sample data</a>.</div>');
 }
@@ -638,6 +628,114 @@ async function toDataURL(url){ try{ const r=await fetch(url); if(!r.ok)return ur
 /* image fields for a brand-new item: reuse our saved DB image if we have one, else a placeholder */
 function imageForNew(data){ const e=dbEntry(data); if(e)return {photo:e.photo,stock:(e.source!=='manual'),realImage:true,imgSrc:e.srcUrl||'db'}; return {photo:stockImage(data),stock:true}; }
 
+/* ============ PriceCharting — market prices from eBay sold-listing data ============ */
+/* Calls go through the 'pricecharting' Supabase Edge Function so the API token never
+   appears in page source. The token lives in Settings (synced via your private cloud
+   state). Prices come back in pennies; for cards the price fields map to grades. */
+function pcToken(){ return (state&&state.settings&&state.settings.pcToken)||''; }
+async function pcApi(path,params){
+  if(!cloudOn()) return { error:'cloud off' };
+  params=Object.assign({},params||{}); if(pcToken())params.t=pcToken();
+  try{ const { data, error } = await sb.functions.invoke('pricecharting',{ body:{ path, params } });
+    if(error) return { error:(error.message||String(error)) };
+    return data||{};
+  }catch(e){ return { error:String(e) }; }
+}
+/* map our grade text to PriceCharting's card price fields (pennies → dollars) */
+function pcPriceFor(prod,grade){
+  const g=String(grade||'Ungraded').toLowerCase(); let field='loose-price';
+  if(g&&g!=='ungraded'){
+    if(/psa\s*10|gem\s*mint/.test(g))field='manual-only-price';
+    else if(/bgs\s*10/.test(g))field='bgs-10-price';
+    else if(/cgc\s*10/.test(g))field='condition-17-price';
+    else if(/sgc\s*10/.test(g))field='condition-18-price';
+    else if(/9\.5/.test(g))field='box-only-price';
+    else if(/\b9\b/.test(g))field='graded-price';
+    else if(/\b8\b/.test(g))field='new-price';
+    else if(/\b7\b/.test(g))field='cib-price';
+    else field='graded-price';                       // graded, grade unclear → grade-9 value as a floor
+  }
+  const cents=Number(prod&&prod[field]); return cents>0?cents/100:0;
+}
+/* find the best PriceCharting product for an item (name + collector number + set) */
+async function pcLookup(it){
+  const num=String(it.number||'').split('/')[0].trim();
+  const q=[it.name||'',num?('#'+num):'',it.set||''].join(' ').replace(/\s+/g,' ').trim();
+  if(!q) return { error:'nothing to search' };
+  const r=await pcApi('products',{ q });
+  if(r.error) return r;
+  const list=r.products||[];
+  if(!list.length) return { error:'no match' };
+  const ns=norm(it.set||''), nn=norm(num), nm=norm(it.name||'');
+  let best=list[0], score=-1;
+  list.slice(0,25).forEach(p=>{ let s=0; const pn=norm(p['product-name']||''), cn=norm(p['console-name']||'');
+    if(ns&&(cn.includes(ns)||ns.includes(cn)))s+=4;
+    if(nn&&pn.includes(nn))s+=3;
+    if(nm&&pn.includes(nm))s+=2;
+    if(s>score){score=s;best=p;} });
+  const full=await pcApi('product',{ id:best.id });   // the list view omits some grade fields
+  return (full&&full.id)?{ ok:true, prod:full }:{ ok:true, prod:best };
+}
+/* Add/Edit screen: fill the list price from the live market */
+let pcSuggest=null;
+async function pcFillPrice(){
+  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  const data=collectItem(); if(!data.name){ toast('Enter the card name first.'); return; }
+  toast('Looking up market price…');
+  const r=await pcLookup(data);
+  if(!r.ok){ toast(r.error==='no match'?'No PriceCharting match — check the name/number.':('Lookup failed: '+r.error)); return; }
+  const px=pcPriceFor(r.prod,data.grade);
+  if(!(px>0)){ toast('Matched “'+(r.prod['product-name']||'')+'” but it has no price for that grade yet.'); return; }
+  pcSuggest=px; const f=el('f_price'); if(f)f.value=px.toFixed(2);
+  toast('Market '+money(px)+' — '+(r.prod['product-name']||'')+' ['+(r.prod['console-name']||'')+']');
+}
+/* bulk reprice: refresh every in-stock/intake item from the market (background job) */
+let priceJob={running:false,done:0,total:0,found:0,stop:false};
+function startPriceJob(){
+  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); go('settings'); return; }
+  if(priceJob.running){ toast('Reprice already running.'); return; }
+  if(navigator.onLine===false){ toast('You look offline — connect to update prices.'); return; }
+  const items=state.inventory.filter(i=>i.status==='available'||i.status==='intake');
+  if(!items.length){ toast('Nothing to reprice.'); return; }
+  priceJob={running:true,done:0,total:items.length,found:0,stop:false};
+  toast('Updating market prices for '+items.length+' item(s) in the background…');
+  runPriceJob(items);
+}
+async function runPriceJob(items){
+  for(const it of items){
+    if(priceJob.stop)break;
+    try{ const r=await pcLookup(it);
+      if(r.ok){ const px=pcPriceFor(r.prod,it.grade);
+        if(px>0){ it.suggestedPrice=px; it.pcId=r.prod.id; if(!it.priceOverride)it.listPrice=px; priceJob.found++; } }
+    }catch(e){}
+    priceJob.done++; if(priceJob.done%5===0)save();
+    await sleep(220);   // stay friendly to the API
+  }
+  priceJob.running=false; save();
+  toast('Market prices updated — '+priceJob.found+' of '+priceJob.total+' matched. Locked/graded prices were left alone (suggested price still refreshed).');
+  if(ui.authed&&ui.route==='inventory')render();
+}
+function savePcToken(){ state.settings.pcToken=val('s_pctoken').trim(); save(); toast(state.settings.pcToken?'PriceCharting connected.':'Token cleared.'); }
+/* trades: value the incoming card at live market */
+async function pcFillTradeMarket(){
+  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  const name=val('in_name'); if(!name){ toast('Enter the card name first.'); return; }
+  toast('Looking up market…');
+  const r=await pcLookup({name,set:val('in_set'),number:val('in_number')});
+  if(!r.ok){ toast(r.error==='no match'?'No match found.':('Lookup failed: '+r.error)); return; }
+  const px=pcPriceFor(r.prod,'Ungraded'); const f=el('in_market'); if(f&&px>0)f.value=px.toFixed(2);
+  toast(px>0?('Market '+money(px)+' — '+(r.prod['product-name']||'')):'Matched, but no ungraded price yet.');
+}
+/* wish list: what's it going for right now? */
+async function pcWantPrice(id){ const w=state.wantlist.find(x=>x.id===id); if(!w)return;
+  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  toast('Checking the market…');
+  const r=await pcLookup({name:w.text,set:w.set,number:w.number});
+  if(!r.ok){ toast(r.error==='no match'?'No match found.':('Lookup failed: '+r.error)); return; }
+  const px=pcPriceFor(r.prod,'Ungraded');
+  toast((r.prod['product-name']||w.text)+': market '+money(px)+(w.maxPrice?' · your max '+money(w.maxPrice)+(px>0&&px<=w.maxPrice?' ✅ under budget!':''):''));
+}
+
 /* -------- Add / Edit item (intake) -------- */
 let editingId=null, pendingPhoto=null;
 function viewAdd(){
@@ -648,7 +746,8 @@ function viewAdd(){
   return '<h2 class="page">'+(it?'Edit item':'Add item')+' <small>Photo only required if condition is NOT Near Mint · barcode auto-created</small></h2>'+
     '<div class="card"><div class="row noprint" style="margin-bottom:10px"><button class="blue" onclick="scanOnAdd()">📷 Scan barcode / UPC</button>'+
       '<button class="blue" onclick="scanCardFront()">🃏 Scan card front (auto-read)</button>'+
-      '<span class="muted">barcode/UPC opens an existing label or fills the UPC; card-front reads the name/number for you to review</span></div>'+
+      '<button class="gold" onclick="pcFillPrice()">💲 Market price</button>'+
+      '<span class="muted">barcode/UPC opens an existing label or fills the UPC; card-front reads the name/number; 💲 fills the list price from live eBay sold data</span></div>'+
     '<div class="grid2">'+
       fld('Category',sel('f_cat',CATEGORIES,g('category','Pokemon')))+
       fld('Set',inp('f_set',g('set',''),'e.g. Surging Sparks'))+
@@ -683,6 +782,7 @@ function collectItem(){ return {category:val('f_cat'),set:val('f_set'),name:val(
 function needsPhoto(cond){ return cond && cond!=='NM'; }
 function saveItem(makeAvailable){
   const data=collectItem(); if(!data.name){toast('Card name is required');return;}
+  if(pcSuggest){ data.suggestedPrice=pcSuggest; pcSuggest=null; }   // remember the market price we looked up
   if(data.grade&&data.grade.toLowerCase()!=='ungraded')data.priceOverride=true;
   if(editingId){ const it=state.inventory.find(i=>i.id===editingId); Object.assign(it,data); it.needsReview=false;
     if(pendingPhoto){ it.photo=pendingPhoto; it.stock=false; it.realImage=true; it.imgSrc='manual'; dbSave(it,pendingPhoto,'manual'); }
@@ -697,7 +797,14 @@ function saveItem(makeAvailable){
   if(makeAvailable){ toast('Added & ready'+(fromDB?' (reused saved image)':'')+'. Printing label…'); printLabels([item.id]); } else toast('Saved to intake'+(fromDB?' (reused saved image)':'')+'.');
   go('inventory');
 }
-function scanOnAdd(){ openScanner(code=>{ code=(code||'').trim(); if(!code)return; const it=state.inventory.find(i=>i.barcode.toUpperCase()===code.toUpperCase()); if(it){ toast('Found existing item — opening to edit.'); editItem(it.id); } else { const f=el('f_upc'); if(f)f.value=code; toast('Scanned '+code+' → added to UPC field.'); } }); }
+function scanOnAdd(){ openScanner(code=>{ code=(code||'').trim(); if(!code)return; const it=state.inventory.find(i=>i.barcode.toUpperCase()===code.toUpperCase()); if(it){ toast('Found existing item — opening to edit.'); editItem(it.id); return; }
+  const f=el('f_upc'); if(f)f.value=code; toast('Scanned '+code+' → added to UPC field.');
+  // a retail UPC + PriceCharting = instant product ID and market price (great for sealed)
+  if(/^\d{8,14}$/.test(code)&&pcToken()){ toast('Looking up that UPC…'); pcApi('product',{upc:code}).then(p=>{ if(!p||!p.id)return;
+    const fn=el('f_name'); if(fn&&!fn.value)fn.value=p['product-name']||'';
+    const fs=el('f_set'); if(fs&&!fs.value)fs.value=p['console-name']||'';
+    const px=pcPriceFor(p,'Ungraded'); const fp=el('f_price'); if(fp&&!fp.value&&px>0){ fp.value=px.toFixed(2); pcSuggest=px; }
+    toast('Found: '+(p['product-name']||'product')+(px>0?' · market '+money(px):'')); }); } }); }
 
 /* -------- Scan card FRONT → OCR (free, on-device) → Review tab -------- */
 function scanCardFront(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
@@ -779,8 +886,8 @@ function pixelate(ctx,x,y,w,h){ x=Math.round(x);y=Math.round(y);w=Math.round(w);
   for(let yy=y; yy<y+h; yy+=block){ for(let xx=x; xx<x+w; xx+=block){ try{ const d=ctx.getImageData(xx,yy,1,1).data; ctx.fillStyle='rgb('+d[0]+','+d[1]+','+d[2]+')'; ctx.fillRect(xx,yy,Math.min(block,x+w-xx),Math.min(block,y+h-yy)); }catch(e){} } }
   ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(x,y,w,h);
 }
-function editItem(id){editingId=id;pendingPhoto=null;go('add');}
-function cancelEdit(){editingId=null;pendingPhoto=null;go('inventory');}
+function editItem(id){editingId=id;pendingPhoto=null;pcSuggest=null;go('add');}
+function cancelEdit(){editingId=null;pendingPhoto=null;pcSuggest=null;go('inventory');}
 function deleteItem(id){ const it=state.inventory.find(i=>i.id===id); const nm=it?(it.name||'this item'):'this item'; if(!confirm('Delete "'+nm+'" permanently? This cannot be undone.'))return; state.inventory=state.inventory.filter(i=>i.id!==id);logChange('inventory','deleted "'+nm+'"');save();toast('Deleted.');editingId=null;go('inventory'); }
 function finishIntake(id){ const it=state.inventory.find(i=>i.id===id); if(needsPhoto(it.condition)&&(!it.photo||it.stock)){editItem(id);toast('Condition '+it.condition+' needs a real photo before selling.');return;} it.status='available';it.needsReview=false;logChange('inventory','finalized "'+(it.name||'item')+'" to in-stock');save();toast('Item is now available.');render(); }
 
@@ -868,7 +975,7 @@ function viewSell(){
   const lines=ui.cart.map((c,idx)=>cartLineHTML(c,idx)).join('');
   let panel='';
   if(ui.sellPanel==='manual') panel='<div class="card"><h3>Manual item</h3><div class="grid2">'+fld('Description',inp('m_desc','','penny sleeves, bulk lot…'))+fld('Price',inp('m_price','','','number'))+fld('Owner (whose sale)',userSel('m_owner'))+'</div><div class="row"><button class="gold" onclick="addManualLine()">Add to cart</button><button class="ghost" onclick="ui.sellPanel=null;render()">Cancel</button></div></div>';
-  if(ui.sellPanel==='prize') panel='<div class="card"><h3>Prize plays</h3><div class="grid2">'+fld('How many plays',inp('p_qty','1','','number'))+fld('Total price',inp('p_price',state.settings.prizePrice,'','number'))+'</div><div class="muted">Default '+money(state.settings.prizePrice)+' each · splits 50/50 Reggie/Manny.</div><div class="row"><button class="gold" onclick="addPrizeLine()">Add to cart</button><button class="ghost" onclick="ui.sellPanel=null;render()">Cancel</button></div></div>';
+  if(ui.sellPanel==='prize') panel='<div class="card"><h3>Prize plays</h3><div class="grid2">'+fld('How many plays',inp('p_qty','1','','number'))+fld('Total price',inp('p_price',state.settings.prizePrice,'','number'))+'</div><div class="muted">Default '+money(state.settings.prizePrice)+' each.</div><div class="row"><button class="gold" onclick="addPrizeLine()">Add to cart</button><button class="ghost" onclick="ui.sellPanel=null;render()">Cancel</button></div></div>';
   return '<h2 class="page">Sell <small>'+esc(show.name)+' · drawer float '+money(show.cashFloat)+'</small></h2>'+
     '<div class="card"><h3>Add to cart</h3><div class="scanbar"><input id="scanInput" placeholder="Scan or type barcode, then Enter" onkeydown="if(event.key===\'Enter\'){addBarcodeToCart(this.value);this.value=\'\';}"/>'+
       '<button class="gold" onclick="var i=el(\'scanInput\');addBarcodeToCart(i.value);i.value=\'\'">Add</button>'+
@@ -952,7 +1059,7 @@ function viewNewTrade(){ const d=ui.tradeDraft; if(!d){go('trades');return '';}
       fld('Language','<select id="in_lang">'+LANGUAGES.map(l=>'<option'+(l==='EN'?' selected':'')+'>'+l+'</option>').join('')+'</select>')+
       fld('Trade value given (our cost)',inp('in_tradeval','','what we credited','number'))+
       fld('Market price',inp('in_market','','current market','number'))+
-    '</div><div class="row"><button class="blue" onclick="tradeAddIn()">＋ Add this card</button></div>'+
+    '</div><div class="row"><button class="blue" onclick="tradeAddIn()">＋ Add this card</button><button class="ghost" onclick="pcFillTradeMarket()">💲 Look up market</button></div>'+
       '<hr class="sep"><div class="muted">Receiving ('+d.in.length+'):</div>'+(inRows||'<div class="muted">none yet</div>')+'</div>'+
     buyoutBlock+
     '<div class="card"><div class="muted">Incoming cards become inventory (owner = '+(owners.length>1?'the buyer':userName(owners[0]||state.currentUserId))+') with your cost set to the trade value given — so we always know what we have in it.</div>'+
@@ -986,6 +1093,7 @@ function viewWishlist(){ let list=state.wantlist.slice().reverse();
   if(wishQ)list=list.filter(w=>smatch((w.text+' '+(w.set||'')+' '+(w.number||'')+' '+userName(w.userId)),wishQ));
   const rows=list.map(w=>'<div class="cart-line"><div style="flex:1"><b>'+esc(w.text)+'</b>'+(w.qty&&w.qty>1?' <span class="tag">×'+w.qty+'</span>':'')+
       '<div class="muted">'+(w.category?esc(w.category)+' · ':'')+(w.set?esc(w.set)+' ':'')+(w.number?'#'+esc(w.number)+' ':'')+'· wanted by '+userName(w.userId)+(w.maxPrice?' · up to '+money(w.maxPrice):'')+(w.note?' · '+esc(w.note):'')+'</div></div>'+
+      '<button class="sm" title="check market price" onclick="pcWantPrice(\''+w.id+'\')">💲</button>'+
       '<button class="sm red" onclick="delWant(\''+w.id+'\')">✕</button></div>').join('');
   return '<h2 class="page">Wish list <small>when anyone scans/sells a match, the wanter gets pinged</small></h2>'+
     '<div class="card"><h3>Add a card you\'re hunting</h3><div class="grid3">'+
@@ -1084,29 +1192,25 @@ function viewSettings(){ const s=state.settings;
   const acctSel=(m)=>{const cur=state.paymentAccounts[m];const opts=[['drawer','Cash drawer (no owner)'],['prompt','Ask per sale']].concat(state.users.map(u=>[u.id,u.name]));return '<select onchange="setAcct(\''+m+'\',this.value)">'+opts.map(([v,l])=>'<option value="'+v+'"'+(cur===v?' selected':'')+'>'+l+'</option>').join('')+'</select>';};
   const acctRows=METHODS.map(m=>'<tr><td>'+METHOD_LABEL[m]+'</td><td>'+acctSel(m)+'</td></tr>').join('');
   return '<h2 class="page">Settings</h2>'+
-    '<div class="card"><h3>Payment accounts — who receives each method</h3><table><tbody>'+acctRows+'</tbody></table><div class="muted" style="margin-top:8px">Default: Cash→drawer · Venmo→Manny · Cash App/PayPal/Square→Reggie · Zelle→ask per sale.</div></div>'+
-    '<div class="card"><h3>Show defaults</h3><div class="grid3">'+fld('Cash float',inp('s_float',s.cashFloat,'','number'))+fld('Prize price',inp('s_prize',s.prizePrice,'','number'))+fld('Prize plays/show',inp('s_plays',s.prizePlaysPerShow,'','number'))+'</div><button class="gold" onclick="saveSettings()">Save defaults</button><div class="muted" style="margin-top:6px">Prize machine splits 50/50 Reggie ↔ Manny.</div></div>'+
+    '<div class="card"><h3>Payment accounts — who receives each method</h3><table><tbody>'+acctRows+'</tbody></table><div class="muted" style="margin-top:8px">Cash goes to the drawer by default; everything else lands in your accounts.</div></div>'+
+    '<div class="card"><h3>Show defaults</h3><div class="grid3">'+fld('Cash float',inp('s_float',s.cashFloat,'','number'))+fld('Prize price',inp('s_prize',s.prizePrice,'','number'))+fld('Prize plays/show',inp('s_plays',s.prizePlaysPerShow,'','number'))+'</div><button class="gold" onclick="saveSettings()">Save defaults</button></div>'+
     '<div class="card"><h3>Branding / logo</h3>'+(s.logo?'<img src="'+s.logo+'" style="height:60px;border-radius:10px;border:2px solid var(--gold);background:#000;margin-bottom:8px"/><br>':'')+
       '<label class="fld"><span>Upload your House of Cards logo (shows top-left)</span><input type="file" accept="image/*" onchange="saveLogo(this)"/></label>'+
       (s.logo?'<button class="ghost" onclick="state.settings.logo=null;save();render();toast(\'Logo removed.\')">Remove logo</button>':'')+
       '<div class="muted" style="margin-top:6px">Saved on this device. To show it on every device automatically, also drop the file as <b>logo.png</b> in the app folder.</div></div>'+
+    '<div class="card"><h3>Market prices (PriceCharting)</h3><label class="fld"><span>PriceCharting API token (pricecharting.com → your account → API)</span>'+inp('s_pctoken',s.pcToken||'','paste your 40-character token')+'</label><button class="gold" onclick="savePcToken()">Save token</button><div class="muted" style="margin-top:6px">Powers “💲 Market price” on Add/Edit, bulk “Update market prices” on Inventory, trade valuations and wish-list checks — all from PriceCharting’s eBay sold-listing data, with graded values (PSA/BGS/CGC/SGC). Your token is stored in your private cloud settings and sent through your own server function — never in the page source.</div></div>'+
     '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
     '<div class="card"><h3>My account — '+esc(me().name)+'</h3>'+
-      '<div class="muted" style="margin-bottom:8px">Each person signs into their own account. You can only change your own password.</div>'+
+      '<div class="muted" style="margin-bottom:8px">This is your cloud account — the same login works on every device, and your inventory follows you.</div>'+
       '<div class="row" style="align-items:center;gap:14px;margin-bottom:6px">'+currentAvatarTag('lg')+
-        '<label class="fld" style="flex:1;min-width:180px;margin:0"><span>Profile picture</span><input type="file" accept="image/*" onchange="saveAvatar(this)"/></label>'+
-        ((!socialReadySafe()&&me().avatar)?'<button class="ghost sm" onclick="removeAvatar()">Remove</button>':'')+'</div>'+
-      '<div class="muted" style="margin-bottom:10px">'+(socialReadySafe()?'Synced to all your devices via your cloud profile (manage it on the Friends tab).':'Saved on this device. Connect on the <b>Friends</b> tab to sync it across devices.')+'</div><hr class="sep">'+
-      '<div class="row" style="align-items:flex-end"><label class="fld" style="flex:1;min-width:200px;margin:0"><span>Email (used to sign in &amp; for cloud)</span>'+inp('ac_email',me().email||'','you@example.com','email')+'</label><button class="blue" onclick="saveEmail()">Save email</button></div>'+
-      '<div class="muted" style="margin:6px 0 10px">After changing your email, sign in with it + your password and your cloud profile links automatically.</div><hr class="sep">'+
-      '<div class="grid2">'+fld('Current password',inp('ac_cur','','','password'))+fld('New password',inp('ac_new','','at least 3 characters','password'))+'</div>'+
-      '<button class="gold" onclick="changePassword()">Update my password</button>'+
-      '<hr class="sep"><div class="muted" style="margin-bottom:6px">Security question (lets you reset your own password if you forget it):</div>'+
-      '<div class="grid2">'+fld('Question',inp('ac_q',me().secQ||'','e.g. First pet\'s name'))+fld('Answer',inp('ac_a','',me().secA?'(saved — type to change)':'your answer'))+'</div>'+
-      '<button class="blue" onclick="saveSecurityQ()">Save security question</button></div>'+
-    '<div class="card"><h3>Team</h3>'+state.users.map(u=>'• '+esc(u.name)+(u.id===state.currentUserId?' (you)':'')+(u.pass===hashPass('test')?' <span class="muted">— still using default password</span>':'')).join('<br>')+'<div class="muted" style="margin-top:6px">Everyone\'s password starts as <b>test</b> until they change it.</div></div>'+
-    '<div class="card"><h3>Beta — reset data</h3><div class="banner">Clear everything you entered while testing so you start clean for your first real show.</div><div class="row" style="margin-top:10px"><button class="red" onclick="resetTestData()">Clear test data (keep team & settings)</button><button class="red ghost" onclick="factoryReset()">Full factory reset</button><button class="ghost right" onclick="loadSample()">Load sample data</button></div></div>'+
-    '<div class="card"><h3>About</h3><div class="muted">Local beta — data stored only in this browser, works offline. Camera scanning works on the hosted (https) version in Safari and Chrome (the first scan downloads the scanner, so it needs internet once). Card-front auto-read and online image fetching need internet; reused/saved images and everything else work offline.</div></div>';
+        '<label class="fld" style="flex:1;min-width:180px;margin:0"><span>Profile picture</span><input type="file" accept="image/*" onchange="saveAvatar(this)"/></label></div>'+
+      '<div class="muted" style="margin-bottom:10px">'+(socialReadySafe()?'Synced to all your devices via your cloud profile (manage it on the Friends tab).':'Connect on the <b>Friends</b> tab to sync it across devices.')+'</div><hr class="sep">'+
+      '<div class="row" style="align-items:flex-end"><label class="fld" style="flex:1;min-width:200px;margin:0"><span>Email (your sign-in)</span>'+inp('ac_email',me().email||'','you@example.com','email')+'</label><button class="blue" onclick="saveEmail()">Change email</button></div>'+
+      '<div class="muted" style="margin:6px 0 10px">Changing your email sends a confirmation link before it takes effect.</div><hr class="sep">'+
+      fld('New password',inp('ac_new','','at least 6 characters','password'))+
+      '<button class="gold" onclick="changePassword()">Update my password</button></div>'+
+    '<div class="card"><h3>Beta — reset data</h3><div class="banner">Clear everything you entered while testing so you start clean for your first real show.</div><div class="row" style="margin-top:10px"><button class="red" onclick="resetTestData()">Clear test data (keep settings)</button><button class="red ghost" onclick="factoryReset()">Full factory reset</button><button class="ghost right" onclick="loadSample()">Load sample data</button></div></div>'+
+    '<div class="card"><h3>About</h3><div class="muted">Cloud beta — your account, inventory and sales live in your House of Cards cloud account and sync to any device you sign in on. A local copy is kept on this device so the app still opens offline; changes push to the cloud when you reconnect. Camera scanning works on the hosted (https) version in Safari and Chrome.</div></div>';
 }
 function setAcct(m,v){state.paymentAccounts[m]=v;logChange('settings','set '+METHOD_LABEL[m]+' account');save();toast('Updated.');}
 function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.prizePrice=num('s_prize');state.settings.prizePlaysPerShow=num('s_plays');logChange('settings','updated show defaults');save();toast('Saved.');}
@@ -1116,24 +1220,30 @@ function socialReadySafe(){ return typeof socialReady==='function' && socialRead
 function saveAvatar(input){ const f=input.files[0]; if(!f)return;
   if(socialReadySafe()){ toast('Uploading photo…'); uploadAvatar(f).then(r=>{ if(r.error)toast('Cloud upload failed: '+r.error); else toast('Profile picture updated & synced.'); render(); }); return; }
   const r=new FileReader(); r.onload=()=>{ me().avatar=r.result; logChange('account','updated profile picture'); save(); toast('Profile picture updated.'); render(); }; r.readAsDataURL(f); }
-function removeAvatar(){ me().avatar=null; save(); toast('Profile picture removed.'); render(); }
-function changePassword(){ const u=me(); if(u.pass!==hashPass(val('ac_cur'))){ toast('Current password is wrong.'); return; } const np=val('ac_new'); if(np.length<3){ toast('New password needs at least 3 characters.'); return; } u.pass=hashPass(np); u.mustChange=false; logChange('account','changed own password'); save(); toast('Password updated.'); render(); }
-function saveEmail(){ const u=me(); const e=val('ac_email').trim(); if(!/^\S+@\S+\.\S+$/.test(e)){ toast('Enter a valid email address.'); return; }
-  if(state.users.some(x=>x.id!==u.id&&String(x.email||'').toLowerCase()===e.toLowerCase())){ toast('That email is already used by another account here.'); return; }
-  u.email=e; logChange('account','updated email'); save(); toast('Email saved. Sign in with it + your password to link your cloud login.'); render(); }
-function saveSecurityQ(){ const u=me(); const q=val('ac_q'); const a=val('ac_a'); if(!q){ toast('Enter a question.'); return; } u.secQ=q; if(a)u.secA=hashPass(a.toLowerCase()); save(); toast('Security question saved.'); render(); }
-function resetTestData(){ if(!confirm('Clear all inventory, sales, shows, trades and wish list? Team & settings stay.'))return; state.inventory=[];state.sales=[];state.shows=[];state.trades=[];state.wantlist=[];state.currentShowId=null;ui.cart=[];ui.cartPayments=[];save();toast('Test data cleared.');go('dashboard'); }
-function factoryReset(){ if(!confirm('FULL reset to factory defaults? Cannot be undone.'))return; stopImgJob(); state=freshState();ui={route:'dashboard',cart:[],cartPayments:[],focusId:null,sellPanel:null,showPanel:null,tradeDraft:null,inForm:{},authed:false,loginMode:'login'};save();toast('Factory reset done — sign in again.');render(); }
+async function changePassword(){ const np=val('ac_new'); if(np.length<6){ toast('New password needs at least 6 characters.'); return; }
+  if(!socialReadySafe()){ toast('You’re offline — try again when connected.'); return; }
+  const { error } = await sb.auth.updateUser({ password:np });
+  if(error){ toast(error.message); return; }
+  logChange('account','changed password'); save(); toast('Password updated.'); render(); }
+async function saveEmail(){ const e=val('ac_email').trim(); if(!/^\S+@\S+\.\S+$/.test(e)){ toast('Enter a valid email address.'); return; }
+  if(!socialReadySafe()){ toast('You’re offline — try again when connected.'); return; }
+  const { error } = await sb.auth.updateUser({ email:e });
+  if(error){ toast(error.message); return; }
+  logChange('account','requested email change'); save(); toast('Check your inbox — the change applies once you confirm it.'); render(); }
+function resetTestData(){ if(!confirm('Clear all inventory, sales, shows, trades and wish list? Your account & settings stay.'))return; state.inventory=[];state.sales=[];state.shows=[];state.trades=[];state.wantlist=[];state.currentShowId=null;ui.cart=[];ui.cartPayments=[];save();toast('Test data cleared.');go('dashboard'); }
+function factoryReset(){ if(!confirm('FULL reset of this device? Your cloud account and its data stay — sign back in to restore them.'))return; stopImgJob();
+  if(typeof cloudSignOut==='function'){ try{ cloudSignOut(); }catch(e){} }
+  state=freshState();ui={route:'dashboard',cart:[],cartPayments:[],focusId:null,sellPanel:null,showPanel:null,tradeDraft:null,inForm:{},authed:false,loginMode:'login',authView:'landing',menuOpen:false};save();toast('Reset done — sign in again.');render(); }
 
 /* -------- sample data -------- */
 function loadSample(){ if(state.inventory.length&&!confirm('Add sample items on top of existing data?'))return;
-  const samp=[['Pokemon','Surging Sparks','Pikachu ex','238/191','SIR','Holofoil','EN','Ungraded','NM','u_reggie',180,329],
-    ['Pokemon','Prismatic Evolutions','Umbreon ex','161/131','SIR','Holofoil','EN','Ungraded','NM','u_manny',900,1450],
-    ['Pokemon','151','Charizard ex','199/165','SIR','Holofoil','EN','PSA 10','NM','u_reggie',400,720],
-    ['Pokemon','Base Set','Blastoise','2/102','Holo','Holofoil','EN','Ungraded','LP','u_hailey',120,210],
-    ['Pokemon','Paldea Evolved','Iono','254/193','SIR','Holofoil','EN','Ungraded','NM','u_manny',55,98]];
-  samp.forEach(r=>{ const data={category:r[0],set:r[1],name:r[2],number:r[3],rarity:r[4],variance:r[5],language:r[6],grade:r[7],condition:r[8],ownerId:r[9],costBasis:r[10],listPrice:r[11]};
-    state.inventory.push(Object.assign({id:uid('item'),barcode:genBarcodeId(),suggestedPrice:r[11],priceOverride:r[7]!=='Ungraded',photo:stockImage(data),stock:true,status:'available',dateAdded:Date.now()},data)); });
+  const samp=[['Pokemon','Surging Sparks','Pikachu ex','238/191','SIR','Holofoil','EN','Ungraded','NM',180,329],
+    ['Pokemon','Prismatic Evolutions','Umbreon ex','161/131','SIR','Holofoil','EN','Ungraded','NM',900,1450],
+    ['Pokemon','151','Charizard ex','199/165','SIR','Holofoil','EN','PSA 10','NM',400,720],
+    ['Pokemon','Base Set','Blastoise','2/102','Holo','Holofoil','EN','Ungraded','LP',120,210],
+    ['Pokemon','Paldea Evolved','Iono','254/193','SIR','Holofoil','EN','Ungraded','NM',55,98]];
+  samp.forEach(r=>{ const data={category:r[0],set:r[1],name:r[2],number:r[3],rarity:r[4],variance:r[5],language:r[6],grade:r[7],condition:r[8],ownerId:state.currentUserId,costBasis:r[9],listPrice:r[10]};
+    state.inventory.push(Object.assign({id:uid('item'),barcode:genBarcodeId(),suggestedPrice:r[10],priceOverride:r[7]!=='Ungraded',photo:stockImage(data),stock:true,status:'available',dateAdded:Date.now()},data)); });
   save();toast('Sample items added.');go('inventory');
 }
 
@@ -1149,18 +1259,11 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
   initCloud();
   try{ state=await loadState(); }catch(e){ state=null; }
   if(!state){ state=freshState(); save(); }
-  state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];state.imageDB=state.imageDB||{};state.audit=state.audit||[];
-  // migrate users to have passwords/security questions (default password "test"), usernames + email
-  state.users.forEach(u=>{ if(!u.pass){ u.pass=hashPass('test'); u.mustChange=true; } if(u.secQ===undefined)u.secQ=''; if(u.secA===undefined)u.secA='';
-    if(!u.username)u.username=(u.name||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'')||('user'+Math.floor(Math.random()*9000+1000));
-    if(u.email===undefined)u.email=''; if(u.subscription===undefined)u.subscription={status:'owner',since:0}; });
+  state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];state.imageDB=state.imageDB||{};state.audit=state.audit||[];state.users=state.users||[];
+  state.version=Math.max(state.version||0,4);   // v4 = cloud-first auth: your cloud account is the only login
   if(state.settings.menuOpen===undefined)state.settings.menuOpen=(window.innerWidth>=760);
   ui.menuOpen=state.settings.menuOpen;
-  // stay logged in across refreshes: restore the saved session
-  if(state.session && state.session.userId && state.users.some(u=>u.id===state.session.userId)){
-    state.currentUserId=state.session.userId; ui.authed=true; ui.route='dashboard';
-  }
   save();
-  render();
+  render();   // landing — cloudInitSession below signs you back in if a session is saved
   if(typeof cloudInitSession==='function'){ try{ await cloudInitSession(); }catch(e){ console.warn(e); } }
 })();

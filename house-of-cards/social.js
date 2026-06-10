@@ -18,9 +18,16 @@ function KM_PER_MI(){ return 1.609344; }
 async function cloudInitSession(){
   if(!cloudOn()) return;
   try{
+    sb.auth.onAuthStateChange((ev,session)=>{ cloudUser=session?session.user:null; if(!cloudUser){myProfile=null;fui.loaded=false;}
+      // arriving via a password-reset email link: let them set the new password right here
+      if(ev==='PASSWORD_RECOVERY'){ const np=prompt('Choose a new password (6+ characters):');
+        if(np&&np.length>=6){ sb.auth.updateUser({ password:np }).then(({error})=>{
+          toast(error?error.message:'Password updated — welcome back.');
+          if(!error&&typeof enterCloudUser==='function')enterCloudUser(); }); } } });
     const { data } = await sb.auth.getSession();
-    if(data && data.session){ cloudUser=data.session.user; await loadMyProfile(); try{ await loadSocial(); fui.loaded=true; }catch(e){} render(); }
-    sb.auth.onAuthStateChange((_e,session)=>{ cloudUser=session?session.user:null; if(!cloudUser){myProfile=null;fui.loaded=false;} });
+    if(data && data.session){ cloudUser=data.session.user;
+      if(typeof enterCloudUser==='function'){ await enterCloudUser(); }   // stay signed in across refreshes
+      else { await loadMyProfile(); render(); } }
   }catch(e){ console.warn('[HoC] cloud session', e); }
 }
 async function cloudSignUp(email,pass,name,handle){
@@ -347,6 +354,58 @@ function friendRow(p,action,relId){
 }
 function onAvatarPick(input){ const f=input.files[0]; if(!f)return; toast('Uploading photo…');
   uploadAvatar(f).then(r=>{ if(r.error)toast('Upload failed: '+r.error); else toast('Profile picture updated & synced.'); render(); }); }
+
+/* ============ cloud inventory & state sync (Phase 2) ============ */
+/* Inventory rows live in public.items (one row per item — friends can read them,
+   powering inventory viewing later). Everything else (sales, shows, trades,
+   wish list, settings, audit) is private, so it syncs as one JSONB document in
+   public.user_state. Local IndexedDB stays as the offline cache; every save()
+   schedules a debounced push of just what changed. */
+const STATE_DOC_KEYS=['version','paymentAccounts','settings','shows','currentShowId','trades','wantlist','sales','imageDB','audit'];
+let _pushedItems=null, _pushedDoc=null, _pushTimer=null, _pushing=false;
+
+function buildStateDoc(){ const doc={}; STATE_DOC_KEYS.forEach(k=>{ if(state[k]!==undefined)doc[k]=state[k]; }); return doc; }
+
+/* download my cloud copy; returns 'ok' (loaded), 'empty' (no cloud copy yet) or 'error' */
+async function pullCloud(){
+  if(!socialReady()) return 'error';
+  const { data:st, error:e1 } = await sb.from('user_state').select('doc').eq('owner_id',cloudUser.id).maybeSingle();
+  if(e1){ console.warn('[HoC] pull state',e1); return 'error'; }
+  const { data:rows, error:e2 } = await sb.from('items').select('id,data').eq('owner_id',cloudUser.id);
+  if(e2){ console.warn('[HoC] pull items',e2); return 'error'; }
+  if(!st||!st.doc) return 'empty';
+  Object.assign(state, st.doc);
+  state.inventory=(rows||[]).map(r=>r.data);
+  _pushedItems={}; (rows||[]).forEach(r=>{ _pushedItems[r.id]=JSON.stringify(r.data); });
+  _pushedDoc=JSON.stringify(buildStateDoc());
+  return 'ok';
+}
+
+function cloudPushSoon(){
+  if(!socialReady()||typeof state==='undefined'||!state||typeof ui==='undefined'||!ui.authed) return;
+  clearTimeout(_pushTimer); _pushTimer=setTimeout(()=>{ cloudPush().catch(e=>console.warn('[HoC] cloud push',e)); },2500);
+}
+
+/* upload only what changed since the last successful push */
+async function cloudPush(){
+  if(!socialReady()) return;
+  if(_pushing){ cloudPushSoon(); return; }
+  _pushing=true;
+  try{
+    if(_pushedItems==null)_pushedItems={};
+    const ups=[], have={}, now=new Date().toISOString();
+    (state.inventory||[]).forEach(it=>{ if(!it||!it.id)return; const j=JSON.stringify(it); have[it.id]=1;
+      if(_pushedItems[it.id]!==j) ups.push({ owner_id:cloudUser.id, id:it.id, data:JSON.parse(j), updated_at:now }); });
+    const dels=Object.keys(_pushedItems).filter(id=>!have[id]);
+    if(ups.length){ const { error } = await sb.from('items').upsert(ups,{ onConflict:'owner_id,id' }); if(error)throw error;
+      ups.forEach(u=>{ _pushedItems[u.id]=JSON.stringify(u.data); }); }
+    if(dels.length){ const { error } = await sb.from('items').delete().eq('owner_id',cloudUser.id).in('id',dels); if(error)throw error;
+      dels.forEach(id=>{ delete _pushedItems[id]; }); }
+    const doc=buildStateDoc(); const dj=JSON.stringify(doc);
+    if(dj!==_pushedDoc){ const { error } = await sb.from('user_state').upsert({ owner_id:cloudUser.id, doc, updated_at:now }); if(error)throw error; _pushedDoc=dj; }
+  } finally { _pushing=false; }
+}
+window.addEventListener('online',()=>{ try{ cloudPushSoon(); }catch(e){} });
 
 /* Rare fallback — cloud normally connects automatically when you log into the app.
    Shown only if the auto-connect didn't go through (e.g. password changed or no email on file). */

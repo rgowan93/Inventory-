@@ -13,20 +13,25 @@ Goal: move from a local/offline app to a multi-user cloud app.
   - Tap a friend → **View inventory** to browse their collection (read-only).
 
 ## Phases
-- [ ] **Phase 0 — Reset & access**
-  - Wipe cloud (`truncate public.profiles cascade; delete from auth.users;`) and local (factory reset).
-  - Enable Claude's Supabase access: network policy allows `*.supabase.co` + service_role key as an env secret.
-- [ ] **Phase 1 — Cloud-first auth**
-  - Remove built-in Reggie/Manny/Hailey logins.
-  - App login = Supabase login (sign up / sign in with email + password). One identity, no more tangling.
-- [ ] **Phase 2 — Inventory in the cloud**
-  - New tables: items, sales, shows (owned by user_id), image storage.
-  - App reads/writes the cloud; offline cache optional later.
+- [x] **Phase 0 — Reset & access** *(done)*
+  - Cloud wiped (profiles/companies/friendships/follows/auth.users all cleared).
+  - Claude's Supabase access live (MCP) — schema, SQL, migrations, edge functions.
+- [x] **Phase 1 — Cloud-first auth** *(done)*
+  - Built-in Reggie/Manny/Hailey logins removed; no more local passwords.
+  - App login = Supabase login (email or username + password). Password reset by email.
+- [x] **Phase 2 — Inventory in the cloud** *(done)*
+  - `public.items`: one row per item (owner_id + RLS; friends can read — ready for Phase 4).
+  - `public.user_state`: sales, shows, trades, wish list, settings, audit as one private JSONB doc.
+  - Local IndexedDB stays as the offline cache; every save pushes changes (debounced) to the cloud.
+  - Images currently ride inside item data (data URLs); moving them to a Storage bucket is a later optimization.
+- [x] **Bonus — PriceCharting market prices** *(done)*
+  - `pricecharting` edge function proxies the API (token never ships in page source).
+  - Live market price on Add/Edit, bulk reprice on Inventory, trade valuations, wish-list checks, UPC autofill.
 - [ ] **Phase 3 — Companies + membership + invites**
-  - Tables: companies, company_members (role), company_invites.
+  - Tables: company_members (role), company_invites.
   - Company inventory view pools members' items. Members can invite by username/email; invitee accepts.
 - [ ] **Phase 4 — Friends inventory viewing**
-  - Friends (existing) get a "View inventory" action (read-only) with RLS allowing friends to read each other's items.
+  - Friends get a "View inventory" action (read-only). The RLS policy for it already exists on `items`.
 
 ## Notes
 - RLS (row-level security) is the key design work: "company members can read each other's items", "friends can read my items", "only I can edit mine".

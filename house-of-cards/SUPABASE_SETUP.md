@@ -1,5 +1,57 @@
 # Cloud setup — profiles & friends (one time, ~10 minutes)
 
+> **Already applied to the live project** (June 2026): everything below, plus the
+> `items` / `user_state` tables (migration `cloud_inventory_phase2`) and the
+> `pricecharting` edge function. This doc is the recipe for setting up a fresh
+> Supabase project from scratch.
+
+## 0. Cloud inventory tables (Phase 2)
+
+```sql
+create table if not exists public.items (
+  owner_id   uuid not null references auth.users(id) on delete cascade,
+  id         text not null,
+  data       jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (owner_id, id)
+);
+create index if not exists items_owner_idx on public.items(owner_id);
+
+create table if not exists public.user_state (
+  owner_id   uuid primary key references auth.users(id) on delete cascade,
+  doc        jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.items      enable row level security;
+alter table public.user_state enable row level security;
+
+create policy "items owner select" on public.items for select using ((select auth.uid()) = owner_id);
+create policy "items owner insert" on public.items for insert with check ((select auth.uid()) = owner_id);
+create policy "items owner update" on public.items for update using ((select auth.uid()) = owner_id) with check ((select auth.uid()) = owner_id);
+create policy "items owner delete" on public.items for delete using ((select auth.uid()) = owner_id);
+create policy "items friend read"  on public.items for select using (
+  exists (select 1 from public.friendships f
+          where f.status = 'accepted'
+            and ((f.requester = (select auth.uid()) and f.addressee = owner_id)
+              or (f.addressee = (select auth.uid()) and f.requester = owner_id))));
+
+create policy "state owner select" on public.user_state for select using ((select auth.uid()) = owner_id);
+create policy "state owner insert" on public.user_state for insert with check ((select auth.uid()) = owner_id);
+create policy "state owner update" on public.user_state for update using ((select auth.uid()) = owner_id) with check ((select auth.uid()) = owner_id);
+create policy "state owner delete" on public.user_state for delete using ((select auth.uid()) = owner_id);
+```
+
+## 0b. PriceCharting proxy (market prices)
+
+The app calls the `pricecharting` edge function (deployed) so your API token never
+appears in the page source. Paste your token in the app: **Settings → Market prices**.
+Optionally, set it server-side instead: **Edge Functions → Secrets →
+`PRICECHARTING_TOKEN`** — then nobody ever has to paste it in the app.
+
+---
+
 The Friends feature and cross-device profile pictures need three things in your
 Supabase project: two database tables, an image bucket, and email sign-in turned
 on. Do these once and it works for everyone.
