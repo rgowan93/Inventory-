@@ -640,6 +640,10 @@ function imageForNew(data){ const e=dbEntry(data); if(e)return {photo:e.photo,st
    appears in page source. The token lives in Settings (synced via your private cloud
    state). Prices come back in pennies; for cards the price fields map to grades. */
 function pcToken(){ return (state&&state.settings&&state.settings.pcToken)||''; }
+/* market pricing works whenever the cloud is reachable — the token lives in the
+   Supabase edge function (server-side), so no client token is required. */
+function pcEnabled(){ return cloudOn(); }
+function pcOffMsg(){ return 'Market prices need a connection — sign in / get online and try again.'; }
 async function pcApi(path,params){
   if(!cloudOn()) return { error:'cloud off' };
   params=Object.assign({},params||{}); if(pcToken())params.t=pcToken();
@@ -686,7 +690,7 @@ async function pcLookup(it){
 /* Add/Edit screen: fill the list price from the live market */
 let pcSuggest=null;
 async function pcFillPrice(){
-  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  if(!pcEnabled()){ toast(pcOffMsg()); return; }
   const data=collectItem(); if(!data.name){ toast('Enter the card name first.'); return; }
   toast('Looking up market price…');
   const r=await pcLookup(data);
@@ -699,7 +703,7 @@ async function pcFillPrice(){
 /* bulk reprice: refresh every in-stock/intake item from the market (background job) */
 let priceJob={running:false,done:0,total:0,found:0,stop:false};
 function startPriceJob(){
-  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); go('settings'); return; }
+  if(!pcEnabled()){ toast(pcOffMsg()); return; }
   if(priceJob.running){ toast('Reprice already running.'); return; }
   if(navigator.onLine===false){ toast('You look offline — connect to update prices.'); return; }
   const items=state.inventory.filter(i=>i.status==='available'||i.status==='intake');
@@ -763,7 +767,7 @@ function belowMarket(c){ if(!c.itemId)return 0;
 /* ---- recent sold listings (eBay / marketplace comps) for an item ---- */
 async function pcShowComps(itemId){
   const it=state.inventory.find(x=>x.id===itemId); if(!it)return;
-  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  if(!pcEnabled()){ toast(pcOffMsg()); return; }
   toast('Fetching sold listings…');
   let pid=it.pcId;
   if(!pid){ const r=await pcLookup(it); if(!r.ok){ toast('No PriceCharting match for this card.'); return; } pid=r.prod.id; it.pcId=pid; save(); }
@@ -789,7 +793,7 @@ async function pcShowComps(itemId){
 /* ---- wish-list deal alerts: refresh market prices, flag anything at/under your max ---- */
 let wantJobRunning=false;
 async function checkWantDeals(force){
-  if(!pcToken()||navigator.onLine===false||wantJobRunning)return;
+  if(!pcEnabled()||navigator.onLine===false||wantJobRunning)return;
   const last=Number(state.settings.wantCheckAt)||0;
   if(!force&&Date.now()-last<20*3600*1000)return;
   if(!state.wantlist.length)return;
@@ -817,7 +821,7 @@ function worthScan(){ const inp=document.createElement('input'); inp.type='file'
     if(!c.name){ toast('Couldn’t read the card — try a clearer, straight-on photo.'); return; }
     worthLookup({name:c.name,set:c.set,number:c.number}); }; r.readAsDataURL(f); }; inp.click(); }
 async function worthLookup(q){
-  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  if(!pcEnabled()){ toast(pcOffMsg()); return; }
   toast('Pricing '+q.name+'…');
   const r=await pcLookup(q);
   if(!r.ok){ toast(r.error==='no match'?'No PriceCharting match found.':('Lookup failed: '+r.error)); return; }
@@ -841,7 +845,7 @@ async function worthLookup(q){
 }
 /* trades: value the incoming card at live market */
 async function pcFillTradeMarket(){
-  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  if(!pcEnabled()){ toast(pcOffMsg()); return; }
   const name=val('in_name'); if(!name){ toast('Enter the card name first.'); return; }
   toast('Looking up market…');
   const r=await pcLookup({name,set:val('in_set'),number:val('in_number')});
@@ -851,7 +855,7 @@ async function pcFillTradeMarket(){
 }
 /* wish list: what's it going for right now? */
 async function pcWantPrice(id){ const w=state.wantlist.find(x=>x.id===id); if(!w)return;
-  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  if(!pcEnabled()){ toast(pcOffMsg()); return; }
   toast('Checking the market…');
   const r=await pcLookup({name:w.text,set:w.set,number:w.number});
   if(!r.ok){ toast(r.error==='no match'?'No match found.':('Lookup failed: '+r.error)); return; }
@@ -923,7 +927,7 @@ function saveItem(makeAvailable){
 function scanOnAdd(){ openScanner(code=>{ code=(code||'').trim(); if(!code)return; const it=state.inventory.find(i=>i.barcode.toUpperCase()===code.toUpperCase()); if(it){ toast('Found existing item — opening to edit.'); editItem(it.id); return; }
   const f=el('f_upc'); if(f)f.value=code; toast('Scanned '+code+' → added to UPC field.');
   // a retail UPC + PriceCharting = instant product ID and market price (great for sealed)
-  if(/^\d{8,14}$/.test(code)&&pcToken()){ toast('Looking up that UPC…'); pcApi('product',{upc:code}).then(p=>{ if(!p||!p.id)return;
+  if(/^\d{8,14}$/.test(code)&&pcEnabled()){ toast('Looking up that UPC…'); pcApi('product',{upc:code}).then(p=>{ if(!p||!p.id)return;
     const fn=el('f_name'); if(fn&&!fn.value)fn.value=p['product-name']||'';
     const fs=el('f_set'); if(fs&&!fs.value)fs.value=p['console-name']||'';
     const px=pcPriceFor(p,'Ungraded'); const fp=el('f_price'); if(fp&&!fp.value&&px>0){ fp.value=px.toFixed(2); pcSuggest=px; }
@@ -1351,9 +1355,11 @@ function viewSettings(){ const s=state.settings;
       '<label class="fld"><span>Upload your House of Cards logo (shows top-left)</span><input type="file" accept="image/*" onchange="saveLogo(this)"/></label>'+
       (s.logo?'<button class="ghost" onclick="state.settings.logo=null;save();render();toast(\'Logo removed.\')">Remove logo</button>':'')+
       '<div class="muted" style="margin-top:6px">Saved on this device. To show it on every device automatically, also drop the file as <b>logo.png</b> in the app folder.</div></div>'+
-    '<div class="card"><h3>Market prices (PriceCharting)</h3><label class="fld"><span>PriceCharting API token (pricecharting.com → your account → API)</span>'+inp('s_pctoken',s.pcToken||'','paste your 40-character token')+'</label>'+
+    '<div class="card"><h3>Market prices (PriceCharting) <span class="pill avail">connected</span></h3>'+
+      '<div class="muted" style="margin-bottom:8px">Your PriceCharting token is configured on the server, so market pricing works automatically — nothing to paste. It powers “💲 Market price” on Add/Edit, bulk “Update market prices” on Inventory, “💰 What’s it worth?”, 📈 sold comps, trade valuations and wish-list deal alerts (PriceCharting eBay sold data, with PSA/BGS/CGC/SGC graded values).</div>'+
       '<div class="grid2">'+fld('Warn when selling more than this % below market',inp('s_guard',s.guardPct!=null?s.guardPct:20,'','number'))+fld('Cash-offer % of market (when buying cards)',inp('s_buypct',s.buyPct!=null?s.buyPct:70,'','number'))+'</div>'+
-      '<button class="gold" onclick="savePcToken()">Save</button><div class="muted" style="margin-top:6px">Powers “💲 Market price” on Add/Edit, bulk “Update market prices” on Inventory, “💰 What’s it worth?” on the Dashboard, 📈 sold comps, trade valuations and wish-list deal alerts — all from PriceCharting’s eBay sold-listing data, with graded values (PSA/BGS/CGC/SGC). Your token is stored in your private cloud settings and sent through your own server function — never in the page source.</div></div>'+
+      '<button class="gold" onclick="savePcToken()">Save</button>'+
+      '<hr class="sep"><label class="fld"><span>Override token (optional — only to use a different PriceCharting account on this device)</span>'+inp('s_pctoken',s.pcToken||'','leave blank to use the built-in server token')+'</label></div>'+
     '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
     '<div class="card"><h3>My account — '+esc(me().name)+'</h3>'+
       '<div class="muted" style="margin-bottom:8px">This is your cloud account — the same login works on every device, and your inventory follows you.</div>'+
