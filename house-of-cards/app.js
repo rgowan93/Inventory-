@@ -787,20 +787,39 @@ async function priceFromImage(dataUrl){
   if(!card){ showPriceQuote({name:name||'',number:number||'',set:'',rarity:'',ungraded:0,unknown:true}, dataUrl); return; }
   showPriceQuote(card, dataUrl);
 }
-/* Read the card with Claude vision via the Supabase edge function (if configured). Returns null on any failure. */
+/* Read the card with an AI vision model (if a key is set). Returns {name,number,setTotal,...} or null. */
 async function visionIdentify(dataUrl){
-  const cfg=window.HOC_CONFIG||{}; const base=(cfg.SUPABASE_URL||'').replace(/\/$/,''); const key=cfg.SUPABASE_ANON_KEY||'';
-  if(!base) return null;
+  const key=geminiKey(); if(!key) return null;
   toast('Reading the card with AI…');
+  return await geminiIdentify(dataUrl,key);
+}
+function geminiKey(){ return (state.settings&&state.settings.geminiKey)||(window.HOC_CONFIG&&window.HOC_CONFIG.GEMINI_API_KEY)||''; }
+/* Google Gemini vision (free tier) — reads the card straight from the browser. Key is restricted to your device's settings. */
+async function geminiIdentify(dataUrl,key){
+  let media='image/jpeg', data=String(dataUrl||'');
+  const m=data.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s); if(m){ media=m[1]; data=m[2]; }
+  if(!data) return null;
+  const model=(state.settings&&state.settings.geminiModel)||(window.HOC_CONFIG&&window.HOC_CONFIG.GEMINI_MODEL)||'gemini-2.0-flash';
+  const url='https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key);
+  const prompt='This is a photo of a trading card (usually Pokémon). Identify it and return JSON with these fields: '+
+    'name = the printed card name exactly (e.g. "Mega Greninja ex"); '+
+    'number = the LEFT part of the collector number as printed, digits only (e.g. "22" from "022/068"); '+
+    'setTotal = the RIGHT part as an integer (e.g. 68 from "022/068"; use 0 if unreadable); '+
+    'setName = the set name if visible, else ""; isPokemon = true/false. '+
+    'Read carefully through foil glare and stylized fonts.';
+  const body={ contents:[{parts:[{inline_data:{mime_type:media,data:data}},{text:prompt}]}],
+    generationConfig:{ responseMimeType:'application/json', responseSchema:{ type:'OBJECT',
+      properties:{ name:{type:'STRING'}, number:{type:'STRING'}, setTotal:{type:'INTEGER'}, setName:{type:'STRING'}, isPokemon:{type:'BOOLEAN'} },
+      required:['name','number','setTotal','setName','isPokemon'] } } };
   try{
-    const r=await fetch(base+'/functions/v1/identify-card',{ method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+key,'apikey':key},
-      body:JSON.stringify({image:dataUrl}) });
-    if(!r.ok) return null;
+    const r=await fetch(url,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    if(!r.ok){ const t=await r.text().catch(()=>''); toast('Card reader error ('+r.status+') — check your key in Profile.'); console.warn('[HoC] gemini',r.status,t); return null; }
     const j=await r.json();
-    if(j&&!j.error&&(j.name||j.number)) return j;
-    return null;
-  }catch(e){ return null; }
+    const txt=j&&j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts&&j.candidates[0].content.parts[0]&&j.candidates[0].content.parts[0].text;
+    if(!txt) return null;
+    const o=JSON.parse(txt);
+    return (o&&(o.name||o.number))?o:null;
+  }catch(e){ console.warn('[HoC] gemini',e); return null; }
 }
 
 /* resolve the real card (and its ungraded market price) from pokemontcg.io */
@@ -1225,6 +1244,7 @@ function viewSettings(){ const s=state.settings;
       '<label class="fld"><span>Upload your House of Cards logo (shows top-left)</span><input type="file" accept="image/*" onchange="saveLogo(this)"/></label>'+
       (s.logo?'<button class="ghost" onclick="state.settings.logo=null;save();render();toast(\'Logo removed.\')">Remove logo</button>':'')+
       '<div class="muted" style="margin-top:6px">Saved on this device. To show it on every device automatically, also drop the file as <b>logo.png</b> in the app folder.</div></div>'+
+    '<div class="card"><h3>Card reader (AI vision) — free</h3><label class="fld"><span>Google Gemini API key — lets the scanner read cards as well as a human (free tier)</span>'+inp('s_gemini',(s.geminiKey||''),'paste your free key from aistudio.google.com')+'</label><button class="gold" onclick="saveGeminiKey()">Save key</button>'+(s.geminiKey?' <span class="tag">✓ key saved</span>':'')+'<div class="muted" style="margin-top:6px">Get a free key at <b>aistudio.google.com/apikey</b> → "Create API key" → paste it here. Stored only on this device. Without a key, scanning falls back to basic on-device reading.</div></div>'+
     '<div class="card"><h3>Scan &amp; pricing</h3><label class="fld"><span>Cash offer % — when buying, offer this share of the ungraded market price</span>'+inp('s_buypct',(s.buyPct||70),'e.g. 70','number')+'</label><button class="gold" onclick="saveBuyPct()">Save %</button><div class="muted" style="margin-top:6px">Used by the "Scan a card → price" cash-offer line. Graded ladder values are estimates from the live ungraded market price (TCGplayer via pokemontcg.io); always confirm big cards against real sold listings.</div></div>'+
     '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
     '<div class="card"><h3>My account — '+esc(me().name)+'</h3>'+
@@ -1248,6 +1268,7 @@ function setAcct(m,v){state.paymentAccounts[m]=v;logChange('settings','set '+MET
 function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.prizePrice=num('s_prize');state.settings.prizePlaysPerShow=num('s_plays');logChange('settings','updated show defaults');save();toast('Saved.');}
 function savePtcg(){state.settings.ptcgKey=val('s_ptcg');save();toast('Image API key saved.');}
 function saveBuyPct(){ let p=Math.round(num('s_buypct')); if(!(p>0&&p<=100))p=70; state.settings.buyPct=p; save(); toast('Cash offer set to '+p+'%.'); }
+function saveGeminiKey(){ state.settings.geminiKey=(val('s_gemini')||'').trim(); save(); toast(state.settings.geminiKey?'Card reader key saved — scanning now uses AI.':'Key cleared.'); render(); }
 function saveLogo(input){ const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ state.settings.logo=r.result; save(); toast('Logo updated.'); render(); }; r.readAsDataURL(f); }
 function socialReadySafe(){ return typeof socialReady==='function' && socialReady(); }
 function saveAvatar(input){ const f=input.files[0]; if(!f)return;
