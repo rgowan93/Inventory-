@@ -233,8 +233,8 @@ function header(headers,names){ const low=headers.map(h=>h.toLowerCase().trim())
 /* ============================== rendering ============================== */
 const TABS=[['dashboard','Dashboard'],['inventory','Inventory'],['add','Add Item'],['import','Import CSV'],['labels','Print Labels'],
   ['sell','Sell'],['trades','Trades'],['wishlist','Wish List'],['history','Sold History'],['reports','Reports'],['friends','Friends'],['activity','Activity'],['settings','Settings']];
-const PARENT={checkout:'sell',newtrade:'trades'};
-const VIEWS={dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,import:viewImport,labels:viewLabels,
+const PARENT={checkout:'sell',newtrade:'trades',scanreview:'inventory'};
+const VIEWS={dashboard:viewDashboard,inventory:viewInventory,add:viewAdd,import:viewImport,labels:viewLabels,scanreview:viewScanReview,
   sell:viewSell,checkout:viewCheckout,trades:viewTrades,newtrade:viewNewTrade,wishlist:viewWishlist,history:viewHistory,reports:viewReports,
   friends:(typeof viewFriends==='function'?viewFriends:viewDashboard),activity:viewActivity,settings:viewSettings};
 function go(route){ ui.route=route; ui.focusId=null;
@@ -495,8 +495,9 @@ function viewDashboard(){
   return '<h2 class="page">Dashboard <small>'+new Date().toLocaleDateString()+' · acting as '+me().name+'</small></h2>'+
     '<div class="kpi">'+kpi('Available',avail)+kpi('In intake',intake)+kpi('Inventory value',money(totalValue))+kpi('Shows logged',state.shows.length)+'</div>'+
     '<div style="height:14px"></div>'+
-    '<div class="card"><h3>Price a card</h3><p class="muted" style="margin:2px 0 10px">Snap a photo of any Pokémon card to see its market value, a graded estimate ladder, and your cash offer.</p>'+
-    '<button class="gold" style="font-size:16px;padding:12px 18px" onclick="scanCardForPrice()">📷 Scan a card → price</button></div>'+
+    '<div class="card"><h3>Scan cards</h3><p class="muted" style="margin:2px 0 10px">Snap several Pokémon cards in a row — they identify in the background. Then review prices &amp; grades and add them all to inventory.</p>'+
+    '<button class="gold" style="font-size:16px;padding:12px 18px" onclick="openCardScanner()">📷 Scan cards</button> '+
+    '<button class="ghost" onclick="scanCardForPrice()">Quick price check</button></div>'+
     '<div style="height:14px"></div>'+showCard+
     '<div class="card"><h3>Quick actions</h3><div class="row">'+
     '<button onclick="go(\'add\')">＋ Add item</button><button onclick="go(\'sell\')">Sell</button>'+
@@ -769,12 +770,12 @@ function scanCardForPrice(){ const inp=document.createElement('input'); inp.type
 async function priceFromImage(dataUrl){
   if(navigator.onLine===false){ toast('You\'re offline — a price check needs internet.'); return; }
   let name='',number='',total=0;
-  // Preferred: read the card with Claude vision (accurate on foil/stylized fonts).
-  const v=await visionIdentify(dataUrl);
-  if(v){ name=v.name||''; number=v.number||''; total=Number(v.setTotal)||0; }
-  else {
-    // Fallback: on-device OCR (works without the vision function configured).
-    toast('Reading the card… (first scan downloads the reader)');
+  if(geminiKey()){
+    toast('Reading the card with AI…');
+    try{ const v=await geminiIdentify(dataUrl,geminiKey()); name=v.name||''; number=v.number||''; total=Number(v.setTotal)||0; }
+    catch(e){ toast('Card reader failed: '+((e&&e.message)||e)); return; }   // loud, not silent — no garbage fallback when a key is set
+  } else {
+    toast('Reading the card… (no AI key set — add one free in Profile for accuracy)');
     let text='';
     try{ await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
       if(window.Tesseract){ const res=await window.Tesseract.recognize(dataUrl,'eng'); text=(res&&res.data&&res.data.text)||''; }
@@ -787,18 +788,13 @@ async function priceFromImage(dataUrl){
   if(!card){ showPriceQuote({name:name||'',number:number||'',set:'',rarity:'',ungraded:0,unknown:true}, dataUrl); return; }
   showPriceQuote(card, dataUrl);
 }
-/* Read the card with an AI vision model (if a key is set). Returns {name,number,setTotal,...} or null. */
-async function visionIdentify(dataUrl){
-  const key=geminiKey(); if(!key) return null;
-  toast('Reading the card with AI…');
-  return await geminiIdentify(dataUrl,key);
-}
 function geminiKey(){ return (state.settings&&state.settings.geminiKey)||(window.HOC_CONFIG&&window.HOC_CONFIG.GEMINI_API_KEY)||''; }
-/* Google Gemini vision (free tier) — reads the card straight from the browser. Key is restricted to your device's settings. */
+/* Google Gemini vision (free tier) — reads the card straight from the browser. THROWS a descriptive
+   error on failure so the caller can show the real reason instead of silently producing garbage. */
 async function geminiIdentify(dataUrl,key){
   let media='image/jpeg', data=String(dataUrl||'');
   const m=data.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s); if(m){ media=m[1]; data=m[2]; }
-  if(!data) return null;
+  if(!data) throw new Error('no image');
   const model=(state.settings&&state.settings.geminiModel)||(window.HOC_CONFIG&&window.HOC_CONFIG.GEMINI_MODEL)||'gemini-2.0-flash';
   const url='https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key);
   const prompt='This is a photo of a trading card (usually Pokémon). Identify it and return JSON with these fields: '+
@@ -811,31 +807,41 @@ async function geminiIdentify(dataUrl,key){
     generationConfig:{ responseMimeType:'application/json', responseSchema:{ type:'OBJECT',
       properties:{ name:{type:'STRING'}, number:{type:'STRING'}, setTotal:{type:'INTEGER'}, setName:{type:'STRING'}, isPokemon:{type:'BOOLEAN'} },
       required:['name','number','setTotal','setName','isPokemon'] } } };
-  try{
-    const r=await fetch(url,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-    if(!r.ok){ const t=await r.text().catch(()=>''); toast('Card reader error ('+r.status+') — check your key in Profile.'); console.warn('[HoC] gemini',r.status,t); return null; }
-    const j=await r.json();
-    const txt=j&&j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts&&j.candidates[0].content.parts[0]&&j.candidates[0].content.parts[0].text;
-    if(!txt) return null;
-    const o=JSON.parse(txt);
-    return (o&&(o.name||o.number))?o:null;
-  }catch(e){ console.warn('[HoC] gemini',e); return null; }
+  let r;
+  try{ r=await fetch(url,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }); }
+  catch(e){ throw new Error('network/CORS blocked ('+((e&&e.message)||e)+')'); }
+  if(!r.ok){ let t=''; try{t=await r.text();}catch(_){ } let msg=''; try{ msg=((JSON.parse(t)||{}).error||{}).message||''; }catch(_){ }
+    throw new Error('AI '+r.status+(msg?(' — '+msg):' — check your key in Profile')); }
+  const j=await r.json();
+  const txt=j&&j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts&&j.candidates[0].content.parts[0]&&j.candidates[0].content.parts[0].text;
+  if(!txt) throw new Error('no result from AI');
+  let o; try{ o=JSON.parse(txt); }catch(_){ throw new Error('bad AI response'); }
+  if(!o||(!o.name&&!o.number)) throw new Error('card not recognized — try a clearer photo');
+  return o;
 }
 
-/* resolve the real card (and its ungraded market price) from pokemontcg.io */
-async function identifyCardFull(number,total,nameGuess){
+/* resolve the real card (best match) from pokemontcg.io */
+async function identifyCardFull(number,total,nameGuess){ const a=await identifyCandidates(number,total,nameGuess); return a.length?a[0]:null; }
+/* return ranked candidate cards (best first) so the user can pick the right printing */
+async function identifyCandidates(number,total,nameGuess){
   const headers=state.settings.ptcgKey?{'X-Api-Key':state.settings.ptcgKey}:{};
   const tryq=async q=>{ try{ const r=await fetch('https://api.pokemontcg.io/v2/cards?pageSize=60&q='+encodeURIComponent(q),{headers}); if(!r.ok)return []; const j=await r.json(); return j.data||[]; }catch(e){ return []; } };
+  const nm=nameGuess?String(nameGuess).replace(/"/g,''):'';
   let data=[];
-  if(number&&nameGuess) data=await tryq('number:'+number+' name:"'+nameGuess.replace(/"/g,'')+'"');
+  if(number&&nm) data=await tryq('number:'+number+' name:"'+nm+'"');
   if(!data.length&&number) data=await tryq('number:'+number);
-  if(!data.length&&nameGuess) data=await tryq('name:"'+nameGuess.replace(/"/g,'')+'"');
-  if(!data.length) return null;
-  let cands=data;
-  if(total){ const t=data.filter(c=>c.set&&(c.set.printedTotal===total||c.set.total===total)); if(t.length)cands=t; } // "/086" pins the set
-  let pick=cands[0];
-  if(nameGuess){ const ng=norm(nameGuess); const m=cands.find(c=>norm(c.name).includes(ng)||ng.includes(norm(c.name))); if(m)pick=m; }
-  return cardFromPtcg(pick, number);
+  if(!data.length&&nm) data=await tryq('name:"'+nm+'"');
+  if(!data.length) return [];
+  const ng=nm?norm(nm):'';
+  data.sort((a,b)=>{
+    const at=total&&a.set&&(a.set.printedTotal===total||a.set.total===total)?1:0;
+    const bt=total&&b.set&&(b.set.printedTotal===total||b.set.total===total)?1:0;
+    if(at!==bt)return bt-at;
+    const an=ng&&(norm(a.name).includes(ng)||ng.includes(norm(a.name)))?1:0;
+    const bn=ng&&(norm(b.name).includes(ng)||ng.includes(norm(b.name)))?1:0;
+    return bn-an;
+  });
+  return data.slice(0,8).map(c=>cardFromPtcg(c,number));
 }
 /* turn a pokemontcg.io card object into our quote shape, picking the best market price */
 function cardFromPtcg(pick,number){
@@ -904,6 +910,129 @@ function addQuotedToInventory(){
   const item=Object.assign({id:uid('item'),barcode:genBarcodeId(),photo:lastQuote.photo,stock:false,realImage:true,imgSrc:'manual',suggestedPrice:Number(c.ungraded)||0,status:'intake',needsReview:true,dateAdded:Date.now()},data);
   state.inventory.push(item); logChange('inventory','added "'+(item.name||'item')+'" via price scan'); save();
   toast('Added to Review — confirm the details.'); editItem(item.id);
+}
+
+/* ============================== Continuous card scanner (Collectr-style) ==============================
+   Snap many cards in a row; each identifies in the background (AI vision → pokemontcg.io). Then a
+   review screen shows Your Picture vs the matched card, alternate matches, and live grade/condition
+   pricing before you add them all to inventory. */
+function openCardScanner(){
+  if(!geminiKey() && !confirm('Tip: add a FREE AI vision key in Profile → "Card reader" for accurate scanning. Scan with the basic reader anyway?')) { go('settings'); return; }
+  ui.scanQueue=ui.scanQueue||[];
+  const wrap=document.createElement('div'); wrap.className='scanmodal'; wrap.id='cardScanModal';
+  wrap.innerHTML=
+    '<div class="hint" id="csHint">Point at a card and tap Capture. Keep going — cards identify while you scan.</div>'+
+    '<video id="csVideo" playsinline autoplay muted style="width:min(92vw,460px);border:3px solid var(--gold);border-radius:14px;background:#000"></video>'+
+    '<div class="row" style="margin-top:12px;justify-content:center"><button class="gold" id="csCap" style="font-size:17px;padding:14px 26px">📸 Capture</button>'+
+      '<button class="blue" id="csReview">Review ('+ui.scanQueue.length+')</button>'+
+      '<button class="red" id="csClose">Done</button></div>'+
+    '<div id="csStrip" class="csstrip"></div>'+
+    '<div class="row" style="justify-content:center;margin-top:6px"><label class="btn-link" style="cursor:pointer">Upload photos instead<input id="csFiles" type="file" accept="image/*" multiple style="display:none"></label></div>';
+  document.body.appendChild(wrap);
+  let stream=null; const video=wrap.querySelector('#csVideo');
+  const cleanup=()=>{ try{ if(stream)stream.getTracks().forEach(t=>t.stop()); }catch(e){} wrap.remove(); };
+  (async()=>{ try{ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw 0;
+      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}); video.srcObject=stream; await video.play().catch(()=>{}); }
+    catch(e){ const h=wrap.querySelector('#csHint'); if(h)h.textContent='Camera unavailable here — tap "Upload photos instead".'; } })();
+  function grab(){ if(!video.videoWidth)return null; const W=Math.min(1000,video.videoWidth), s=W/video.videoWidth;
+    const c=document.createElement('canvas'); c.width=W; c.height=Math.round(video.videoHeight*s);
+    c.getContext('2d').drawImage(video,0,0,c.width,c.height); return c.toDataURL('image/jpeg',0.82); }
+  wrap.querySelector('#csCap').onclick=()=>{ const d=grab(); if(!d){ toast('Camera still starting…'); return; } addScanItem(d);
+    video.style.opacity='0.35'; setTimeout(()=>{ if(video)video.style.opacity='1'; },110); };
+  wrap.querySelector('#csFiles').onchange=(e)=>{ [...e.target.files].forEach(f=>{ const r=new FileReader(); r.onload=()=>addScanItem(r.result); r.readAsDataURL(f); }); };
+  wrap.querySelector('#csReview').onclick=()=>{ if(!ui.scanQueue.length){ toast('Capture at least one card first.'); return; } cleanup(); go('scanreview'); };
+  wrap.querySelector('#csClose').onclick=()=>{ cleanup(); if(ui.scanQueue.length) go('scanreview'); };
+  renderScanStrip();
+}
+function addScanItem(photo){
+  ui.scanQueue=ui.scanQueue||[];
+  const it={id:uid('scan'),photo:photo,status:'reading',card:null,candidates:[],read:null,grade:'Ungraded',variant:'Normal',condition:'NM',qty:1,ownerId:state.currentUserId,error:''};
+  ui.scanQueue.push(it); renderScanStrip(); processScanItem(it);
+}
+async function processScanItem(it){
+  try{
+    let name='',number='',total=0;
+    if(geminiKey()){ const v=await geminiIdentify(it.photo,geminiKey()); name=v.name||''; number=v.number||''; total=Number(v.setTotal)||0; }
+    else { const c=await readCardFromImage(it.photo); name=c.name||''; const parts=(c.number||'').split('/'); number=(parts[0]||'').replace(/\D/g,''); total=parseInt(parts[1]||'0',10)||0; }
+    it.read={name,number,total};
+    const cands=await identifyCandidates(number?parseInt(number,10):0,total,name);
+    if(cands.length){ it.candidates=cands; it.card=cands[0]; it.status='done'; }
+    else { it.card={name:name,number:number,set:'',rarity:'',ungraded:0,unknown:true}; it.status='nomatch'; }
+  }catch(e){ it.status='error'; it.error=(e&&e.message)||'failed'; }
+  renderScanStrip(); if(ui.route==='scanreview')render();
+}
+function renderScanStrip(){ const m=el('cardScanModal'); if(!m)return;
+  const s=m.querySelector('#csStrip'); if(s)s.innerHTML=(ui.scanQueue||[]).map(scanThumb).join('');
+  const rv=m.querySelector('#csReview'); if(rv)rv.textContent='Review ('+(ui.scanQueue||[]).length+')'; }
+function scanThumb(it){ const tag=it.status==='reading'?'⏳':(it.status==='done'?'✓':(it.status==='nomatch'?'?':'⚠'));
+  return '<div class="csitem"><img src="'+it.photo+'"/><span class="cstag">'+tag+'</span></div>'; }
+function scanItemPrice(it){ const u=Number(it.card&&it.card.ungraded)||0; if(!u)return 0; const g=GRADE_LADDER.find(x=>x[0]===it.grade); return u*((g&&g[1])||1); }
+/* ---- Scan review screen ---- */
+function viewScanReview(){
+  const q=ui.scanQueue||[];
+  if(!q.length) return '<h2 class="page">Scan review</h2><div class="card"><div class="empty">No scanned cards yet.</div><button class="gold" onclick="openCardScanner()">📷 Scan cards</button></div>';
+  const ready=q.filter(it=>it.card&&!it.card.unknown).length;
+  const working=q.filter(it=>it.status==='reading').length;
+  return '<h2 class="page">Scan review <small>'+q.length+' scanned · '+ready+' identified'+(working?(' · '+working+' reading…'):'')+'</small></h2>'+
+    '<div class="card noprint"><div class="row"><button class="gold" onclick="addAllScans()">＋ Add all to inventory</button>'+
+      '<button class="blue" onclick="openCardScanner()">📷 Scan more</button>'+
+      '<button class="ghost right" onclick="clearScans()">Clear all</button></div>'+
+      '<div class="muted" style="margin-top:6px">Tap a grade to update the price. Wrong match? Pick an alternate below the card or edit the name/number and Re-look up.</div></div>'+
+    q.map((it,i)=>scanReviewCard(it,i)).join('');
+}
+function scanReviewCard(it,i){
+  if(it.status==='reading') return '<div class="card"><div class="srow"><img class="sthumb" src="'+it.photo+'"/><div style="flex:1"><b>Reading…</b><div class="muted">identifying this card</div></div><button class="sm red" onclick="discardScan('+i+')">✕</button></div></div>';
+  if(it.status==='error') return '<div class="card"><div class="srow"><img class="sthumb" src="'+it.photo+'"/><div style="flex:1"><b style="color:var(--red)">Couldn\'t read</b><div class="muted">'+esc(it.error||'')+'</div><div style="margin-top:6px"><input id="sc_name'+i+'" placeholder="type card name"/> <input id="sc_num'+i+'" placeholder="number" style="max-width:90px"/> <button class="sm blue" onclick="relookupScan('+i+')">🔄 Look up</button></div></div><button class="sm red" onclick="discardScan('+i+')">✕</button></div></div>';
+  const c=it.card||{name:'',number:'',ungraded:0,unknown:true};
+  const price=scanItemPrice(it);
+  const cand=(it.candidates&&it.candidates.length>1)?'<div class="candpick">'+it.candidates.map((cd,ci)=>'<img class="'+(it.card===cd?'on':'')+'" src="'+(cd.image||it.photo)+'" title="'+esc(cd.name||'')+' '+esc(cd.set||'')+'" onclick="pickScanCand('+i+','+ci+')"/>').join('')+'</div>':'';
+  const grades=GRADE_LADDER.map(g=>'<span class="chip '+(it.grade===g[0]?'on':'')+'" onclick="setScan('+i+',\'grade\',\''+g[0]+'\')">'+g[0]+'</span>').join('');
+  const opt=(arr,cur)=>arr.map(o=>'<option'+(o===cur?' selected':'')+'>'+o+'</option>').join('');
+  const ownerSel='<select onchange="setScan('+i+',\'ownerId\',this.value)">'+state.users.map(u=>'<option value="'+u.id+'"'+(it.ownerId===u.id?' selected':'')+'>'+esc(u.name)+'</option>').join('')+'</select>';
+  return '<div class="card">'+
+    '<div class="srow">'+
+      '<img class="sthumb" src="'+it.photo+'"/>'+(c.image?'<img class="sthumb" src="'+c.image+'"/>':'')+
+      '<div style="flex:1;min-width:150px">'+
+        '<input id="sc_name'+i+'" value="'+esc(c.name||'')+'" style="font-weight:800"/>'+
+        '<div class="row" style="gap:6px;margin-top:5px"><input id="sc_num'+i+'" value="'+esc((c.number||'').split('/')[0])+'" placeholder="number" style="max-width:90px"/><button class="sm blue" onclick="relookupScan('+i+')">🔄 Re-look up</button></div>'+
+        '<div class="muted" style="margin-top:4px">'+esc(c.set||(c.unknown?'no match — edit name/number then Re-look up':''))+(c.number?(' · #'+esc(c.number)):'')+'</div>'+
+        '<div class="big" style="font-size:22px;margin-top:4px">'+money(price)+(it.grade!=='Ungraded'?' <span class="muted" style="font-size:12px">est.</span>':'')+'</div>'+
+      '</div>'+
+      '<button class="sm red" onclick="discardScan('+i+')">✕</button>'+
+    '</div>'+cand+
+    '<div style="margin-top:8px">'+grades+'</div>'+
+    '<div class="grid3" style="margin-top:8px">'+
+      '<label class="fld" style="margin:0"><span>Raw condition</span><select onchange="setScan('+i+',\'condition\',this.value)">'+opt(CONDITIONS,it.condition)+'</select></label>'+
+      '<label class="fld" style="margin:0"><span>Variant</span><select onchange="setScan('+i+',\'variant\',this.value)">'+opt(VARIANCES,it.variant)+'</select></label>'+
+      '<label class="fld" style="margin:0"><span>Qty</span><input type="number" min="1" value="'+(it.qty||1)+'" onchange="setScan('+i+',\'qty\',Math.max(1,parseInt(this.value)||1))"/></label>'+
+    '</div>'+
+    '<label class="fld" style="margin:8px 0 0"><span>Owner</span>'+ownerSel+'</label>'+
+  '</div>';
+}
+function setScan(i,field,val){ const it=(ui.scanQueue||[])[i]; if(!it)return; it[field]=val; render(); }
+function pickScanCand(i,ci){ const it=(ui.scanQueue||[])[i]; if(!it||!it.candidates)return; it.card=it.candidates[ci]; render(); }
+function discardScan(i){ if(!ui.scanQueue)return; ui.scanQueue.splice(i,1); render(); }
+function clearScans(){ if(!confirm('Discard all scanned cards?'))return; ui.scanQueue=[]; render(); }
+async function relookupScan(i){ const it=(ui.scanQueue||[])[i]; if(!it)return;
+  const nm=(val('sc_name'+i)||'').trim(); const num=(val('sc_num'+i)||'').replace(/\D/g,'');
+  if(!nm && !num){ toast('Type a name or number first.'); return; }
+  toast('Looking up '+(nm||('#'+num))+'…');
+  const cands=await identifyCandidates(num?parseInt(num,10):0, it.read&&it.read.total, nm);
+  if(cands.length){ it.candidates=cands; it.card=cands[0]; it.status='done'; }
+  else { it.card={name:nm,number:num,set:'',rarity:'',ungraded:0,unknown:true}; it.status='nomatch'; toast('Still no match — you can add it manually.'); }
+  render();
+}
+function addAllScans(){ const q=ui.scanQueue||[]; let added=0;
+  q.forEach(it=>{ const c=it.card; const name=(c&&c.name)||(it.read&&it.read.name)||''; if(!name)return;
+    const price=scanItemPrice(it);
+    for(let n=0;n<(it.qty||1);n++){
+      const data={category:'Pokemon',set:(c&&c.set)||'',name:name,number:(c&&c.number)||'',rarity:(c&&c.rarity)||'',variance:it.variant||'Normal',language:'EN',grade:it.grade||'Ungraded',condition:it.condition||'NM',ownerId:it.ownerId||state.currentUserId,costBasis:0,listPrice:Math.round(price*100)/100,priceOverride:(it.grade&&it.grade!=='Ungraded')};
+      const item=Object.assign({id:uid('item'),barcode:genBarcodeId(),photo:it.photo,stock:false,realImage:true,imgSrc:'manual',suggestedPrice:Number(c&&c.ungraded)||0,status:'intake',needsReview:true,dateAdded:Date.now()},data);
+      state.inventory.push(item); added++;
+    }
+  });
+  if(!added){ toast('Nothing identified yet to add.'); return; }
+  logChange('inventory','added '+added+' card(s) via scan'); save(); ui.scanQueue=[]; toast('Added '+added+' card(s) to Review.'); go('inventory');
 }
 
 /* -------- Graded slab: blur the certification number before saving -------- */
