@@ -55,7 +55,7 @@ function freshState(){
     users:[reggie,manny,hailey],
     currentUserId:reggie.id,
     paymentAccounts:{cash:'drawer',venmo:manny.id,cashapp:reggie.id,paypal:reggie.id,square:reggie.id,zelle:'prompt'},
-    settings:{ cashFloat:200, floatOwnerId:reggie.id, prizePrice:10, prizePlaysPerShow:400, prizeSplit:[reggie.id,manny.id] },
+    settings:{ cashFloat:200, floatOwnerId:reggie.id, prizePrice:10, prizePlaysPerShow:400, prizeSplit:[reggie.id,manny.id], buyPct:70 },
     inventory:[], shows:[], currentShowId:null, trades:[], wantlist:[], sales:[], imageDB:{}, audit:[]
   };
 }
@@ -494,6 +494,9 @@ function viewDashboard(){
   } else { showCard='<div class="card"><h3>No show running</h3><p class="muted">Start a show to begin selling (drawer opens with the '+money(state.settings.cashFloat)+' float).</p><button class="gold" onclick="go(\'reports\')">Go to Reports to start a show</button></div>'; }
   return '<h2 class="page">Dashboard <small>'+new Date().toLocaleDateString()+' · acting as '+me().name+'</small></h2>'+
     '<div class="kpi">'+kpi('Available',avail)+kpi('In intake',intake)+kpi('Inventory value',money(totalValue))+kpi('Shows logged',state.shows.length)+'</div>'+
+    '<div style="height:14px"></div>'+
+    '<div class="card"><h3>Price a card</h3><p class="muted" style="margin:2px 0 10px">Snap a photo of any Pokémon card to see its market value, a graded estimate ladder, and your cash offer.</p>'+
+    '<button class="gold" style="font-size:16px;padding:12px 18px" onclick="scanCardForPrice()">📷 Scan a card → price</button></div>'+
     '<div style="height:14px"></div>'+showCard+
     '<div class="card"><h3>Quick actions</h3><div class="row">'+
     '<button onclick="go(\'add\')">＋ Add item</button><button onclick="go(\'sell\')">Sell</button>'+
@@ -648,7 +651,8 @@ function viewAdd(){
   return '<h2 class="page">'+(it?'Edit item':'Add item')+' <small>Photo only required if condition is NOT Near Mint · barcode auto-created</small></h2>'+
     '<div class="card"><div class="row noprint" style="margin-bottom:10px"><button class="blue" onclick="scanOnAdd()">📷 Scan barcode / UPC</button>'+
       '<button class="blue" onclick="scanCardFront()">🃏 Scan card front (auto-read)</button>'+
-      '<span class="muted">barcode/UPC opens an existing label or fills the UPC; card-front reads the name/number for you to review</span></div>'+
+      '<button class="gold" onclick="scanCardForPrice()">💲 Scan → price check</button>'+
+      '<span class="muted">barcode/UPC opens an existing label or fills the UPC; card-front reads the name/number for you to review; price check looks up market value</span></div>'+
     '<div class="grid2">'+
       fld('Category',sel('f_cat',CATEGORIES,g('category','Pokemon')))+
       fld('Set',inp('f_set',g('set',''),'e.g. Surging Sparks'))+
@@ -750,6 +754,115 @@ function parseCardText(text){ text=String(text||'');
   let name='',best=0;
   lines.slice(0,7).forEach(l=>{ if(NOISE.test(l))return; const a=l.replace(/[^A-Za-z .'\-]/g,'').trim(); const letters=a.replace(/[^A-Za-z]/g,''); if(letters.length>best&&letters.length>=4){best=letters.length;name=a;} });
   return {name,number,total};
+}
+
+/* ============================== Scan a card → instant price quote ==============================
+   Identity + raw price come ONLY from pokemontcg.io (a Pokemon-only database), so a misread can
+   never match a video game like the old PriceCharting lookup did. Graded numbers are ESTIMATES
+   derived from the real ungraded market price via configurable multipliers. */
+const GRADE_LADDER=[['Ungraded',1],['Grade 7',1.0],['Grade 8',1.25],['Grade 9',1.7],['Grade 9.5',2.4],['PSA 10',4.0],['BGS 10',5.5]];
+function buyPct(){ const p=Number(state.settings&&state.settings.buyPct); return (p>0&&p<=100)?p:70; }
+
+function scanCardForPrice(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
+  inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>priceFromImage(r.result); r.readAsDataURL(f); }; inp.click(); }
+
+async function priceFromImage(dataUrl){
+  if(navigator.onLine===false){ toast('You\'re offline — a price check needs internet.'); return; }
+  toast('Reading the card… (first scan downloads the reader)');
+  let text='';
+  try{ await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    if(window.Tesseract){ const res=await window.Tesseract.recognize(dataUrl,'eng'); text=(res&&res.data&&res.data.text)||''; }
+  }catch(e){}
+  const p=parseCardText(text);
+  if(!p.number && (!p.name || p.name.length<4)){ toast('Couldn\'t read the card — try a straight-on, well-lit photo with the number (e.g. 065/086) showing.'); return; }
+  toast('Looking up '+(p.name||('#'+p.number))+'…');
+  const card=await identifyCardFull(p.number?parseInt(p.number,10):0, p.total, p.name);
+  if(!card){ showPriceQuote({name:p.name||'',number:p.number||'',set:'',rarity:'',ungraded:0,unknown:true}, dataUrl); return; }
+  showPriceQuote(card, dataUrl);
+}
+
+/* resolve the real card (and its ungraded market price) from pokemontcg.io */
+async function identifyCardFull(number,total,nameGuess){
+  const headers=state.settings.ptcgKey?{'X-Api-Key':state.settings.ptcgKey}:{};
+  const tryq=async q=>{ try{ const r=await fetch('https://api.pokemontcg.io/v2/cards?pageSize=60&q='+encodeURIComponent(q),{headers}); if(!r.ok)return []; const j=await r.json(); return j.data||[]; }catch(e){ return []; } };
+  let data=[];
+  if(number&&nameGuess) data=await tryq('number:'+number+' name:"'+nameGuess.replace(/"/g,'')+'"');
+  if(!data.length&&number) data=await tryq('number:'+number);
+  if(!data.length&&nameGuess) data=await tryq('name:"'+nameGuess.replace(/"/g,'')+'"');
+  if(!data.length) return null;
+  let cands=data;
+  if(total){ const t=data.filter(c=>c.set&&(c.set.printedTotal===total||c.set.total===total)); if(t.length)cands=t; } // "/086" pins the set
+  let pick=cands[0];
+  if(nameGuess){ const ng=norm(nameGuess); const m=cands.find(c=>norm(c.name).includes(ng)||ng.includes(norm(c.name))); if(m)pick=m; }
+  return cardFromPtcg(pick, number);
+}
+/* turn a pokemontcg.io card object into our quote shape, picking the best market price */
+function cardFromPtcg(pick,number){
+  const prices=(pick.tcgplayer&&pick.tcgplayer.prices)||{};
+  const order=['holofoil','reverseHolofoil','normal','1stEditionHolofoil','1stEdition','unlimitedHolofoil'];
+  let ungraded=0, variant='';
+  for(const k of order){ const v=prices[k]; if(v){ const m=v.market||v.mid||v.high||v.low; if(m){ungraded=m;variant=k;break;} } }
+  if(!ungraded){ for(const k in prices){ const v=prices[k]; const m=v.market||v.mid||v.high; if(m){ungraded=m;variant=k;break;} } }
+  if(!ungraded && pick.cardmarket && pick.cardmarket.prices){ const cm=pick.cardmarket.prices; const eur=cm.averageSellPrice||cm.trendPrice||0; if(eur){ ungraded=eur*1.08; variant='cardmarket(€)'; } }
+  return { name:pick.name||'', set:(pick.set&&pick.set.name)||'',
+    number:(pick.number||number)+(pick.set&&pick.set.printedTotal?('/'+pick.set.printedTotal):''),
+    rarity:pick.rarity||'', image:(pick.images&&(pick.images.large||pick.images.small))||'',
+    ungraded:Math.round((ungraded||0)*100)/100, variant,
+    tcgUrl:(pick.tcgplayer&&pick.tcgplayer.url)||'', unknown:false };
+}
+/* search links so the user can verify against real sold listings */
+function ebaySold(q){ return 'https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(q+' pokemon')+'&LH_Sold=1&LH_Complete=1'; }
+function priceChartingLink(q){ return 'https://www.pricecharting.com/search-products?q='+encodeURIComponent(q+' pokemon')+'&type=prices'; }
+
+let lastQuote=null;
+function showPriceQuote(card,dataUrl){
+  lastQuote={card,photo:dataUrl};
+  const title=card.name||'Unknown card';
+  const sub=[card.set,card.number?('#'+card.number):'',card.rarity].filter(Boolean).join(' · ');
+  const img=card.image||dataUrl;
+  const u=Number(card.ungraded)||0;
+  let body;
+  if(card.unknown || !u){
+    const reason=card.unknown?'We couldn\'t match this exact card in the Pokémon database (very new sets can take a while to appear).':'No market price is listed for this card yet.';
+    body='<div class="banner" style="margin:10px 0">'+reason+' Use the links below to check real sold prices, or add it manually.</div>';
+  } else {
+    const offer=u*buyPct()/100;
+    const rows=GRADE_LADDER.map(([label,mult])=>{
+      const val=label==='Ungraded'?u:u*mult;
+      const est=label!=='Ungraded';
+      return '<tr><td>'+label+(est?' <span class="muted">est.</span>':'')+'</td><td class="money" style="text-align:right">'+money(val)+'</td></tr>';
+    }).join('');
+    body='<table style="width:100%;margin:8px 0"><tbody>'+rows+'</tbody></table>'+
+      '<div class="banner" style="margin:8px 0"><b>Suggested cash offer if buying: '+money(offer)+'</b><br><span class="muted">'+buyPct()+'% of ungraded market — change your % in Profile → Scan &amp; pricing.</span></div>'+
+      '<div class="muted" style="font-size:12px">Ungraded = live market'+(card.variant?(' ('+card.variant+')'):'')+' from TCGplayer via pokemontcg.io. Graded values are estimates from that price — always confirm against real sold listings below.</div>';
+  }
+  const q=(card.name?card.name:'')+(card.number?(' '+String(card.number).split('/')[0]):'');
+  const links='<div class="row" style="margin-top:10px;justify-content:center">'+
+    '<a class="btn-link" target="_blank" rel="noopener" href="'+ebaySold(q)+'">eBay solds ↗</a>'+
+    (card.tcgUrl?'<a class="btn-link" target="_blank" rel="noopener" href="'+card.tcgUrl+'">TCGplayer ↗</a>':'')+
+    '<a class="btn-link" target="_blank" rel="noopener" href="'+priceChartingLink(q)+'">PriceCharting ↗</a></div>';
+  const wrap=document.createElement('div'); wrap.className='scanmodal';
+  wrap.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:92vh;overflow:auto;text-align:left">'+
+    '<div class="row" style="gap:12px;align-items:flex-start">'+
+      '<img src="'+img+'" style="width:96px;height:auto;border-radius:10px;border:2px solid var(--gold);background:#000"/>'+
+      '<div style="flex:1;min-width:140px"><h3 style="margin:0 0 4px">'+esc(title)+'</h3><div class="muted">'+esc(sub||'—')+'</div></div></div>'+
+    body+links+
+    '<hr class="sep"><div class="row" style="justify-content:center">'+
+      (card.name?'<button class="gold" id="pqAdd">Add to inventory</button>':'')+
+      '<button class="ghost" id="pqClose">Close</button></div></div>';
+  document.body.appendChild(wrap);
+  const close=()=>wrap.remove();
+  wrap.querySelector('#pqClose').onclick=close;
+  wrap.addEventListener('click',e=>{ if(e.target===wrap)close(); });
+  const addBtn=wrap.querySelector('#pqAdd'); if(addBtn)addBtn.onclick=()=>{ close(); addQuotedToInventory(); };
+}
+/* prefill the Add screen from the last quote (with its real photo + market price) */
+function addQuotedToInventory(){
+  if(!lastQuote)return; const c=lastQuote.card;
+  const data={category:'Pokemon',set:c.set||'',name:c.name||'',number:c.number||'',rarity:c.rarity||'',variance:'Normal',language:'EN',grade:'Ungraded',condition:'NM',ownerId:state.currentUserId,costBasis:0,listPrice:Number(c.ungraded)||0,priceOverride:false};
+  const item=Object.assign({id:uid('item'),barcode:genBarcodeId(),photo:lastQuote.photo,stock:false,realImage:true,imgSrc:'manual',suggestedPrice:Number(c.ungraded)||0,status:'intake',needsReview:true,dateAdded:Date.now()},data);
+  state.inventory.push(item); logChange('inventory','added "'+(item.name||'item')+'" via price scan'); save();
+  toast('Added to Review — confirm the details.'); editItem(item.id);
 }
 
 /* -------- Graded slab: blur the certification number before saving -------- */
@@ -1090,6 +1203,7 @@ function viewSettings(){ const s=state.settings;
       '<label class="fld"><span>Upload your House of Cards logo (shows top-left)</span><input type="file" accept="image/*" onchange="saveLogo(this)"/></label>'+
       (s.logo?'<button class="ghost" onclick="state.settings.logo=null;save();render();toast(\'Logo removed.\')">Remove logo</button>':'')+
       '<div class="muted" style="margin-top:6px">Saved on this device. To show it on every device automatically, also drop the file as <b>logo.png</b> in the app folder.</div></div>'+
+    '<div class="card"><h3>Scan &amp; pricing</h3><label class="fld"><span>Cash offer % — when buying, offer this share of the ungraded market price</span>'+inp('s_buypct',(s.buyPct||70),'e.g. 70','number')+'</label><button class="gold" onclick="saveBuyPct()">Save %</button><div class="muted" style="margin-top:6px">Used by the "Scan a card → price" cash-offer line. Graded ladder values are estimates from the live ungraded market price (TCGplayer via pokemontcg.io); always confirm big cards against real sold listings.</div></div>'+
     '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
     '<div class="card"><h3>My account — '+esc(me().name)+'</h3>'+
       '<div class="muted" style="margin-bottom:8px">Each person signs into their own account. You can only change your own password.</div>'+
@@ -1111,6 +1225,7 @@ function viewSettings(){ const s=state.settings;
 function setAcct(m,v){state.paymentAccounts[m]=v;logChange('settings','set '+METHOD_LABEL[m]+' account');save();toast('Updated.');}
 function saveSettings(){state.settings.cashFloat=num('s_float');state.settings.prizePrice=num('s_prize');state.settings.prizePlaysPerShow=num('s_plays');logChange('settings','updated show defaults');save();toast('Saved.');}
 function savePtcg(){state.settings.ptcgKey=val('s_ptcg');save();toast('Image API key saved.');}
+function saveBuyPct(){ let p=Math.round(num('s_buypct')); if(!(p>0&&p<=100))p=70; state.settings.buyPct=p; save(); toast('Cash offer set to '+p+'%.'); }
 function saveLogo(input){ const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ state.settings.logo=r.result; save(); toast('Logo updated.'); render(); }; r.readAsDataURL(f); }
 function socialReadySafe(){ return typeof socialReady==='function' && socialReady(); }
 function saveAvatar(input){ const f=input.files[0]; if(!f)return;
