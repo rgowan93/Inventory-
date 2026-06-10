@@ -28,7 +28,8 @@ async function cloudInitSession(){
     if(data && data.session){ cloudUser=data.session.user;
       if(typeof enterCloudUser==='function'){ await enterCloudUser(); }   // stay signed in across refreshes
       else { await loadMyProfile(); render(); } }
-  }catch(e){ console.warn('[HoC] cloud session', e); }
+    else { if(typeof ui!=='undefined')ui.restoring=false; if(typeof render==='function')render(); }  // no saved login → show landing
+  }catch(e){ console.warn('[HoC] cloud session', e); if(typeof ui!=='undefined')ui.restoring=false; }
 }
 async function cloudSignUp(email,pass,name,handle){
   const { data, error } = await sb.auth.signUp({ email, password:pass });

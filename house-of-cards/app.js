@@ -14,14 +14,20 @@ const LANGUAGES = ['EN','JP','CN','Other'];
 /* ============================== cloud (Supabase) ============================== */
 let sb = null;                       // Supabase client, or null when offline-only
 function cloudOn(){ return !!sb; }
+const HOC_AUTH_KEY='hoc-auth';   // localStorage key Supabase uses to persist the login
 function initCloud(){
   try{ const c=window.HOC_CONFIG||{};
     if(c.SUPABASE_URL && c.SUPABASE_ANON_KEY && window.supabase){
-      sb = window.supabase.createClient(c.SUPABASE_URL, c.SUPABASE_ANON_KEY);
+      sb = window.supabase.createClient(c.SUPABASE_URL, c.SUPABASE_ANON_KEY, {
+        auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true, storageKey:HOC_AUTH_KEY }
+      });
       console.log('[HoC] cloud connected:', c.SUPABASE_URL);
     } else { console.log('[HoC] running offline (no Supabase config)'); }
   }catch(e){ console.warn('[HoC] cloud init failed', e); sb=null; }
 }
+/* a persisted login exists in this browser? (lets boot show "signing in…" instead of the
+   landing page, so a refresh never looks like a logout) */
+function hasStoredSession(){ try{ return !!localStorage.getItem(HOC_AUTH_KEY); }catch(e){ return false; } }
 function logoBucket(){ return (window.HOC_CONFIG&&window.HOC_CONFIG.LOGO_BUCKET)||'branding'; }
 /* public URL of the shared landing logo (same for every device); cache-busted by version */
 function cloudLogoUrl(){ const c=window.HOC_CONFIG||{}; if(!c.SUPABASE_URL)return null;
@@ -64,11 +70,12 @@ async function enterCloudUser(){
     if(state.cloudOwnerId && state.cloudOwnerId!==cloudUser.id){ stopImgJob(); state=freshState(); }
     state.cloudOwnerId=cloudUser.id;
     ensureLocalUser();
-    const pulled=await pullCloud();                                   // cloud copy wins when it exists
+    let pulled='error';
+    try{ pulled=await pullCloud(); }catch(e){ console.warn('[HoC] cloud pull failed — using local cache', e); }  // never strand on the landing page
     if(pulled==='empty'){ remapStateToUser(cloudUser.id); cloudPushSoon(); } // first login: adopt this device's data
     ensureLocalUser(); remapStateToUser(cloudUser.id);
     try{ await loadSocial(); fui.loaded=true; }catch(e){}
-    ui.authed=true; ui.route='dashboard'; state.session={userId:cloudUser.id,since:Date.now()};
+    ui.authed=true; ui.restoring=false; ui.route=ui.route||'dashboard'; state.session={userId:cloudUser.id,since:Date.now()};
     save(); render();
     try{ snapshotValue(); }catch(e){}
     try{ checkWantDeals(); }catch(e){}    // background daily wish-list price check
@@ -296,12 +303,13 @@ function render(){
   const logo=el('brandLogo'); if(logo){ if(state&&state.settings&&state.settings.logo){ logo.src=state.settings.logo; } else if(!logo.dataset.set){ logo.dataset.set='1'; logo.src='logo.png'; logo.onerror=()=>{logo.onerror=null;logo.src='logo.svg';}; } }
   const mb=el('menuBtn'); if(mb)mb.style.display=ui.authed?'':'none';
   if(!ui.authed){ el('whoBar').innerHTML=''; el('tabs').innerHTML=''; ui.menuOpen=false; applyMenu();
+    const bn0=el('botnav'); if(bn0)bn0.style.display='none';
+    if(ui.restoring){ stopBounce(); el('view').innerHTML='<div class="login" style="text-align:center;margin-top:18vh"><img src="'+landingLogo()+'" onerror="this.style.display=\'none\'" style="width:120px;height:auto;border-radius:18px;margin-bottom:18px"/><h2 class="page" style="justify-content:center">Signing you in…</h2><div class="muted">Restoring your session</div></div>'; updateImgChip(); return; }
     const av=ui.authView||'landing';
     if(av==='login'){ stopBounce(); el('view').innerHTML=viewLogin(); }
     else if(av==='signup'){ stopBounce(); el('view').innerHTML=viewSignup(); }
     else if(av==='subscribe'){ stopBounce(); el('view').innerHTML=viewSubscribe(); }
     else { el('view').innerHTML=viewLanding(); startBounce(); }
-    const bn0=el('botnav'); if(bn0)bn0.style.display='none';
     afterRenderFocus(); updateImgChip(); return; }
   stopBounce();
   el('whoBar').innerHTML=currentAvatarTag('sm')+'<span class="muted">'+esc(me().name)+'</span>'+
@@ -649,7 +657,9 @@ async function pcApi(path,params){
   params=Object.assign({},params||{}); if(pcToken())params.t=pcToken();
   try{ const { data, error } = await sb.functions.invoke('pricecharting',{ body:{ path, params } });
     if(error) return { error:(error.message||String(error)) };
-    return data||{};
+    const d=data||{};
+    if(d.status==='error') return { error:(d['error-message']||'PriceCharting error') };  // PriceCharting reports issues in the body
+    return d;
   }catch(e){ return { error:String(e) }; }
 }
 /* map our grade text to PriceCharting's card price fields (pennies → dollars) */
@@ -1424,7 +1434,9 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
   state.version=Math.max(state.version||0,4);   // v4 = cloud-first auth: your cloud account is the only login
   if(state.settings.menuOpen===undefined)state.settings.menuOpen=(window.innerWidth>=760);
   ui.menuOpen=state.settings.menuOpen;
+  ui.restoring=hasStoredSession();   // show "signing you in…" instead of the landing flash when a login is saved
   save();
-  render();   // landing — cloudInitSession below signs you back in if a session is saved
+  render();
   if(typeof cloudInitSession==='function'){ try{ await cloudInitSession(); }catch(e){ console.warn(e); } }
+  ui.restoring=false; if(!ui.authed)render();   // no valid session after all → fall back to the landing page
 })();
