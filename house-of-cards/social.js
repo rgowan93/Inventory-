@@ -361,7 +361,7 @@ function onAvatarPick(input){ const f=input.files[0]; if(!f)return; toast('Uploa
    wish list, settings, audit) is private, so it syncs as one JSONB document in
    public.user_state. Local IndexedDB stays as the offline cache; every save()
    schedules a debounced push of just what changed. */
-const STATE_DOC_KEYS=['version','paymentAccounts','settings','shows','currentShowId','trades','wantlist','sales','imageDB','audit'];
+const STATE_DOC_KEYS=['version','paymentAccounts','settings','shows','currentShowId','trades','wantlist','sales','imageDB','audit','valueHistory'];
 let _pushedItems=null, _pushedDoc=null, _pushTimer=null, _pushing=false;
 
 function buildStateDoc(){ const doc={}; STATE_DOC_KEYS.forEach(k=>{ if(state[k]!==undefined)doc[k]=state[k]; }); return doc; }

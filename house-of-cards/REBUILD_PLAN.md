@@ -27,6 +27,12 @@ Goal: move from a local/offline app to a multi-user cloud app.
 - [x] **Bonus — PriceCharting market prices** *(done)*
   - `pricecharting` edge function proxies the API (token never ships in page source).
   - Live market price on Add/Edit, bulk reprice on Inventory, trade valuations, wish-list checks, UPC autofill.
+- [x] **Bonus 2 — PriceCharting power features** *(done)*
+  - Collection value tracking: daily snapshots + chart on the dashboard (▲/▼ this week).
+  - Sell guardrails: cart lines flag "below market"; checkout confirms before selling too low (% in Settings).
+  - 📈 Sold comps per item: recent eBay/marketplace sold listings in a modal.
+  - Wish-list deal alerts: daily auto price check, 🔥 badge when under your max, manual "check now".
+  - 💰 "What's it worth?" scanner: photo → OCR → every grade's market price + suggested cash offer (buy % in Settings).
 - [ ] **Phase 3 — Companies + membership + invites**
   - Tables: company_members (role), company_invites.
   - Company inventory view pools members' items. Members can invite by username/email; invitee accepts.

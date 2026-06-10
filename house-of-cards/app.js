@@ -49,8 +49,8 @@ function freshState(){
     version:4,
     users:[], currentUserId:null, cloudOwnerId:null,
     paymentAccounts:{cash:'drawer',venmo:null,cashapp:null,paypal:null,square:null,zelle:null},
-    settings:{ cashFloat:200, floatOwnerId:null, prizePrice:10, prizePlaysPerShow:400, prizeSplit:[] },
-    inventory:[], shows:[], currentShowId:null, trades:[], wantlist:[], sales:[], imageDB:{}, audit:[]
+    settings:{ cashFloat:200, floatOwnerId:null, prizePrice:10, prizePlaysPerShow:400, prizeSplit:[], guardPct:20, buyPct:70 },
+    inventory:[], shows:[], currentShowId:null, trades:[], wantlist:[], sales:[], imageDB:{}, audit:[], valueHistory:[]
   };
 }
 
@@ -70,6 +70,8 @@ async function enterCloudUser(){
     try{ await loadSocial(); fui.loaded=true; }catch(e){}
     ui.authed=true; ui.route='dashboard'; state.session={userId:cloudUser.id,since:Date.now()};
     save(); render();
+    try{ snapshotValue(); }catch(e){}
+    try{ checkWantDeals(); }catch(e){}    // background daily wish-list price check
   } finally { _entering=false; }
 }
 /* the local roster is just the signed-in cloud account */
@@ -309,6 +311,7 @@ function render(){
     '<button class="menu-collapse" onclick="closeMenu()">‹ Collapse menu</button>'+
     TABS.map(([r,l])=>{ let label=l;
       if(r==='friends'&&typeof fui!=='undefined'&&fui.incoming&&fui.incoming.length) label+=' <span class="badge">'+fui.incoming.length+'</span>';
+      if(r==='wishlist'){ const d=(state.wantlist||[]).filter(w=>w.deal).length; if(d) label+=' <span class="badge">🔥'+d+'</span>'; }
       return '<button class="'+(active===r?'active':'')+'" onclick="go(\''+r+'\')">'+label+'</button>'; }).join('');
   applyMenu();
   const bn=el('botnav'); if(bn){ bn.style.display='flex';
@@ -483,11 +486,13 @@ function viewDashboard(){
   } else { showCard='<div class="card"><h3>No show running</h3><p class="muted">Start a show to begin selling (drawer opens with the '+money(state.settings.cashFloat)+' float).</p><button class="gold" onclick="go(\'reports\')">Go to Reports to start a show</button></div>'; }
   return '<h2 class="page">Dashboard <small>'+new Date().toLocaleDateString()+' · acting as '+me().name+'</small></h2>'+
     '<div class="kpi">'+kpi('Available',avail)+kpi('In intake',intake)+kpi('List value',money(totalValue))+kpi('Market value',money(marketValue))+'</div>'+
-    '<div style="height:14px"></div>'+showCard+
+    '<div style="height:14px"></div>'+showCard+valueChart()+
     '<div class="card"><h3>Quick actions</h3><div class="row">'+
     '<button onclick="go(\'add\')">＋ Add item</button><button onclick="go(\'sell\')">Sell</button>'+
+    '<button class="gold" onclick="worthScan()">💰 What’s it worth?</button>'+
     '<button onclick="go(\'labels\')">Print labels</button><button onclick="go(\'trades\')">Trades</button>'+
-    '<button class="ghost" onclick="loadSample()">Load sample data</button></div></div>';
+    '<button class="ghost" onclick="loadSample()">Load sample data</button></div>'+
+    '<div class="muted" style="margin-top:6px">💰 photographs any card (yours or a customer’s), reads it, and shows every grade’s market price plus a suggested cash offer.</div></div>';
 }
 function kpi(label,v){return '<div class="card"><div class="big">'+v+'</div><div class="muted">'+label+'</div></div>';}
 function countSold(show){let n=0;state.sales.filter(s=>s.showId===show.id&&s.status!=='voided').forEach(s=>s.lines.forEach(l=>{if(l.type!=='prize')n+=(l.qty||1);}));return n;}
@@ -523,6 +528,7 @@ function viewInventory(){
       (i.status==='available'?'<button class="sm gold" onclick="addBarcodeToCart(\''+i.barcode+'\')">Add to cart</button>':'')+
       ((i.status==='intake'&&i.needsReview)?'<button class="sm blue" onclick="finishIntake(\''+i.id+'\')">Confirm</button>':'')+
       ((i.status==='intake'&&!i.needsReview)?'<button class="sm blue" onclick="finishIntake(\''+i.id+'\')">Finish intake</button>':'')+
+      '<button class="sm" onclick="pcShowComps(\''+i.id+'\')" title="recent eBay/marketplace sold listings">📈 Comps</button>'+
       '<button class="sm ghost" onclick="markWrongImage(\''+i.id+'\')" title="fetch a different image">🚫 Wrong pic</button>'+
       ((i.status==='available'||i.status==='intake')?'<button class="sm red" onclick="deleteItem(\''+i.id+'\')">Delete</button>':'')+
       '</div></td></tr>').join('');
@@ -711,11 +717,121 @@ async function runPriceJob(items){
     priceJob.done++; if(priceJob.done%5===0)save();
     await sleep(220);   // stay friendly to the API
   }
-  priceJob.running=false; save();
+  priceJob.running=false; snapshotValue(true); save();
   toast('Market prices updated — '+priceJob.found+' of '+priceJob.total+' matched. Locked/graded prices were left alone (suggested price still refreshed).');
   if(ui.authed&&ui.route==='inventory')render();
 }
-function savePcToken(){ state.settings.pcToken=val('s_pctoken').trim(); save(); toast(state.settings.pcToken?'PriceCharting connected.':'Token cleared.'); }
+function savePcToken(){ state.settings.pcToken=val('s_pctoken').trim();
+  state.settings.guardPct=num('s_guard'); state.settings.buyPct=num('s_buypct')||70;
+  save(); toast(state.settings.pcToken?'PriceCharting connected.':'Token cleared.'); }
+
+/* ---- collection value tracking: a snapshot at most once a day (and after reprices) ---- */
+function snapshotValue(force){
+  state.valueHistory=state.valueHistory||[];
+  const last=state.valueHistory[state.valueHistory.length-1];
+  if(!force&&last&&(Date.now()-last.at)<20*3600*1000)return;
+  const avail=state.inventory.filter(i=>i.status==='available');
+  const market=avail.reduce((a,i)=>a+(Number(i.suggestedPrice)||Number(i.listPrice)||0),0);
+  const list=avail.reduce((a,i)=>a+(Number(i.listPrice)||0),0);
+  state.valueHistory.push({at:Date.now(),market:Math.round(market*100)/100,list:Math.round(list*100)/100,count:avail.length});
+  if(state.valueHistory.length>400)state.valueHistory=state.valueHistory.slice(-400);
+  save();
+}
+function valueChart(){
+  const h=state.valueHistory||[]; if(h.length<2)return '';
+  const w=600, ht=120, pad=8;
+  const vals=h.map(p=>p.market); const min=Math.min(...vals), max=Math.max(...vals); const span=(max-min)||1;
+  const pts=h.map((p,i)=>{ const x=pad+(w-2*pad)*i/(h.length-1); const y=ht-pad-(ht-2*pad)*((p.market-min)/span); return x.toFixed(1)+','+y.toFixed(1); }).join(' ');
+  const lastV=h[h.length-1].market;
+  let wk=h[0]; for(const p of h){ if(Date.now()-p.at>=7*86400000)wk=p; }
+  const wd=lastV-wk.market; const first=h[0].market; const diff=lastV-first; const pct=first>0?(diff/first*100):0;
+  return '<div class="card"><h3>Collection value over time</h3>'+
+    '<svg viewBox="0 0 '+w+' '+ht+'" style="width:100%;height:auto;display:block"><polyline fill="none" stroke="var(--gold)" stroke-width="3" points="'+pts+'"/></svg>'+
+    '<div class="row"><span class="muted">'+new Date(h[0].at).toLocaleDateString()+' → today · '+h.length+' snapshots</span>'+
+    '<span class="right" style="font-weight:900;color:'+(wd>=0?'var(--ok)':'var(--red)')+'">'+(wd>=0?'▲':'▼')+' '+money(Math.abs(wd))+' this week</span></div>'+
+    '<div class="muted" style="margin-top:4px">All-time: '+(diff>=0?'+':'−')+money(Math.abs(diff))+' ('+pct.toFixed(1)+'%). Snapshots happen daily when you use the app, and after every bulk reprice.</div></div>';
+}
+
+/* ---- sell-price guardrails: flag cart lines too far below market ---- */
+function guardPctVal(){ const v=Number(state.settings.guardPct); return isNaN(v)?20:v; }
+function belowMarket(c){ if(!c.itemId)return 0;
+  const it=state.inventory.find(i=>i.id===c.itemId); if(!it)return 0;
+  const mk=Number(it.suggestedPrice)||0; if(!(mk>0))return 0;
+  return (Number(c.soldPrice)||0)<mk*(1-guardPctVal()/100)?mk:0; }
+
+/* ---- recent sold listings (eBay / marketplace comps) for an item ---- */
+async function pcShowComps(itemId){
+  const it=state.inventory.find(x=>x.id===itemId); if(!it)return;
+  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  toast('Fetching sold listings…');
+  let pid=it.pcId;
+  if(!pid){ const r=await pcLookup(it); if(!r.ok){ toast('No PriceCharting match for this card.'); return; } pid=r.prod.id; it.pcId=pid; save(); }
+  const r=await pcApi('offers',{ product:pid, status:'sold' });
+  if(r&&r.error){ toast('Comps lookup failed: '+r.error); return; }
+  const offers=(r&&r.offers)||[];
+  const cents=o=>{ const v=[o.price,o['sale-price'],o['offer-price']].find(x=>x!=null); return Number(v)>0?Number(v)/100:0; };
+  const rows=offers.slice(0,15).map(o=>{
+    const px=cents(o); const when=o['sale-date']||o['ended-date']||o['date']||'';
+    const ttl=o.title||o['product-name']||it.name; const cond=o.condition||o['offer-status']||'';
+    return '<div class="cart-line"><div style="flex:1">'+esc(String(ttl))+'<div class="muted">'+esc(String(when))+(cond?' · '+esc(String(cond)):'')+'</div></div><div class="money">'+(px>0?money(px):'—')+'</div></div>'; }).join('');
+  const w=document.createElement('div'); w.className='scanmodal';
+  w.innerHTML='<div class="card" style="max-width:560px;width:94vw;max-height:80vh;overflow:auto"><h3>📈 Recent sold — '+esc(it.name||'')+'</h3>'+
+    (rows||'<div class="muted">No sold listings returned for this product yet.</div>')+
+    '<div class="muted" style="margin-top:8px">Source: PriceCharting marketplace &amp; eBay sold data. Your market price ('+money(Number(it.suggestedPrice)||0)+') is the smoothed average of sales like these.</div>'+
+    '<div class="row" style="margin-top:10px"><button class="ghost" onclick="this.closest(\'.scanmodal\').remove()">Close</button></div></div>';
+  w.onclick=e=>{ if(e.target===w)w.remove(); };
+  document.body.appendChild(w);
+}
+
+/* ---- wish-list deal alerts: refresh market prices, flag anything at/under your max ---- */
+let wantJobRunning=false;
+async function checkWantDeals(force){
+  if(!pcToken()||navigator.onLine===false||wantJobRunning)return;
+  const last=Number(state.settings.wantCheckAt)||0;
+  if(!force&&Date.now()-last<20*3600*1000)return;
+  if(!state.wantlist.length)return;
+  wantJobRunning=true; state.settings.wantCheckAt=Date.now();
+  if(force)toast('Checking the market for '+state.wantlist.length+' wish-list card(s)…');
+  let deals=0;
+  try{
+    for(const w of state.wantlist.slice()){
+      try{ const r=await pcLookup({name:w.text,set:w.set,number:w.number});
+        if(r.ok){ const px=pcPriceFor(r.prod,'Ungraded');
+          if(px>0){ w.marketPrice=px; w.marketAt=Date.now(); w.deal=!!(w.maxPrice&&px<=w.maxPrice); if(w.deal)deals++; } } }catch(e){}
+      await sleep(220);
+    }
+  } finally { wantJobRunning=false; }
+  save();
+  if(deals)toast('🔥 '+deals+' wish-list card(s) at or under your max price — check the Wish List!');
+  else if(force)toast('Wish-list prices refreshed — no deals under your max prices yet.');
+  if(ui.authed)render();
+}
+
+/* ---- “What’s it worth?” — photograph any card, get every grade’s market price ---- */
+function worthScan(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
+  inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; const r=new FileReader(); r.onload=async()=>{
+    toast('Reading the card…'); const c=await readCardFromImage(r.result);
+    if(!c.name){ toast('Couldn’t read the card — try a clearer, straight-on photo.'); return; }
+    worthLookup({name:c.name,set:c.set,number:c.number}); }; r.readAsDataURL(f); }; inp.click(); }
+async function worthLookup(q){
+  if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
+  toast('Pricing '+q.name+'…');
+  const r=await pcLookup(q);
+  if(!r.ok){ toast(r.error==='no match'?'No PriceCharting match found.':('Lookup failed: '+r.error)); return; }
+  const prod=r.prod;
+  const grades=[['Ungraded','loose-price'],['Grade 7','cib-price'],['Grade 8','new-price'],['Grade 9','graded-price'],['Grade 9.5','box-only-price'],['PSA 10','manual-only-price'],['BGS 10','bgs-10-price'],['CGC 10','condition-17-price'],['SGC 10','condition-18-price']];
+  const rows=grades.map(([g,f])=>{ const c=Number(prod[f]); return c>0?'<div class="cart-line"><div style="flex:1">'+g+'</div><div class="money">'+money(c/100)+'</div></div>':''; }).join('');
+  const mk=pcPriceFor(prod,'Ungraded'); const bp=Number(state.settings.buyPct)||70;
+  const offer=mk>0?'<div class="banner" style="margin-top:10px">💵 Suggested cash offer if buying: <b>'+money(mk*bp/100)+'</b> ('+bp+'% of ungraded market — set your % in Settings)</div>':'';
+  const vol=prod['sales-volume']?'<div class="muted" style="margin-top:6px">Sales volume: '+esc(String(prod['sales-volume']))+' — how often this sells; higher means easier to move.</div>':'';
+  const w=document.createElement('div'); w.className='scanmodal';
+  w.innerHTML='<div class="card" style="max-width:480px;width:94vw;max-height:82vh;overflow:auto"><h3>💰 '+esc(prod['product-name']||q.name)+'</h3>'+
+    '<div class="muted" style="margin-bottom:8px">'+esc(prod['console-name']||'')+'</div>'+
+    (rows||'<div class="muted">Matched, but no prices recorded yet.</div>')+offer+vol+
+    '<div class="row" style="margin-top:10px"><button class="ghost" onclick="this.closest(\'.scanmodal\').remove()">Close</button></div></div>';
+  w.onclick=e=>{ if(e.target===w)w.remove(); };
+  document.body.appendChild(w);
+}
 /* trades: value the incoming card at live market */
 async function pcFillTradeMarket(){
   if(!pcToken()){ toast('Paste your PriceCharting token in Settings → Market prices first.'); return; }
@@ -986,7 +1102,8 @@ function viewSell(){
       '<hr class="sep"><div class="row"><div class="big">'+money(cartTotal())+'</div>'+(ui.cart.length?'<button class="gold right" onclick="go(\'checkout\')">Payment →</button><button class="ghost" onclick="ui.cart=[];render()">Clear cart</button>':'')+'</div></div>';
 }
 function cartLineHTML(c,idx){ const adj=c.listPrice!=null&&Number(c.soldPrice)!==Number(c.listPrice);
-  return '<div class="cart-line"><div style="flex:1"><div>'+esc(c.desc)+'</div><div class="muted">'+(c.type==='card'?('owner '+userName(c.ownerId)):c.type)+(adj?' · was '+money(c.listPrice):'')+'</div>'+
+  const low=belowMarket(c);
+  return '<div class="cart-line"><div style="flex:1"><div>'+esc(c.desc)+(low?' <span class="tag" style="background:var(--red);color:#fff">⚠ below market '+money(low)+'</span>':'')+'</div><div class="muted">'+(c.type==='card'?('owner '+userName(c.ownerId)):c.type)+(adj?' · was '+money(c.listPrice):'')+'</div>'+
     (adj?'<input style="margin-top:5px;font-size:12px" value="'+esc(c.discountReason||'')+'" placeholder="reason for adjusted price (tracked)" onchange="ui.cart['+idx+'].discountReason=this.value"/>':'')+'</div>'+
     '<div style="width:110px"><input type="number" value="'+c.soldPrice+'" onchange="setCartPrice('+idx+',this.value)"/></div><button class="sm red" onclick="removeCart('+idx+')">✕</button></div>';
 }
@@ -1018,6 +1135,8 @@ function addPayment(){ const method=val('payMethod'); let amount=parseFloat(val(
   if(state.paymentAccounts[method]==='prompt'){ receivedById=val('payZelle')||state.currentUserId; } ui.cartPayments.push({method,amount,receivedById}); render(); }
 function completeSale(){ const total=cartTotal(); const paid=ui.cartPayments.reduce((a,p)=>a+(Number(p.amount)||0),0);
   if(!ui.cart.length){toast('Cart empty.');return;} if(Math.abs(total-paid)>0.005){ if(!confirm('Payments ('+money(paid)+') don\'t match total ('+money(total)+'). Record anyway?'))return; }
+  const lows=ui.cart.filter(c=>belowMarket(c));
+  if(lows.length && !confirm(lows.length+' line(s) are more than '+guardPctVal()+'% below market:\n'+lows.map(c=>'• '+c.desc+' — selling '+money(c.soldPrice)+' vs market '+money(belowMarket(c))).join('\n')+'\nComplete the sale anyway?'))return;
   const show=openShow(); if(!show){toast('No open show.');return;}
   const sale={id:uid('sale'),showId:show.id,createdById:state.currentUserId,createdAt:Date.now(),status:'completed',
     lines:ui.cart.map(c=>({id:uid('ln'),itemId:c.itemId,type:c.type,desc:c.desc,ownerId:c.ownerId,qty:c.qty||1,listPrice:c.listPrice,soldPrice:Number(c.soldPrice)||0,costBasis:c.costBasis||0,discountReason:c.discountReason||''})),
@@ -1091,8 +1210,8 @@ function pingWantList(item){ state.wantlist.forEach(w=>{ const hay=item.name+' '
 let wishQ='';
 function viewWishlist(){ let list=state.wantlist.slice().reverse();
   if(wishQ)list=list.filter(w=>smatch((w.text+' '+(w.set||'')+' '+(w.number||'')+' '+userName(w.userId)),wishQ));
-  const rows=list.map(w=>'<div class="cart-line"><div style="flex:1"><b>'+esc(w.text)+'</b>'+(w.qty&&w.qty>1?' <span class="tag">×'+w.qty+'</span>':'')+
-      '<div class="muted">'+(w.category?esc(w.category)+' · ':'')+(w.set?esc(w.set)+' ':'')+(w.number?'#'+esc(w.number)+' ':'')+'· wanted by '+userName(w.userId)+(w.maxPrice?' · up to '+money(w.maxPrice):'')+(w.note?' · '+esc(w.note):'')+'</div></div>'+
+  const rows=list.map(w=>'<div class="cart-line"><div style="flex:1"><b>'+esc(w.text)+'</b>'+(w.qty&&w.qty>1?' <span class="tag">×'+w.qty+'</span>':'')+(w.deal?' <span class="tag" style="background:var(--ok);color:#fff">🔥 deal — under your max!</span>':'')+
+      '<div class="muted">'+(w.category?esc(w.category)+' · ':'')+(w.set?esc(w.set)+' ':'')+(w.number?'#'+esc(w.number)+' ':'')+'· wanted by '+userName(w.userId)+(w.maxPrice?' · up to '+money(w.maxPrice):'')+(w.marketPrice?' · market '+money(w.marketPrice):'')+(w.note?' · '+esc(w.note):'')+'</div></div>'+
       '<button class="sm" title="check market price" onclick="pcWantPrice(\''+w.id+'\')">💲</button>'+
       '<button class="sm red" onclick="delWant(\''+w.id+'\')">✕</button></div>').join('');
   return '<h2 class="page">Wish list <small>when anyone scans/sells a match, the wanter gets pinged</small></h2>'+
@@ -1104,7 +1223,9 @@ function viewWishlist(){ let list=state.wantlist.slice().reverse();
       fld('How many',inp('w_qty','1','','number'))+
       fld('Max price (optional)',inp('w_max','','budget','number'))+
     '</div><label class="fld"><span>Note (optional)</span><input id="w_note" placeholder="condition, foil only, etc."/></label>'+
-    '<button class="gold" onclick="addWant()">Add to my wish list</button></div>'+
+    '<div class="row"><button class="gold" onclick="addWant()">Add to my wish list</button>'+
+    '<button class="blue" onclick="checkWantDeals(true)">💲 Check all prices now</button></div>'+
+    '<div class="muted" style="margin-top:6px">Prices also refresh automatically once a day — anything at or under your max price gets a 🔥 deal badge.</div></div>'+
     '<div class="card"><label class="fld"><span>Search wish list (partial)</span><input id="wishSearch" value="'+esc(wishQ)+'" oninput="wishQ=this.value;ui.focusId=\'wishSearch\';render()" placeholder="name, set, number"/></label></div>'+
     (list.length?'<div class="card">'+rows+'</div>':'<div class="empty">Nothing on the wish list yet.</div>'); }
 function addWant(){ const t=val('w_text'); if(!t){toast('Enter a card name.');return;}
@@ -1198,7 +1319,9 @@ function viewSettings(){ const s=state.settings;
       '<label class="fld"><span>Upload your House of Cards logo (shows top-left)</span><input type="file" accept="image/*" onchange="saveLogo(this)"/></label>'+
       (s.logo?'<button class="ghost" onclick="state.settings.logo=null;save();render();toast(\'Logo removed.\')">Remove logo</button>':'')+
       '<div class="muted" style="margin-top:6px">Saved on this device. To show it on every device automatically, also drop the file as <b>logo.png</b> in the app folder.</div></div>'+
-    '<div class="card"><h3>Market prices (PriceCharting)</h3><label class="fld"><span>PriceCharting API token (pricecharting.com → your account → API)</span>'+inp('s_pctoken',s.pcToken||'','paste your 40-character token')+'</label><button class="gold" onclick="savePcToken()">Save token</button><div class="muted" style="margin-top:6px">Powers “💲 Market price” on Add/Edit, bulk “Update market prices” on Inventory, trade valuations and wish-list checks — all from PriceCharting’s eBay sold-listing data, with graded values (PSA/BGS/CGC/SGC). Your token is stored in your private cloud settings and sent through your own server function — never in the page source.</div></div>'+
+    '<div class="card"><h3>Market prices (PriceCharting)</h3><label class="fld"><span>PriceCharting API token (pricecharting.com → your account → API)</span>'+inp('s_pctoken',s.pcToken||'','paste your 40-character token')+'</label>'+
+      '<div class="grid2">'+fld('Warn when selling more than this % below market',inp('s_guard',s.guardPct!=null?s.guardPct:20,'','number'))+fld('Cash-offer % of market (when buying cards)',inp('s_buypct',s.buyPct!=null?s.buyPct:70,'','number'))+'</div>'+
+      '<button class="gold" onclick="savePcToken()">Save</button><div class="muted" style="margin-top:6px">Powers “💲 Market price” on Add/Edit, bulk “Update market prices” on Inventory, “💰 What’s it worth?” on the Dashboard, 📈 sold comps, trade valuations and wish-list deal alerts — all from PriceCharting’s eBay sold-listing data, with graded values (PSA/BGS/CGC/SGC). Your token is stored in your private cloud settings and sent through your own server function — never in the page source.</div></div>'+
     '<div class="card"><h3>Card image source (free)</h3><label class="fld"><span>pokemontcg.io API key — OPTIONAL (free; leave blank to use without a key)</span>'+inp('s_ptcg',s.ptcgKey||'','optional, only speeds up big batches')+'</label><button class="gold" onclick="savePtcg()">Save key</button><div class="muted" style="margin-top:6px">No key needed — image fetching works free without one (pokemontcg.io + TCGdex fallback). A key just raises the daily limit for big imports.</div></div>'+
     '<div class="card"><h3>My account — '+esc(me().name)+'</h3>'+
       '<div class="muted" style="margin-bottom:8px">This is your cloud account — the same login works on every device, and your inventory follows you.</div>'+
@@ -1259,7 +1382,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
   initCloud();
   try{ state=await loadState(); }catch(e){ state=null; }
   if(!state){ state=freshState(); save(); }
-  state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];state.imageDB=state.imageDB||{};state.audit=state.audit||[];state.users=state.users||[];
+  state.sales=state.sales||[];state.trades=state.trades||[];state.wantlist=state.wantlist||[];state.imageDB=state.imageDB||{};state.audit=state.audit||[];state.users=state.users||[];state.valueHistory=state.valueHistory||[];
   state.version=Math.max(state.version||0,4);   // v4 = cloud-first auth: your cloud account is the only login
   if(state.settings.menuOpen===undefined)state.settings.menuOpen=(window.innerWidth>=760);
   ui.menuOpen=state.settings.menuOpen;
