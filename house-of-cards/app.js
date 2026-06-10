@@ -338,7 +338,8 @@ const FEATURES=[
   ['🎪','Shows & cash-outs','Run live shows, track the cash float, log cash-outs per person and finalize with a full report.'],
   ['🔄','Trades','Log two-way trades; incoming cards drop straight into intake, outgoing come out of stock.'],
   ['⭐','Wish list','Keep a want-list so you know what to hunt for at the next show or break.'],
-  ['📥','CSV import & pricing','Bulk-import inventory and re-price in seconds from a price CSV.'],
+  ['📥','CSV import & pricing','Bulk-import inventory and re-price in seconds from a price CSV — including PriceCharting price-guide downloads.'],
+  ['📈','Live market prices','PriceCharting-powered: auto-pricing from eBay sold data, graded values, sold comps, deal alerts and collection value tracking.'],
   ['📊','Reports','See profit by person, by show, and your sold history at a glance.'],
   ['👥','Shared team access','Everyone on your company shares the same data — and every change is signed by who made it.'],
   ['🕵️','Activity audit','A full, searchable log of who did what, so nothing ever gets lost.']];
@@ -775,10 +776,12 @@ async function pcShowComps(itemId){
     const ttl=o.title||o['product-name']||it.name; const cond=o.condition||o['offer-status']||'';
     return '<div class="cart-line"><div style="flex:1">'+esc(String(ttl))+'<div class="muted">'+esc(String(when))+(cond?' · '+esc(String(cond)):'')+'</div></div><div class="money">'+(px>0?money(px):'—')+'</div></div>'; }).join('');
   const w=document.createElement('div'); w.className='scanmodal';
+  const qstr=encodeURIComponent(((it.name||'')+' '+(it.number?('#'+String(it.number).split('/')[0]):'')+' '+(it.set||'')).replace(/\s+/g,' ').trim());
   w.innerHTML='<div class="card" style="max-width:560px;width:94vw;max-height:80vh;overflow:auto"><h3>📈 Recent sold — '+esc(it.name||'')+'</h3>'+
     (rows||'<div class="muted">No sold listings returned for this product yet.</div>')+
     '<div class="muted" style="margin-top:8px">Source: PriceCharting marketplace &amp; eBay sold data. Your market price ('+money(Number(it.suggestedPrice)||0)+') is the smoothed average of sales like these.</div>'+
-    '<div class="row" style="margin-top:10px"><button class="ghost" onclick="this.closest(\'.scanmodal\').remove()">Close</button></div></div>';
+    '<div class="row" style="margin-top:10px"><a href="https://www.ebay.com/sch/i.html?_nkw='+qstr+'&LH_Sold=1&LH_Complete=1" target="_blank" rel="noopener">More on eBay ↗</a>'+
+    '<button class="ghost right" onclick="this.closest(\'.scanmodal\').remove()">Close</button></div></div>';
   w.onclick=e=>{ if(e.target===w)w.remove(); };
   document.body.appendChild(w);
 }
@@ -823,11 +826,15 @@ async function worthLookup(q){
   const rows=grades.map(([g,f])=>{ const c=Number(prod[f]); return c>0?'<div class="cart-line"><div style="flex:1">'+g+'</div><div class="money">'+money(c/100)+'</div></div>':''; }).join('');
   const mk=pcPriceFor(prod,'Ungraded'); const bp=Number(state.settings.buyPct)||70;
   const offer=mk>0?'<div class="banner" style="margin-top:10px">💵 Suggested cash offer if buying: <b>'+money(mk*bp/100)+'</b> ('+bp+'% of ungraded market — set your % in Settings)</div>':'';
+  const rb=Number(prod['retail-loose-buy']), rs=Number(prod['retail-loose-sell']);
+  const retail=(rb>0||rs>0)?'<div class="muted" style="margin-top:6px">Typical store benchmark: buys at '+(rb>0?money(rb/100):'—')+' · sells at '+(rs>0?money(rs/100):'—')+'</div>':'';
   const vol=prod['sales-volume']?'<div class="muted" style="margin-top:6px">Sales volume: '+esc(String(prod['sales-volume']))+' — how often this sells; higher means easier to move.</div>':'';
+  const qstr=encodeURIComponent(((prod['product-name']||q.name)+' '+(prod['console-name']||'')).trim());
+  const links='<div class="row" style="margin-top:10px"><a href="https://www.ebay.com/sch/i.html?_nkw='+qstr+'&LH_Sold=1&LH_Complete=1" target="_blank" rel="noopener">eBay solds ↗</a><a href="https://www.pricecharting.com/search-products?type=prices&q='+qstr+'" target="_blank" rel="noopener">PriceCharting ↗</a></div>';
   const w=document.createElement('div'); w.className='scanmodal';
   w.innerHTML='<div class="card" style="max-width:480px;width:94vw;max-height:82vh;overflow:auto"><h3>💰 '+esc(prod['product-name']||q.name)+'</h3>'+
     '<div class="muted" style="margin-bottom:8px">'+esc(prod['console-name']||'')+'</div>'+
-    (rows||'<div class="muted">Matched, but no prices recorded yet.</div>')+offer+vol+
+    (rows||'<div class="muted">Matched, but no prices recorded yet.</div>')+offer+retail+vol+links+
     '<div class="row" style="margin-top:10px"><button class="ghost" onclick="this.closest(\'.scanmodal\').remove()">Close</button></div></div>';
   w.onclick=e=>{ if(e.target===w)w.remove(); };
   document.body.appendChild(w);
@@ -1013,9 +1020,11 @@ function mapCond(s){s=(s||'').toLowerCase().trim();return COND_MAP[s]||(CONDITIO
 function detectLang(name){const n=(name||'').toUpperCase();if(n.includes('(JP)')||n.includes(' JP'))return 'JP';if(n.includes('(CN)'))return 'CN';return 'EN';}
 const norm=s=>String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,'');
 function gradeMatch(a,b){const ag=(a||'Ungraded').toLowerCase().trim(),bg=(b||'Ungraded').toLowerCase().trim();const au=ag==='ungraded'||ag==='',bu=bg==='ungraded'||bg==='';if(au&&bu)return true;return ag===bg;}
-function rowMatches(it,r){ if(it.ownerId!==state.currentUserId)return false; if(norm(it.number)!==norm(r.number))return false;
+function rowMatches(it,r){ if(it.ownerId!==state.currentUserId)return false;
+  const itNum=r.pcGuide?String(it.number||'').split('/')[0]:it.number;   // PC guide numbers have no "/total"
+  if(norm(itNum)!==norm(r.number))return false;
   if(r.set && norm(it.set)!==norm(r.set) && !norm(it.set).includes(norm(r.set)) && !norm(r.set).includes(norm(it.set)))return false;
-  if(it.condition!==r.condition)return false; if((it.language||'EN')!==r.language)return false; if(!gradeMatch(it.grade,r.grade))return false; return true; }
+  if(r.condition && it.condition!==r.condition)return false; if((it.language||'EN')!==r.language)return false; if(!gradeMatch(it.grade,r.grade))return false; return true; }
 let csvRows=null, csvSummary=null;
 function viewImport(){
   if(!csvRows){
@@ -1043,6 +1052,24 @@ function viewImport(){
 }
 function onCSVFile(input){ const f=input.files[0]; if(!f)return; const reader=new FileReader();
   reader.onload=()=>{ try{ const rows=parseCSV(reader.result); if(rows.length<2){toast('CSV looks empty.');return;} const H=rows[0];
+    // PriceCharting price-guide download? (console-name + loose-price columns, prices in pennies)
+    const low=H.map(h=>h.toLowerCase().trim());
+    if(low.includes('console-name')&&low.includes('loose-price')){
+      const gi={cons:low.indexOf('console-name'),name:low.indexOf('product-name'),loose:low.indexOf('loose-price')};
+      csvRows=rows.slice(1).map(cells=>{ const get=i=>i>=0?(cells[i]||'').trim():'';
+        const pname=get(gi.name); const m=pname.match(/#\s*([0-9A-Za-z]+)/);
+        const name=pname.replace(/#\s*[0-9A-Za-z]+.*/,'').trim(), number=m?m[1]:'';
+        const set=get(gi.cons).replace(/^pokemon\s*/i,'').trim();
+        const raw=get(gi.loose); const n=parseFloat(raw.replace(/[^0-9.\-]/g,''))||0;
+        const price=raw.includes('.')?n:n/100;   // guide prices are pennies unless they carry a decimal point
+        const r={name,set,number,grade:'Ungraded',condition:'',language:'EN',variance:'',newPrice:price,csvMarket:price,csvOverride:false,removed:false,pcGuide:true};
+        r.matches=(name&&number)?state.inventory.filter(it=>it.status!=='sold'&&rowMatches(it,r)):[];
+        r.locked=r.matches.some(mm=>mm.priceOverride); r.action=r.locked?'keep':'use'; return r; })
+        .filter(r=>r.matches.length);   // the guide is enormous — keep only rows that match your inventory
+      toast(csvRows.length?('PriceCharting price guide detected — '+csvRows.length+' row(s) match your inventory.'):'PriceCharting guide detected, but nothing matched your inventory.');
+      if(!csvRows.length)csvRows=null;
+      render(); return;
+    }
     const ci={set:header(H,['set']),name:header(H,['product','name','card name']),number:header(H,['card number','number','card num','card nu']),variance:header(H,['variance','variant']),grade:header(H,['grade']),cond:header(H,['card condition','condition']),price:header(H,['market price','market','price']),override:header(H,['price override','override'])};
     if(ci.number<0&&ci.name<0){toast('Could not find a card name/number column.');return;}
     csvRows=rows.slice(1).map(cells=>{ const get=i=>i>=0?(cells[i]||'').trim():''; const name=get(ci.name),set=get(ci.set),number=get(ci.number);
@@ -1260,7 +1287,12 @@ function viewReports(){ const show=openShow(); let cur='';
     cur='<div class="card"><h3>No open show</h3><button class="gold" onclick="ui.showPanel=\'start\';render()">＋ Start a show</button></div>'+panel;
   }
   const finals=state.shows.filter(s=>s.status==='finalized').reverse().map(s=>'<div class="cart-line"><div style="flex:1"><b>'+esc(s.name)+'</b><div class="muted">finalized '+new Date(s.finalizedAt).toLocaleString()+'</div></div><button class="sm gold" onclick="viewReport(\''+s.id+'\')">View / print</button></div>').join('');
-  return '<h2 class="page">Reports <small>start a show, take sales, finalize for the money breakdown</small></h2>'+cur+
+  const margins=state.inventory.filter(i=>i.status==='available'&&Number(i.suggestedPrice)>0)
+    .map(i=>({i,m:(Number(i.suggestedPrice)||0)-(Number(i.costBasis)||0)})).sort((a,b)=>b.m-a.m).slice(0,10);
+  const marginCard=margins.length?'<div class="card"><h3>Top margin in stock <small class="muted">— market minus your cost</small></h3>'+
+    margins.map(x=>'<div class="cart-line"><div style="flex:1">'+esc(x.i.name||'')+' <span class="muted">'+esc(x.i.set||'')+(x.i.number?' #'+esc(x.i.number):'')+'</span></div><div class="muted">cost '+money(x.i.costBasis)+' · mkt '+money(x.i.suggestedPrice)+'</div><div class="money" style="color:'+(x.m>=0?'var(--ok)':'var(--red)')+'">'+(x.m>=0?'+':'−')+money(Math.abs(x.m))+'</div></div>').join('')+
+    '<div class="muted" style="margin-top:6px">Run “💲 Update market prices” on Inventory to refresh these numbers.</div></div>':'';
+  return '<h2 class="page">Reports <small>start a show, take sales, finalize for the money breakdown</small></h2>'+cur+marginCard+
     '<div class="card"><h3>Finalized shows</h3>'+(finals||'<div class="muted">None yet.</div>')+'</div><div id="reportOut"></div>';
 }
 function startShow(){ if(openShow()){toast('A show is already open.');return;} const name=val('sh_name')||'Card Show'; const show={id:uid('show'),name,date:Date.now(),status:'open',cashFloat:state.settings.cashFloat,prizePlaysStart:state.settings.prizePlaysPerShow,cashOuts:[],finalizedAt:null}; state.shows.push(show);state.currentShowId=show.id;ui.showPanel=null;logChange('shows','started show "'+name+'"');save();toast('Show started.');go('sell'); }

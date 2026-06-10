@@ -267,6 +267,44 @@ function companyRow(c){
       (c.bio?'<div class="muted">'+esc(c.bio)+'</div>':'')+'</div>'+
     '<div class="row" style="gap:6px">'+btn+'</div></div>'; }
 
+/* -------- Phase 4: view a friend's inventory (read-only; items RLS allows accepted friends) -------- */
+let finv={ open:false, owner:null, name:'', items:null, q:'' };
+function openFriendInv(otherId){ const f=fui.friends.find(x=>x.other.id===otherId);
+  viewFriendInventory(otherId,(f&&f.other&&f.other.name)||'Friend'); }
+async function viewFriendInventory(ownerId,name){
+  if(!socialReady())return;
+  finv={ open:true, owner:ownerId, name:name||'Friend', items:null, q:'' };
+  renderFriendInv();
+  const { data, error } = await sb.from('items').select('id,data').eq('owner_id',ownerId);
+  if(error){ toast('Could not load their inventory: '+error.message); finv.open=false; renderFriendInv(); return; }
+  finv.items=(data||[]).map(r=>r.data).filter(it=>it&&it.status==='available');
+  renderFriendInv();
+}
+function renderFriendInv(){
+  let m=el('finvModal');
+  if(!finv.open){ if(m)m.remove(); return; }
+  if(!m){ m=document.createElement('div'); m.id='finvModal'; m.className='scanmodal';
+    m.onclick=e=>{ if(e.target===m){ finv.open=false; m.remove(); } }; document.body.appendChild(m); }
+  const hadFocus=document.activeElement&&document.activeElement.id==='finvQ';
+  let body;
+  if(finv.items==null) body='<div class="muted">Loading their cards…</div>';
+  else {
+    let items=finv.items;
+    if(finv.q) items=items.filter(i=>smatch((i.name||'')+' '+(i.set||'')+' '+(i.number||''),finv.q));
+    body=(items.length?items.slice(0,200).map(i=>'<div class="cart-line">'+
+        (i.photo?'<img class="ph" style="width:44px;height:60px;border-radius:6px;object-fit:cover" src="'+i.photo+'"/>':'')+
+        '<div style="flex:1;min-width:0"><div>'+esc(i.name||'(unnamed)')+'</div><div class="muted">'+esc(i.set||'')+(i.number?' · #'+esc(i.number):'')+' · '+(i.condition||'NM')+(i.grade&&i.grade!=='Ungraded'?' · '+esc(i.grade):'')+'</div></div>'+
+        '<div class="money">'+money(i.listPrice)+'</div></div>').join('')
+      :'<div class="muted">'+(finv.q?'No matches.':'Nothing for sale right now.')+'</div>');
+  }
+  m.innerHTML='<div class="card" style="max-width:560px;width:94vw;max-height:84vh;overflow:auto"><h3>🃏 '+esc(finv.name)+'’s cards for sale'+(finv.items?' ('+finv.items.length+')':'')+'</h3>'+
+    '<input id="finvQ" placeholder="Search their cards…" value="'+esc(finv.q)+'" oninput="finv.q=this.value;renderFriendInv()" style="margin-bottom:8px"/>'+
+    body+
+    '<div class="muted" style="margin-top:8px">Read-only — message them to buy or trade.</div>'+
+    '<div class="row" style="margin-top:10px"><button class="ghost" onclick="finv.open=false;renderFriendInv()">Close</button></div></div>';
+  if(hadFocus){ const q=el('finvQ'); if(q){ q.focus(); try{ const n=q.value.length; q.setSelectionRange(n,n); }catch(e){} } }
+}
+
 /* -------- avatar helpers shared with the top bar -------- */
 function profileAvatar(p,size){ const c='avatar-'+(size||'sm');
   return (p&&p.avatar_url) ? '<img class="'+c+'" src="'+esc(p.avatar_url)+'" alt=""/>'
@@ -344,7 +382,7 @@ function friendRow(p,action,relId){
   if(action==='add') btn='<button class="blue sm" onclick="addFriend(\''+p.id+'\')">＋ Add friend</button> <button class="ghost sm" onclick="blockUser(\''+p.id+'\')">Block</button>';
   else if(action==='respond') btn='<button class="gold sm" onclick="respondFriend(\''+relId+'\',true)">Accept</button> <button class="ghost sm" onclick="respondFriend(\''+relId+'\',false)">Deny</button> <button class="red sm" onclick="blockUser(\''+p.id+'\')">Block</button>';
   else if(action==='related') btn='<span class="muted">pending / friend</span>';
-  else if(action==='friend') btn='<span class="pill avail">friend</span> <button class="ghost sm" onclick="unfriend(\''+relId+'\')">Remove</button> <button class="ghost sm" onclick="blockUser(\''+p.id+'\')">Block</button>';
+  else if(action==='friend') btn='<button class="gold sm" onclick="openFriendInv(\''+p.id+'\')">🃏 View inventory</button> <button class="ghost sm" onclick="unfriend(\''+relId+'\')">Remove</button> <button class="ghost sm" onclick="blockUser(\''+p.id+'\')">Block</button>';
   else if(action==='blocked') btn='<button class="ghost sm" onclick="unblockUser(\''+p.id+'\')">Unblock</button>';
   return '<div class="pickrow">'+profileAvatar(p,'sm')+
     '<div style="flex:1;min-width:0"><div style="font-weight:800">'+esc(p.name||'(no name)')+' '+dist+'</div>'+

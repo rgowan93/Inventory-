@@ -36,8 +36,13 @@ Goal: move from a local/offline app to a multi-user cloud app.
 - [ ] **Phase 3 — Companies + membership + invites**
   - Tables: company_members (role), company_invites.
   - Company inventory view pools members' items. Members can invite by username/email; invitee accepts.
-- [ ] **Phase 4 — Friends inventory viewing**
-  - Friends get a "View inventory" action (read-only). The RLS policy for it already exists on `items`.
+- [x] **Phase 4 — Friends inventory viewing** *(done)*
+  - "🃏 View inventory" on each friend opens their for-sale cards (read-only, searchable),
+    enforced by the friend-read RLS policy on `items`.
+- [x] **Bonus 3 — more PriceCharting features** *(done)*
+  - Retail buy/sell benchmarks + eBay/PriceCharting links in the worth scanner & comps.
+  - PriceCharting price-guide CSV downloads import directly (auto-detected, matched to inventory).
+  - "Top margin in stock" report (market minus cost).
 
 ## Notes
 - RLS (row-level security) is the key design work: "company members can read each other's items", "friends can read my items", "only I can edit mine".
