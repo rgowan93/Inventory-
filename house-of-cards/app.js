@@ -355,7 +355,7 @@ function viewWall(){
       '<img class="wall-logo" src="'+landingLogo()+'" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
-      '<button class="wall-cta" onclick="openTextSignup()">📲 Join our text updates</button>'+
+      '<button class="wall-cta" onclick="openTextSignup()">📲 Join our page</button>'+
       '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
       '<div class="wall-stats"><span>👥 <b id="wMembers">—</b> members</span><span class="dot">•</span><span>👀 <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
@@ -515,7 +515,7 @@ async function loadMedia(){
   cont.innerHTML=m.map(mediaCard).join(''); m.forEach(it=>loadComments(it.id));
 }
 function sharePage(){ const url=location.href;
-  if(navigator.share){ navigator.share({title:'House of Cards', text:'House of Cards — cards, breaks & deals', url:url}).catch(()=>{}); return; }
+  if(navigator.share){ navigator.share({title:'House of Cards', text:'House of Cards — cards, singles & deals', url:url}).catch(()=>{}); return; }
   if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(()=>toast('Link copied — paste to share.')).catch(()=>toast(url)); return; }
   toast(url);
 }
@@ -523,7 +523,7 @@ let _wallTaps=0,_wallTapT=0;
 function wallSecretTap(){ const n=Date.now(); if(n-_wallTapT>1500)_wallTaps=0; _wallTapT=n; if(++_wallTaps>=5){ _wallTaps=0; ui.authView='landing'; render(); } }
 function openTextSignup(){
   const w=document.createElement('div'); w.className='scanmodal';
-  w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="font-size:20px;color:var(--gold)">Join our text updates</h3>'+
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="font-size:20px;color:var(--gold)">Join our page</h3>'+
     '<div class="muted" style="margin-bottom:10px">Get first dibs on new singles, breaks &amp; show deals. We only text the good stuff — no spam.</div>'+
     '<label class="fld"><span>Your name</span><input id="w_name" autocomplete="name" placeholder="First name"/></label>'+
     '<label class="fld"><span>Mobile number</span><input id="w_phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(555) 123-4567"/></label>'+
