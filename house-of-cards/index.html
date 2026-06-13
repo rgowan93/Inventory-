@@ -68,6 +68,17 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .qrmiss{display:flex;align-items:center;justify-content:center;width:100%;max-width:190px;aspect-ratio:1/1;margin:0 auto;
   background:#0b0c11;border:2px dashed #3a3550;border-radius:12px;color:#5a5f78;font-size:12px}
 .wall-foot{text-align:center;color:var(--muted);margin-top:26px;font-weight:700}
+.wall-stats{margin-top:16px;color:var(--cream);font-weight:700;font-size:14px;display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.wall-stats b{color:var(--gold);font-size:17px}.wall-stats .dot{color:#3a3550}
+.revcard{text-align:center}
+.revavg{font-size:20px;font-weight:900;color:var(--gold);margin-bottom:10px}
+.revlist{margin-top:14px;text-align:left;display:grid;gap:10px}
+.rev{background:#11131c;border:1px solid #2c2f42;border-radius:12px;padding:10px 12px}
+.revstars{color:var(--gold);letter-spacing:2px}
+.revtext{color:var(--cream);margin:4px 0;font-weight:600}
+.revby{color:var(--muted);font-size:12px}
+.rvstars{font-size:34px;letter-spacing:6px;text-align:center;margin:6px 0 4px;cursor:pointer;color:#3a3550}
+.rvstars span{color:#3a3550;transition:color .1s}.rvstars span.on{color:var(--gold)}
 input,select,textarea{font-family:inherit;font-weight:700;background:#0b0c11;color:var(--cream);
   border:2px solid #2a2e40;border-radius:10px;padding:10px 11px;font-size:15px;width:100%}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold)}
@@ -233,8 +244,8 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260613h"></script>
-<script src="social.js?v=20260613h"></script>
-<script src="app.js?v=20260613h"></script>
+<script src="config.js?v=20260613i"></script>
+<script src="social.js?v=20260613i"></script>
+<script src="app.js?v=20260613i"></script>
 </body>
 </html>

@@ -254,7 +254,7 @@ function render(){
     else if(av==='signup'){ stopBounce(); el('view').innerHTML=viewSignup(); }
     else if(av==='subscribe'){ stopBounce(); el('view').innerHTML=viewSubscribe(); }
     else if(av==='landing'){ el('view').innerHTML=viewLanding(); startBounce(); }
-    else { stopBounce(); el('view').innerHTML=viewWall(); }
+    else { stopBounce(); el('view').innerHTML=viewWall(); if(typeof wallLoadStats==='function')wallLoadStats(); }
     const bn0=el('botnav'); if(bn0)bn0.style.display='none';
     afterRenderFocus(); updateImgChip(); return; }
   stopBounce();
@@ -331,7 +331,7 @@ const WALL_LINKS = {
   collectr:[ {name:'Reggie', url:'https://app.getcollectr.com/showcase/profile/f60bc1b7-32a8-44e8-a3ed-4016dfb6d4f6'},
              {name:'Manny',  url:'https://app.getcollectr.com/showcase/profile/6a3e41fe-4604-4024-ba28-e005ef4ff3a6'},
              {name:'Hailey', url:'https://app.getcollectr.com/showcase/profile/2c06f053-9f8a-4883-8e45-6a38e97d027e'} ],
-  website:'', tagline:'Singles • Slabs • Breaks • Sealed'
+  website:'', tagline:'Singles • Slabs • Sealed'
 };
 function wallCfg(){ return Object.assign({}, WALL_LINKS, (state.settings&&state.settings.wall)||{}); }
 const _isUrl=s=>/^https?:\/\//i.test(s||'');
@@ -356,8 +356,13 @@ function viewWall(){
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
       '<button class="wall-cta" onclick="openTextSignup()">📲 Join our text updates</button>'+
-      '<div class="wall-cta-sub">First dibs on new singles, breaks &amp; show deals</div>'+
+      '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
+      '<div class="wall-stats"><span>👥 <b id="wMembers">—</b> members</span><span class="dot">•</span><span>👀 <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
+    '<div class="wall-sec">Reviews</div>'+
+    '<div class="card revcard"><div id="wRevAvg" class="revavg">Loading reviews…</div>'+
+      '<button class="wall-share" onclick="openReview()">★ Leave a review</button>'+
+      '<div id="wRevList" class="revlist"></div></div>'+
     '<div class="wall-sec">Visit our page</div><div class="qrgrid">'+
       '<div class="qrtile"><div class="qrlabel">Our Page</div>'+qrImg(pageUrl)+'<div class="qrsub">Scan to open this page on your phone</div></div>'+
     '</div>'+
@@ -403,6 +408,45 @@ function openLeadGate(url){
     if(phone.replace(/\D/g,'').length<10){ toast('Please enter a valid 10-digit mobile number.'); return; }
     saveLead(name,phone); close(); openUrl(url); };
   setTimeout(()=>{ const n=w.querySelector('#lg_name'); if(n)n.focus(); },60);
+}
+/* ---- Wall cloud bits (reviews + counters). All degrade gracefully if the tables aren't set up. ---- */
+function sbBase(){ const c=window.HOC_CONFIG||{}; return {base:(c.SUPABASE_URL||'').replace(/\/$/,''), key:c.SUPABASE_ANON_KEY||''}; }
+async function sbGet(path){ const {base,key}=sbBase(); if(!base||!key)return null; try{ const r=await fetch(base+'/rest/v1/'+path,{headers:{apikey:key,Authorization:'Bearer '+key}}); if(!r.ok)return null; return await r.json(); }catch(e){ return null; } }
+async function sbRpc(fn,args){ const {base,key}=sbBase(); if(!base||!key)return null; try{ const r=await fetch(base+'/rest/v1/rpc/'+fn,{method:'POST',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(args||{})}); if(!r.ok)return null; return await r.json(); }catch(e){ return null; } }
+async function sbInsert(table,obj){ const {base,key}=sbBase(); if(!base||!key)return false; try{ const r=await fetch(base+'/rest/v1/'+table,{method:'POST',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify(obj)}); return r.ok; }catch(e){ return false; } }
+function starStr(n){ n=Math.max(0,Math.min(5,n|0)); return '★★★★★'.slice(0,n)+'☆☆☆☆☆'.slice(0,5-n); }
+let _visitBumped=false, _wallVisits=null;
+async function wallLoadStats(){
+  const set=(id,t)=>{ const e=el(id); if(e)e.textContent=t; };
+  if(!_visitBumped){ _visitBumped=true; const v=await sbRpc('bump_visits'); if(typeof v==='number')_wallVisits=v; }
+  if(_wallVisits!=null) set('wVisits',_wallVisits);
+  const m=await sbRpc('member_count'); if(typeof m==='number') set('wMembers',m);
+  const rev=await sbGet('reviews?select=name,stars,comment,created_at&order=created_at.desc&limit=200');
+  if(Array.isArray(rev)){ const n=rev.length; const avg=n?(rev.reduce((a,r)=>a+(+r.stars||0),0)/n):0;
+    set('wRevAvg', n?(avg.toFixed(1)+' ★  ·  '+n+' review'+(n===1?'':'s')):'No reviews yet — be the first!');
+    const list=el('wRevList'); if(list){ list.innerHTML=rev.slice(0,12).map(r=>'<div class="rev"><div class="revstars">'+starStr(r.stars)+'</div>'+(r.comment?('<div class="revtext">'+esc(r.comment)+'</div>'):'')+'<div class="revby">— '+(r.name?esc(r.name):'Anonymous')+'</div></div>').join(''); }
+  } else { set('wRevAvg','Reviews open soon'); }
+}
+function openReview(){
+  let chosen=5;
+  const w=document.createElement('div'); w.className='scanmodal';
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="color:var(--gold)">Leave a review</h3>'+
+    '<div id="rvStars" class="rvstars">'+[1,2,3,4,5].map(i=>'<span data-v="'+i+'">★</span>').join('')+'</div>'+
+    '<label class="fld"><span>Comment (optional)</span><textarea id="rv_c" rows="3" placeholder="How was your experience?"></textarea></label>'+
+    '<label class="fld"><span>Name (optional — leave blank to stay anonymous)</span><input id="rv_n" autocomplete="name"/></label>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="rv_go" style="flex:1">Submit review</button><button class="ghost" id="rv_x">Cancel</button></div></div>';
+  document.body.appendChild(w);
+  const paint=()=>w.querySelectorAll('#rvStars span').forEach(s=>s.classList.toggle('on',(+s.dataset.v)<=chosen));
+  w.querySelectorAll('#rvStars span').forEach(s=>s.onclick=()=>{ chosen=+s.dataset.v; paint(); }); paint();
+  const close=()=>w.remove();
+  w.querySelector('#rv_x').onclick=close;
+  w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.querySelector('#rv_go').onclick=async()=>{ const name=(w.querySelector('#rv_n').value||'').trim(); const comment=(w.querySelector('#rv_c').value||'').trim();
+    const ok=await sbInsert('reviews',{name:name||null,stars:chosen,comment:comment||null});
+    if(!ok){ toast('Couldn\'t submit — reviews aren\'t enabled yet.'); return; }
+    close(); toast('Thanks for the review! ⭐'); wallLoadStats();
+  };
+  setTimeout(()=>{ const c=w.querySelector('#rv_c'); if(c)c.focus(); },60);
 }
 function sharePage(){ const url=location.href;
   if(navigator.share){ navigator.share({title:'House of Cards', text:'House of Cards — cards, breaks & deals', url:url}).catch(()=>{}); return; }
