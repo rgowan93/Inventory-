@@ -79,6 +79,14 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .revby{color:var(--muted);font-size:12px}
 .rvstars{font-size:34px;letter-spacing:6px;text-align:center;margin:6px 0 4px;cursor:pointer;color:#3a3550}
 .rvstars span{color:#3a3550;transition:color .1s}.rvstars span.on{color:var(--gold)}
+.mediagrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.mcard{background:linear-gradient(180deg,#1c1e2b,#15161f);border:2px solid #2c2f42;border-radius:16px;padding:10px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+.mmedia{width:100%;border-radius:12px;background:#000;max-height:360px;object-fit:cover;display:block}
+.mcap{color:var(--cream);font-weight:700;margin:8px 2px 2px}
+.mmeta{color:var(--muted);font-size:11px;margin:2px}
+.mcomments{margin-top:8px;display:grid;gap:5px}
+.cmt{background:#11131c;border:1px solid #2c2f42;border-radius:9px;padding:6px 9px;font-size:13px;color:var(--cream)}
+.cmt b{color:var(--gold)}
 input,select,textarea{font-family:inherit;font-weight:700;background:#0b0c11;color:var(--cream);
   border:2px solid #2a2e40;border-radius:10px;padding:10px 11px;font-size:15px;width:100%}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold)}
@@ -244,8 +252,8 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260613i"></script>
-<script src="social.js?v=20260613i"></script>
-<script src="app.js?v=20260613i"></script>
+<script src="config.js?v=20260613j"></script>
+<script src="social.js?v=20260613j"></script>
+<script src="app.js?v=20260613j"></script>
 </body>
 </html>

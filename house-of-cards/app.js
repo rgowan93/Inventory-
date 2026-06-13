@@ -363,6 +363,9 @@ function viewWall(){
     '<div class="card revcard"><div id="wRevAvg" class="revavg">Loading reviews…</div>'+
       '<button class="wall-share" onclick="openReview()">★ Leave a review</button>'+
       '<div id="wRevList" class="revlist"></div></div>'+
+    '<div class="wall-sec">Show Photos &amp; Videos</div>'+
+    '<div id="wMediaAdmin"></div>'+
+    '<div id="wMedia" class="mediagrid"><div class="muted" style="text-align:center">Loading…</div></div>'+
     '<div class="wall-sec">Visit our page</div><div class="qrgrid">'+
       '<div class="qrtile"><div class="qrlabel">Our Page</div>'+qrImg(pageUrl)+'<div class="qrsub">Scan to open this page on your phone</div></div>'+
     '</div>'+
@@ -426,6 +429,7 @@ async function wallLoadStats(){
     set('wRevAvg', n?(avg.toFixed(1)+' ★  ·  '+n+' review'+(n===1?'':'s')):'No reviews yet — be the first!');
     const list=el('wRevList'); if(list){ list.innerHTML=rev.slice(0,12).map(r=>'<div class="rev"><div class="revstars">'+starStr(r.stars)+'</div>'+(r.comment?('<div class="revtext">'+esc(r.comment)+'</div>'):'')+'<div class="revby">— '+(r.name?esc(r.name):'Anonymous')+'</div></div>').join(''); }
   } else { set('wRevAvg','Reviews open soon'); }
+  loadMedia();
 }
 function openReview(){
   let chosen=5;
@@ -447,6 +451,66 @@ function openReview(){
     close(); toast('Thanks for the review! ⭐'); wallLoadStats();
   };
   setTimeout(()=>{ const c=w.querySelector('#rv_c'); if(c)c.focus(); },60);
+}
+/* ---- Show photo/video gallery (admin = the 5 staff phones; everyone can view/like/comment) ---- */
+const ADMIN_PHONES=['7313639478','7313639465','3213059361','2567633389','8505438759'];
+function myName(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); const l=a[a.length-1]; return (l&&l.name)||''; }catch(e){ return ''; } }
+function myPhone(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); const l=a[a.length-1]; return (l&&l.phone)||''; }catch(e){ return ''; } }
+function isAdmin(){ let p=''; try{ p=localStorage.getItem('hoc_admin_phone')||''; }catch(e){} if(!p)p=myPhone(); p=String(p).replace(/\D/g,'').slice(-10); return !!p && ADMIN_PHONES.some(n=>n.slice(-10)===p); }
+function staffUnlock(){ const p=(prompt('Staff: enter your mobile number to unlock uploads')||'').replace(/\D/g,''); if(!p)return;
+  if(ADMIN_PHONES.some(n=>n.slice(-10)===p.slice(-10))){ try{ localStorage.setItem('hoc_admin_phone',p); }catch(e){} toast('Staff upload unlocked.'); loadMedia(); }
+  else toast('That number isn\'t on the staff list.'); }
+async function uploadMedia(file){ const {base,key}=sbBase(); if(!base||!key){ toast('Cloud not set up.'); return null; }
+  const ext=((file.name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'')||'bin';
+  const path=Date.now()+'-'+Math.random().toString(36).slice(2,8)+'.'+ext;
+  try{ const r=await fetch(base+'/storage/v1/object/show-media/'+path,{method:'POST',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},body:file});
+    if(!r.ok){ toast('Upload failed ('+r.status+').'); return null; }
+    return {path:path, url:base+'/storage/v1/object/public/show-media/'+path}; }catch(e){ toast('Upload failed.'); return null; } }
+function pickMedia(){ if(!isAdmin()){ staffUnlock(); return; } const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*,video/*';
+  inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading…'); const up=await uploadMedia(f); if(!up)return;
+    const caption=(prompt('Add a caption (optional):')||'').trim(); const kind=(f.type||'').indexOf('video')===0?'video':'photo';
+    const ok=await sbInsert('media',{kind:kind,path:up.path,url:up.url,caption:caption||null,uploader:myName()||null});
+    if(!ok){ toast('File uploaded but saving the post failed.'); return; } toast('Posted! 🎉'); loadMedia(); };
+  inp.click(); }
+async function deleteMedia(id){ if(!isAdmin())return; if(!confirm('Delete this post?'))return; const {base,key}=sbBase();
+  try{ await fetch(base+'/rest/v1/media?id=eq.'+id,{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}); }catch(e){} toast('Deleted.'); loadMedia(); }
+function likedKey(id){ return 'hoc_like_'+id; }
+function mediaLiked(id){ try{ return !!localStorage.getItem(likedKey(id)); }catch(e){ return false; } }
+async function toggleLike(id){ const liked=mediaLiked(id); const delta=liked?-1:1;
+  try{ if(liked)localStorage.removeItem(likedKey(id)); else localStorage.setItem(likedKey(id),'1'); }catch(e){}
+  const n=await sbRpc('like_media',{mid:id,delta:delta}); const s=el('lk'+id); if(s&&typeof n==='number')s.textContent=n;
+  const b=el('lb'+id); if(b)b.classList.toggle('gold',!liked); }
+async function loadComments(id){ const c=el('cm'+id); if(!c)return; const list=await sbGet('media_comments?select=name,body,created_at&media_id=eq.'+id+'&order=created_at.asc&limit=100');
+  if(Array.isArray(list)) c.innerHTML=list.map(x=>'<div class="cmt"><b>'+(x.name?esc(x.name):'Anon')+':</b> '+esc(x.body)+'</div>').join(''); }
+function openComments(id){ const w=document.createElement('div'); w.className='scanmodal';
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="color:var(--gold)">Add a comment</h3>'+
+    '<label class="fld"><span>Name (optional)</span><input id="cm_n" autocomplete="name"/></label>'+
+    '<label class="fld"><span>Comment</span><textarea id="cm_b" rows="3"></textarea></label>'+
+    '<div class="row"><button class="gold" id="cm_go" style="flex:1">Post</button><button class="ghost" id="cm_x">Cancel</button></div></div>';
+  document.body.appendChild(w); const close=()=>w.remove(); w.querySelector('#cm_x').onclick=close; w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.querySelector('#cm_go').onclick=async()=>{ const name=(w.querySelector('#cm_n').value||'').trim(); const body=(w.querySelector('#cm_b').value||'').trim();
+    if(!body){ toast('Type a comment first.'); return; } const ok=await sbInsert('media_comments',{media_id:id,name:name||null,body:body});
+    if(!ok){ toast('Couldn\'t post comment.'); return; } close(); loadComments(id); };
+  setTimeout(()=>{ const b=w.querySelector('#cm_b'); if(b)b.focus(); },60); }
+function mediaCard(it){
+  const media=(it.kind==='video')?('<video class="mmedia" src="'+esc(it.url)+'" controls playsinline preload="metadata"></video>'):('<img class="mmedia" loading="lazy" src="'+esc(it.url)+'"/>');
+  const del=isAdmin()?('<button class="sm red" onclick="deleteMedia('+it.id+')">Delete</button>'):'';
+  return '<div class="mcard">'+media+
+    (it.caption?('<div class="mcap">'+esc(it.caption)+'</div>'):'')+
+    '<div class="mmeta">'+(it.uploader?(esc(it.uploader)+' · '):'')+new Date(it.created_at).toLocaleString()+'</div>'+
+    '<div class="row" style="gap:8px;margin-top:6px"><button id="lb'+it.id+'" class="sm '+(mediaLiked(it.id)?'gold':'ghost')+'" onclick="toggleLike('+it.id+')">❤ <span id="lk'+it.id+'">'+(it.likes||0)+'</span></button>'+
+      '<button class="sm ghost" onclick="openComments('+it.id+')">💬 Comment</button>'+del+'</div>'+
+    '<div id="cm'+it.id+'" class="mcomments"></div></div>';
+}
+async function loadMedia(){
+  const adm=el('wMediaAdmin'); if(adm){ adm.innerHTML = isAdmin()
+    ? '<div class="row" style="justify-content:center;margin-bottom:14px"><button class="gold" onclick="pickMedia()">＋ Add photo / video</button></div>'
+    : '<div style="text-align:center;margin-bottom:14px"><button class="btn-link" onclick="staffUnlock()">Staff upload</button></div>'; }
+  const cont=el('wMedia'); if(!cont)return;
+  const m=await sbGet('media?select=id,kind,url,caption,uploader,likes,created_at&order=created_at.desc&limit=60');
+  if(!Array.isArray(m)){ cont.innerHTML='<div class="muted" style="text-align:center">Gallery opens soon.</div>'; return; }
+  if(!m.length){ cont.innerHTML='<div class="muted" style="text-align:center">No posts yet — check back during the show!</div>'; return; }
+  cont.innerHTML=m.map(mediaCard).join(''); m.forEach(it=>loadComments(it.id));
 }
 function sharePage(){ const url=location.href;
   if(navigator.share){ navigator.share({title:'House of Cards', text:'House of Cards — cards, breaks & deals', url:url}).catch(()=>{}); return; }
