@@ -363,9 +363,6 @@ function viewWall(){
     '<div class="card revcard"><div id="wRevAvg" class="revavg">Loading reviews…</div>'+
       '<button class="wall-share" onclick="openReview()">★ Leave a review</button>'+
       '<div id="wRevList" class="revlist"></div></div>'+
-    '<div class="wall-sec">Show Photos &amp; Videos</div>'+
-    '<div id="wMediaAdmin"></div>'+
-    '<div id="wMedia" class="mediagrid"><div class="muted" style="text-align:center">Loading…</div></div>'+
     '<div class="wall-sec">Visit our page</div><div class="qrgrid">'+
       '<div class="qrtile"><div class="qrlabel">Our Page</div>'+qrImg(pageUrl)+'<div class="qrsub">Scan to open this page on your phone</div></div>'+
     '</div>'+
@@ -386,6 +383,9 @@ function viewWall(){
       pay('PayPal', w.paypal?paypalUrl(w.paypal):'', 'assets/wall/paypal-photo.jpeg', w.paypal)+
     '</div>'+
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
+    '<div class="wall-sec" onclick="mediaSecTap()">Show Photos &amp; Videos</div>'+
+    '<div id="wMediaAdmin"></div>'+
+    '<div id="wMedia" class="mediagrid"><div class="muted" style="text-align:center">Loading…</div></div>'+
     '<div class="wall-foot" style="opacity:.35;font-size:11px">tap the title to manage</div>'+
   '</div>';
 }
@@ -457,6 +457,8 @@ const ADMIN_PHONES=['7313639478','7313639465','3213059361','2567633389','8505438
 function myName(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); const l=a[a.length-1]; return (l&&l.name)||''; }catch(e){ return ''; } }
 function myPhone(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); const l=a[a.length-1]; return (l&&l.phone)||''; }catch(e){ return ''; } }
 function isAdmin(){ let p=''; try{ p=localStorage.getItem('hoc_admin_phone')||''; }catch(e){} if(!p)p=myPhone(); p=String(p).replace(/\D/g,'').slice(-10); return !!p && ADMIN_PHONES.some(n=>n.slice(-10)===p); }
+let _mediaTaps=0,_mediaTapT=0;
+function mediaSecTap(){ const n=Date.now(); if(n-_mediaTapT>1500)_mediaTaps=0; _mediaTapT=n; if(++_mediaTaps>=4){ _mediaTaps=0; staffUnlock(); } }  // hidden: 4 taps on the section title to unlock staff upload
 function staffUnlock(){ const p=(prompt('Staff: enter your mobile number to unlock uploads')||'').replace(/\D/g,''); if(!p)return;
   if(ADMIN_PHONES.some(n=>n.slice(-10)===p.slice(-10))){ try{ localStorage.setItem('hoc_admin_phone',p); }catch(e){} toast('Staff upload unlocked.'); loadMedia(); }
   else toast('That number isn\'t on the staff list.'); }
@@ -505,7 +507,7 @@ function mediaCard(it){
 async function loadMedia(){
   const adm=el('wMediaAdmin'); if(adm){ adm.innerHTML = isAdmin()
     ? '<div class="row" style="justify-content:center;margin-bottom:14px"><button class="gold" onclick="pickMedia()">＋ Add photo / video</button></div>'
-    : '<div style="text-align:center;margin-bottom:14px"><button class="btn-link" onclick="staffUnlock()">Staff upload</button></div>'; }
+    : ''; }  // upload is invisible to everyone but the 5 staff phones
   const cont=el('wMedia'); if(!cont)return;
   const m=await sbGet('media?select=id,kind,url,caption,uploader,likes,created_at&order=created_at.desc&limit=60');
   if(!Array.isArray(m)){ cont.innerHTML='<div class="muted" style="text-align:center">Gallery opens soon.</div>'; return; }
