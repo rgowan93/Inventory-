@@ -324,7 +324,7 @@ function viewLanding(){
    No login/sign-up shown. The owner reaches the real app by tapping the title 5×. */
 const WALL_LINKS = {
   facebook:'https://m.facebook.com/profile.php?id=61587226816031&name=xhp_nt__fb__action__open_user',
-  instagram:'', tiktok:'',
+  instagram:'houseofcards_850', tiktok:'houseofcards57',
   venmo:'', cashapp:'', paypal:'',   // handles or full links — filled in to make crisp QR codes
   website:'', tagline:'Singles • Slabs • Breaks • Sealed'
 };
