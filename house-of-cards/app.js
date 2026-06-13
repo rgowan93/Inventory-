@@ -327,7 +327,7 @@ const WALL_LINKS = {
   instagram:'houseofcards_850', tiktok:'houseofcards57',
   venmo:'https://venmo.com/code?user_id=2145411963813888862&created=1779586134',
   cashapp:'https://cash.app/$rgowan',
-  paypal:'',   // PayPal uses the clean QR screenshot in assets/wall/paypal-photo.jpeg
+  paypal:'Taylorgowan845',
   collectr:[ {name:'Reggie', url:'https://app.getcollectr.com/showcase/profile/f60bc1b7-32a8-44e8-a3ed-4016dfb6d4f6'},
              {name:'Manny',  url:'https://app.getcollectr.com/showcase/profile/6a3e41fe-4604-4024-ba28-e005ef4ff3a6'},
              {name:'Hailey', url:'https://app.getcollectr.com/showcase/profile/2c06f053-9f8a-4883-8e45-6a38e97d027e'} ],
