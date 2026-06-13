@@ -39,7 +39,7 @@ async function uploadCloudLogo(file){
 /* ============================== state ============================== */
 let state = null;
 let ui = { route:'dashboard', cart:[], cartPayments:[], focusId:null, sellPanel:null, showPanel:null,
-           tradeDraft:null, inForm:{}, zellePick:null, authed:false, loginUser:null, loginMode:'login', authView:'landing', menuOpen:false };
+           tradeDraft:null, inForm:{}, zellePick:null, authed:false, loginUser:null, loginMode:'login', authView:'wall', menuOpen:false };
 
 /* audit trail — everyone on a company shares access, but every change is signed by who made it */
 function logChange(area,detail){ if(!state)return; state.audit=state.audit||[]; state.audit.push({id:uid('log'),at:Date.now(),userId:state.currentUserId,area,detail}); if(state.audit.length>3000)state.audit=state.audit.slice(-3000); }
@@ -249,11 +249,12 @@ function render(){
   const logo=el('brandLogo'); if(logo){ if(state&&state.settings&&state.settings.logo){ logo.src=state.settings.logo; } else if(!logo.dataset.set){ logo.dataset.set='1'; logo.src='logo.png'; logo.onerror=()=>{logo.onerror=null;logo.src='logo.svg';}; } }
   const mb=el('menuBtn'); if(mb)mb.style.display=ui.authed?'':'none';
   if(!ui.authed){ el('whoBar').innerHTML=''; el('tabs').innerHTML=''; ui.menuOpen=false; applyMenu();
-    const av=ui.authView||'landing';
+    const av=ui.authView||'wall';
     if(av==='login'){ stopBounce(); el('view').innerHTML=viewLogin(); }
     else if(av==='signup'){ stopBounce(); el('view').innerHTML=viewSignup(); }
     else if(av==='subscribe'){ stopBounce(); el('view').innerHTML=viewSubscribe(); }
-    else { el('view').innerHTML=viewLanding(); startBounce(); }
+    else if(av==='landing'){ el('view').innerHTML=viewLanding(); startBounce(); }
+    else { stopBounce(); el('view').innerHTML=viewWall(); }
     const bn0=el('botnav'); if(bn0)bn0.style.display='none';
     afterRenderFocus(); updateImgChip(); return; }
   stopBounce();
@@ -317,6 +318,81 @@ function viewLanding(){
         '<button class="ghost lg" onclick="ui.authView=\'login\';render()">I already have an account</button></div>'+
     '</div>'+
   '</div>'; }
+
+/* ============================== Public "wall" landing (card-show front page) ==============================
+   Fancy, customer-facing page: social + payment QR codes and a "Join our text updates" capture.
+   No login/sign-up shown. The owner reaches the real app by tapping the title 5×. */
+const WALL_LINKS = {
+  facebook:'https://m.facebook.com/profile.php?id=61587226816031&name=xhp_nt__fb__action__open_user',
+  instagram:'', tiktok:'',
+  venmo:'', cashapp:'', paypal:'',   // handles or full links — filled in to make crisp QR codes
+  website:'', tagline:'Singles • Slabs • Breaks • Sealed'
+};
+function wallCfg(){ return Object.assign({}, WALL_LINKS, (state.settings&&state.settings.wall)||{}); }
+const _isUrl=s=>/^https?:\/\//i.test(s||'');
+function venmoUrl(h){ return _isUrl(h)?h:'https://venmo.com/u/'+String(h).replace(/^@/,''); }
+function cashUrl(h){ return _isUrl(h)?h:'https://cash.app/$'+String(h).replace(/^\$/,''); }
+function paypalUrl(h){ return _isUrl(h)?h:'https://paypal.me/'+String(h).replace(/^@/,''); }
+function igUrl(h){ return _isUrl(h)?h:'https://instagram.com/'+String(h).replace(/^@/,''); }
+function ttUrl(h){ return _isUrl(h)?h:'https://www.tiktok.com/@'+String(h).replace(/^@/,''); }
+function qrImg(data,size){ size=size||320; return '<img class="qr" loading="lazy" src="https://api.qrserver.com/v1/create-qr-code/?size='+size+'x'+size+'&margin=12&qzone=2&data='+encodeURIComponent(data)+'" alt="QR code"/>'; }
+function viewWall(){
+  const w=wallCfg();
+  const tile=(label,inner,sub)=>'<div class="qrtile"><div class="qrlabel">'+label+'</div>'+inner+(sub?('<div class="qrsub">'+esc(sub)+'</div>'):'')+'</div>';
+  const social=(label,url,sub)=>tile(label, url?qrImg(url):'<div class="qrmiss">link coming soon</div>', sub);
+  const pay=(label,url,photo,sub)=>tile(label, url?qrImg(url):(photo?('<img class="qr" loading="lazy" src="'+photo+'"/>'):'<div class="qrmiss">coming soon</div>'), sub);
+  return '<div class="wall">'+
+    '<div class="wall-hero">'+
+      '<img class="wall-logo" src="'+landingLogo()+'" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
+      '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
+      '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
+      '<button class="wall-cta" onclick="openTextSignup()">📲 Join our text updates</button>'+
+      '<div class="wall-cta-sub">First dibs on new singles, breaks &amp; show deals</div>'+
+    '</div>'+
+    '<div class="wall-sec">Follow us</div>'+
+    '<div class="qrgrid">'+
+      social('Facebook', w.facebook, 'Scan to follow')+
+      social('Instagram', w.instagram?igUrl(w.instagram):'', w.instagram?('@'+String(w.instagram).replace(/^@/,'')):'')+
+      social('TikTok', w.tiktok?ttUrl(w.tiktok):'', w.tiktok?('@'+String(w.tiktok).replace(/^@/,'')):'')+
+    '</div>'+
+    '<div class="wall-sec">Pay us</div>'+
+    '<div class="qrgrid">'+
+      pay('Venmo', w.venmo?venmoUrl(w.venmo):'', 'assets/wall/venmo-photo.jpeg', w.venmo)+
+      pay('Cash App', w.cashapp?cashUrl(w.cashapp):'', 'assets/wall/cashapp-photo.jpeg', w.cashapp)+
+      pay('PayPal', w.paypal?paypalUrl(w.paypal):'', 'assets/wall/paypal-photo.jpeg', w.paypal)+
+    '</div>'+
+    (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
+    '<div class="wall-foot" style="opacity:.35;font-size:11px">tap the title to manage</div>'+
+  '</div>';
+}
+let _wallTaps=0,_wallTapT=0;
+function wallSecretTap(){ const n=Date.now(); if(n-_wallTapT>1500)_wallTaps=0; _wallTapT=n; if(++_wallTaps>=5){ _wallTaps=0; ui.authView='landing'; render(); } }
+function openTextSignup(){
+  const w=document.createElement('div'); w.className='scanmodal';
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="font-size:20px;color:var(--gold)">Join our text updates</h3>'+
+    '<div class="muted" style="margin-bottom:10px">Get first dibs on new singles, breaks &amp; show deals. We only text the good stuff — no spam.</div>'+
+    '<label class="fld"><span>Your name</span><input id="w_name" autocomplete="name" placeholder="First name"/></label>'+
+    '<label class="fld"><span>Mobile number</span><input id="w_phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(555) 123-4567"/></label>'+
+    '<div class="row" style="margin-top:10px"><button class="gold" id="w_sub" style="flex:1">Sign me up</button><button class="ghost" id="w_cancel">Cancel</button></div></div>';
+  document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.querySelector('#w_cancel').onclick=close;
+  w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.querySelector('#w_sub').onclick=()=>{
+    const name=(w.querySelector('#w_name').value||'').trim();
+    const phone=(w.querySelector('#w_phone').value||'').trim();
+    if(phone.replace(/\D/g,'').length<10){ toast('Please enter a valid 10-digit mobile number.'); return; }
+    saveTextSignup(name,phone);
+    w.innerHTML='<div class="card" style="max-width:420px;width:100%;text-align:center"><div style="font-size:40px">🎉</div><h3 style="font-size:22px;color:var(--gold)">You\'re in!</h3><div class="muted" style="margin:8px 0 14px">Thanks'+(name?(', '+esc(name)):'')+' — watch your phone for updates from House of Cards.</div><button class="gold" onclick="this.closest(\'.scanmodal\').remove()">Done</button></div>';
+  };
+  setTimeout(()=>{ const n=w.querySelector('#w_name'); if(n)n.focus(); },60);
+}
+function signupList(){ try{ return JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); }catch(e){ return []; } }
+function saveTextSignup(name,phone){ const a=signupList(); a.push({name:name,phone:phone,ts:Date.now()}); try{ localStorage.setItem('hoc_textSignups',JSON.stringify(a)); }catch(e){} }
+function exportSignups(){ const a=signupList(); if(!a.length){ toast('No sign-ups collected yet.'); return; }
+  const csv='Name,Phone,Date\n'+a.map(r=>'"'+String(r.name||'').replace(/"/g,'""')+'","'+String(r.phone||'')+'","'+new Date(r.ts).toLocaleString()+'"').join('\n');
+  const link=document.createElement('a'); link.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv); link.download='house-of-cards-text-signups.csv'; link.click(); toast('Exported '+a.length+' sign-up(s).'); }
+function clearSignups(){ if(!confirm('Delete all text sign-ups collected on this device? Export first if you want to keep them.'))return; localStorage.removeItem('hoc_textSignups'); toast('Cleared.'); render(); }
 function uploadLogoPrompt(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
   inp.onchange=async ()=>{ const f=inp.files[0]; if(!f)return;
     const r=new FileReader(); r.onload=async ()=>{ state.settings.logo=r.result;   // keep a local copy for this device
@@ -446,7 +522,7 @@ function doReset(){ const u=ui.forgotUser?state.users.find(x=>x.id===ui.forgotUs
   const np=val('lg_new'); if(np.length<3){ toast('Pick a password of at least 3 characters.'); return; }
   u.pass=hashPass(np); u.mustChange=false; save(); ui.loginMode='login'; ui.forgotUser=null; toast('Password reset — sign in now.'); render();
 }
-function logout(){ ui.authed=false; ui.loginMode='login'; ui.authView='landing'; stopImgJob(); state.session=null; save();
+function logout(){ ui.authed=false; ui.loginMode='login'; ui.authView='wall'; stopImgJob(); state.session=null; save();
   if(typeof cloudSignOut==='function'){ try{ cloudSignOut(); }catch(e){} }   // clear cloud session so the next login connects fresh
   render(); }
 function switchUserPrompt(id){ if(id===state.currentUserId)return; const u=state.users.find(x=>x.id===id); if(!u)return;
@@ -1463,6 +1539,7 @@ function viewSettings(){ const s=state.settings;
       '<div class="grid2">'+fld('Question',inp('ac_q',me().secQ||'','e.g. First pet\'s name'))+fld('Answer',inp('ac_a','',me().secA?'(saved — type to change)':'your answer'))+'</div>'+
       '<button class="blue" onclick="saveSecurityQ()">Save security question</button></div>'+
     '<div class="card"><h3>Team</h3>'+state.users.map(u=>'• '+esc(u.name)+(u.id===state.currentUserId?' (you)':'')+(u.pass===hashPass('test')?' <span class="muted">— still using default password</span>':'')).join('<br>')+'<div class="muted" style="margin-top:6px">Everyone\'s password starts as <b>test</b> until they change it.</div></div>'+
+    '<div class="card"><h3>Text sign-ups ('+signupList().length+')</h3><div class="muted" style="margin-bottom:8px">People who joined your text list from the front wall (saved on this device). Export before a factory reset.</div><div class="row"><button class="gold" onclick="exportSignups()">Export CSV</button><button class="red ghost" onclick="clearSignups()">Clear</button></div></div>'+
     '<div class="card"><h3>Beta — reset data</h3><div class="banner">Clear everything you entered while testing so you start clean for your first real show.</div><div class="row" style="margin-top:10px"><button class="red" onclick="resetTestData()">Clear test data (keep team & settings)</button><button class="red ghost" onclick="factoryReset()">Full factory reset</button><button class="ghost right" onclick="loadSample()">Load sample data</button></div></div>'+
     '<div class="card"><h3>About</h3><div class="muted">Local beta — data stored only in this browser, works offline. Camera scanning works on the hosted (https) version in Safari and Chrome (the first scan downloads the scanner, so it needs internet once). Card-front auto-read and online image fetching need internet; reused/saved images and everything else work offline.</div></div>';
 }

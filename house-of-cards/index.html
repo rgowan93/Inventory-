@@ -37,6 +37,32 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .candpick{display:flex;gap:6px;overflow-x:auto;margin-top:8px}
 .candpick img{width:46px;height:64px;object-fit:cover;border-radius:6px;border:2px solid #333;cursor:pointer;flex:0 0 auto}
 .candpick img.on{border-color:var(--gold)}
+/* ===== Public card-show "wall" landing ===== */
+.wall{min-height:100%;padding:30px 18px 60px;max-width:760px;margin:0 auto;
+  background:radial-gradient(1200px 500px at 50% -120px,rgba(244,180,0,.16),transparent 70%),linear-gradient(180deg,#0d0e14,#15121d 60%,#0d0e14)}
+.wall-hero{text-align:center;margin-bottom:26px}
+.wall-logo{width:118px;height:118px;object-fit:contain;border-radius:22px;background:#000;border:3px solid var(--gold);
+  box-shadow:0 0 0 6px rgba(244,180,0,.12),0 14px 40px rgba(0,0,0,.6);margin-bottom:14px}
+.wall-title{font-size:clamp(30px,8vw,44px);font-weight:900;letter-spacing:2px;line-height:1;cursor:pointer;user-select:none;
+  text-shadow:0 3px 18px rgba(0,0,0,.6)}
+.wall-title b{color:var(--gold)}
+.wall-tag{color:var(--cream);opacity:.82;font-weight:700;letter-spacing:1px;margin-top:10px;text-transform:uppercase;font-size:13px}
+.wall-cta{margin-top:22px;background:linear-gradient(180deg,#FFCB2D,#F4B400);color:#1a1300;font-weight:900;font-size:19px;
+  border:3px solid #000;border-radius:16px;padding:16px 26px;box-shadow:0 10px 26px rgba(244,180,0,.35);width:100%;max-width:420px}
+.wall-cta-sub{color:var(--muted);font-size:12px;margin-top:7px}
+.wall-sec{font-size:13px;font-weight:900;letter-spacing:3px;text-transform:uppercase;color:var(--gold);
+  text-align:center;margin:30px 0 14px;position:relative}
+.wall-sec:before,.wall-sec:after{content:"";position:absolute;top:50%;width:24%;height:2px;background:linear-gradient(90deg,transparent,#3a3550)}
+.wall-sec:before{left:6%}.wall-sec:after{right:6%;background:linear-gradient(270deg,transparent,#3a3550)}
+.qrgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.qrtile{background:linear-gradient(180deg,#1c1e2b,#15161f);border:2px solid #2c2f42;border-radius:18px;padding:14px 12px 12px;
+  text-align:center;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+.qrlabel{font-weight:900;font-size:15px;color:var(--cream);margin-bottom:10px;letter-spacing:.5px}
+.qrtile .qr{width:100%;max-width:190px;aspect-ratio:1/1;object-fit:contain;background:#fff;border-radius:12px;padding:8px;border:2px solid #000}
+.qrsub{margin-top:9px;color:var(--muted);font-size:12px;font-weight:700;word-break:break-word}
+.qrmiss{display:flex;align-items:center;justify-content:center;width:100%;max-width:190px;aspect-ratio:1/1;margin:0 auto;
+  background:#0b0c11;border:2px dashed #3a3550;border-radius:12px;color:#5a5f78;font-size:12px}
+.wall-foot{text-align:center;color:var(--muted);margin-top:26px;font-weight:700}
 input,select,textarea{font-family:inherit;font-weight:700;background:#0b0c11;color:var(--cream);
   border:2px solid #2a2e40;border-radius:10px;padding:10px 11px;font-size:15px;width:100%}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold)}
@@ -202,8 +228,8 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260610d"></script>
-<script src="social.js?v=20260610d"></script>
-<script src="app.js?v=20260610d"></script>
+<script src="config.js?v=20260613a"></script>
+<script src="social.js?v=20260613a"></script>
+<script src="app.js?v=20260613a"></script>
 </body>
 </html>
