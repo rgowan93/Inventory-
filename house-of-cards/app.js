@@ -352,7 +352,7 @@ function viewWall(){
   const pageUrl=(location.href||'').split('#')[0];
   return '<div class="wall">'+
     '<div class="wall-hero">'+
-      '<img class="wall-logo" src="'+landingLogo()+'" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
+      '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
       '<button class="wall-cta" onclick="openTextSignup()">📲 Join our page</button>'+
