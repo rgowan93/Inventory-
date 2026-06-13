@@ -359,12 +359,8 @@ function viewWall(){
       '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
       '<div class="wall-stats"><span>👥 <b id="wMembers">—</b> members</span><span class="dot">•</span><span>👀 <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
-    '<div class="wall-sec">Reviews</div>'+
-    '<div class="card revcard"><div id="wRevAvg" class="revavg">Loading reviews…</div>'+
-      '<button class="wall-share" onclick="openReview()">★ Leave a review</button>'+
-      '<div id="wRevList" class="revlist"></div></div>'+
     '<div class="wall-sec">Visit our page</div><div class="qrgrid">'+
-      '<div class="qrtile"><div class="qrlabel">Our Page</div>'+qrImg(pageUrl)+'<div class="qrsub">Scan to open this page on your phone</div></div>'+
+      '<div class="qrtile tap" onclick="sharePage()"><div class="qrlabel">Our Page</div>'+qrImg(pageUrl)+'<div class="qrsub">Scan it — or tap to share the link</div></div>'+
     '</div>'+
     ((w.collectr&&w.collectr.filter(c=>c&&c.url).length)?(
       '<div class="wall-sec">Our Collection</div><div class="qrgrid">'+
@@ -383,6 +379,10 @@ function viewWall(){
       pay('PayPal', w.paypal?paypalUrl(w.paypal):'', 'assets/wall/paypal-photo.jpeg', w.paypal)+
     '</div>'+
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
+    '<div class="wall-sec">Reviews</div>'+
+    '<div class="card revcard"><div id="wRevAvg" class="revavg">Loading reviews…</div>'+
+      '<button class="wall-share" onclick="openReview()">★ Leave a review</button>'+
+      '<div id="wRevList" class="revlist"></div></div>'+
     '<div class="wall-sec" onclick="mediaSecTap()">Show Photos &amp; Videos</div>'+
     '<div id="wMediaAdmin"></div>'+
     '<div id="wMedia" class="mediagrid"><div class="muted" style="text-align:center">Loading…</div></div>'+
