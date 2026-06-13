@@ -325,7 +325,9 @@ function viewLanding(){
 const WALL_LINKS = {
   facebook:'https://m.facebook.com/profile.php?id=61587226816031&name=xhp_nt__fb__action__open_user',
   instagram:'houseofcards_850', tiktok:'houseofcards57',
-  venmo:'', cashapp:'', paypal:'',   // handles or full links — filled in to make crisp QR codes
+  venmo:'https://venmo.com/code?user_id=2145411963813888862&created=1779586134',
+  cashapp:'https://cash.app/$rgowan',
+  paypal:'',   // PayPal uses the clean QR screenshot in assets/wall/paypal-photo.jpeg
   website:'', tagline:'Singles • Slabs • Breaks • Sealed'
 };
 function wallCfg(){ return Object.assign({}, WALL_LINKS, (state.settings&&state.settings.wall)||{}); }
@@ -340,7 +342,7 @@ function viewWall(){
   const w=wallCfg();
   const tile=(label,inner,sub)=>'<div class="qrtile"><div class="qrlabel">'+label+'</div>'+inner+(sub?('<div class="qrsub">'+esc(sub)+'</div>'):'')+'</div>';
   const social=(label,url,sub)=>tile(label, url?qrImg(url):'<div class="qrmiss">link coming soon</div>', sub);
-  const pay=(label,url,photo,sub)=>tile(label, url?qrImg(url):(photo?('<img class="qr" loading="lazy" src="'+photo+'"/>'):'<div class="qrmiss">coming soon</div>'), sub);
+  const pay=(label,url,photo,sub)=>tile(label, url?qrImg(url):(photo?('<img class="qr qrphoto" loading="lazy" src="'+photo+'"/>'):'<div class="qrmiss">coming soon</div>'), sub);
   return '<div class="wall">'+
     '<div class="wall-hero">'+
       '<img class="wall-logo" src="'+landingLogo()+'" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
