@@ -328,6 +328,7 @@ const WALL_LINKS = {
   venmo:'https://venmo.com/code?user_id=2145411963813888862&created=1779586134',
   cashapp:'https://cash.app/$rgowan',
   paypal:'',   // PayPal uses the clean QR screenshot in assets/wall/paypal-photo.jpeg
+  collectr:[ {name:'Reggie', url:'https://app.getcollectr.com/showcase/profile/f60bc1b7-32a8-44e8-a3ed-4016dfb6d4f6'} ],  // add Manny here later
   website:'', tagline:'Singles • Slabs • Breaks • Sealed'
 };
 function wallCfg(){ return Object.assign({}, WALL_LINKS, (state.settings&&state.settings.wall)||{}); }
@@ -350,7 +351,12 @@ function viewWall(){
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
       '<button class="wall-cta" onclick="openTextSignup()">📲 Join our text updates</button>'+
       '<div class="wall-cta-sub">First dibs on new singles, breaks &amp; show deals</div>'+
+      '<button class="wall-share" onclick="sharePage()">📤 Share this page</button>'+
     '</div>'+
+    ((w.collectr&&w.collectr.filter(c=>c&&c.url).length)?(
+      '<div class="wall-sec">Our Collection</div><div class="qrgrid">'+
+      w.collectr.filter(c=>c&&c.url).map(c=>tile(esc(c.name)+'&rsquo;s cards', qrImg(c.url), 'Scan to view on Collectr')).join('')+'</div>'
+    ):'')+
     '<div class="wall-sec">Follow us</div>'+
     '<div class="qrgrid">'+
       social('Facebook', w.facebook, 'Scan to follow')+
@@ -366,6 +372,11 @@ function viewWall(){
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
     '<div class="wall-foot" style="opacity:.35;font-size:11px">tap the title to manage</div>'+
   '</div>';
+}
+function sharePage(){ const url=location.href;
+  if(navigator.share){ navigator.share({title:'House of Cards', text:'House of Cards — cards, breaks & deals', url:url}).catch(()=>{}); return; }
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(()=>toast('Link copied — paste to share.')).catch(()=>toast(url)); return; }
+  toast(url);
 }
 let _wallTaps=0,_wallTapT=0;
 function wallSecretTap(){ const n=Date.now(); if(n-_wallTapT>1500)_wallTaps=0; _wallTapT=n; if(++_wallTaps>=5){ _wallTaps=0; ui.authView='landing'; render(); } }
