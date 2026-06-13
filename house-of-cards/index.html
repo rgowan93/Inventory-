@@ -61,6 +61,9 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .qrlabel{font-weight:900;font-size:15px;color:var(--cream);margin-bottom:10px;letter-spacing:.5px}
 .qrtile .qr{width:100%;max-width:190px;aspect-ratio:1/1;object-fit:contain;background:#fff;border-radius:12px;padding:8px;border:2px solid #000}
 .qrtile .qr.qrphoto{object-fit:cover;padding:0}
+.qrtile.tap{cursor:pointer}
+.qrtile.tap:active{transform:translateY(1px)}
+.qrtap{margin-top:9px;color:var(--gold);font-weight:800;font-size:12px}
 .qrsub{margin-top:9px;color:var(--muted);font-size:12px;font-weight:700;word-break:break-word}
 .qrmiss{display:flex;align-items:center;justify-content:center;width:100%;max-width:190px;aspect-ratio:1/1;margin:0 auto;
   background:#0b0c11;border:2px dashed #3a3550;border-radius:12px;color:#5a5f78;font-size:12px}
@@ -230,8 +233,8 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260613e"></script>
-<script src="social.js?v=20260613e"></script>
-<script src="app.js?v=20260613e"></script>
+<script src="config.js?v=20260613f"></script>
+<script src="social.js?v=20260613f"></script>
+<script src="app.js?v=20260613f"></script>
 </body>
 </html>

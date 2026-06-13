@@ -342,9 +342,13 @@ function ttUrl(h){ return _isUrl(h)?h:'https://www.tiktok.com/@'+String(h).repla
 function qrImg(data,size){ size=size||320; return '<img class="qr" loading="lazy" src="https://api.qrserver.com/v1/create-qr-code/?size='+size+'x'+size+'&margin=12&qzone=2&data='+encodeURIComponent(data)+'" alt="QR code"/>'; }
 function viewWall(){
   const w=wallCfg();
-  const tile=(label,inner,sub)=>'<div class="qrtile"><div class="qrlabel">'+label+'</div>'+inner+(sub?('<div class="qrsub">'+esc(sub)+'</div>'):'')+'</div>';
-  const social=(label,url,sub)=>tile(label, url?qrImg(url):'<div class="qrmiss">link coming soon</div>', sub);
-  const pay=(label,url,photo,sub)=>tile(label, url?qrImg(url):(photo?('<img class="qr qrphoto" loading="lazy" src="'+photo+'"/>'):'<div class="qrmiss">coming soon</div>'), sub);
+  const j=s=>String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const tile=(label,inner,sub,onclick)=>'<div class="qrtile'+(onclick?' tap':'')+'"'+(onclick?(' onclick="'+onclick+'"'):'')+'>'+
+    '<div class="qrlabel">'+label+'</div>'+inner+(sub?('<div class="qrsub">'+sub+'</div>'):'')+(onclick?'<div class="qrtap">Tap to open ↗</div>':'')+'</div>';
+  const social=(label,url,sub)=>tile(label, url?qrImg(url):'<div class="qrmiss">link coming soon</div>', sub, url?("openUrl('"+j(url)+"')"):'');
+  const pay=(label,url,photo,sub)=>tile(label, url?qrImg(url):(photo?('<img class="qr qrphoto" loading="lazy" src="'+photo+'"/>'):'<div class="qrmiss">coming soon</div>'), sub, url?("gateOpen('"+j(url)+"')"):'');
+  const coll=c=>tile(esc(c.name)+'&rsquo;s cards', qrImg(c.url), 'Scan to view on Collectr', "gateOpen('"+j(c.url)+"')");
+  const pageUrl=(location.href||'').split('#')[0];
   return '<div class="wall">'+
     '<div class="wall-hero">'+
       '<img class="wall-logo" src="'+landingLogo()+'" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
@@ -352,11 +356,13 @@ function viewWall(){
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
       '<button class="wall-cta" onclick="openTextSignup()">📲 Join our text updates</button>'+
       '<div class="wall-cta-sub">First dibs on new singles, breaks &amp; show deals</div>'+
-      '<button class="wall-share" onclick="sharePage()">📤 Share this page</button>'+
+    '</div>'+
+    '<div class="wall-sec">Visit our page</div><div class="qrgrid">'+
+      '<div class="qrtile"><div class="qrlabel">Our Page</div>'+qrImg(pageUrl)+'<div class="qrsub">Scan to open this page on your phone</div></div>'+
     '</div>'+
     ((w.collectr&&w.collectr.filter(c=>c&&c.url).length)?(
       '<div class="wall-sec">Our Collection</div><div class="qrgrid">'+
-      w.collectr.filter(c=>c&&c.url).map(c=>tile(esc(c.name)+'&rsquo;s cards', qrImg(c.url), 'Scan to view on Collectr')).join('')+'</div>'
+      w.collectr.filter(c=>c&&c.url).map(coll).join('')+'</div>'
     ):'')+
     '<div class="wall-sec">Follow us</div>'+
     '<div class="qrgrid">'+
@@ -366,13 +372,36 @@ function viewWall(){
     '</div>'+
     '<div class="wall-sec">Pay us</div>'+
     '<div class="qrgrid">'+
-      pay('Venmo', w.venmo?venmoUrl(w.venmo):'', 'assets/wall/venmo-photo.jpeg', w.venmo)+
-      pay('Cash App', w.cashapp?cashUrl(w.cashapp):'', 'assets/wall/cashapp-photo.jpeg', w.cashapp)+
+      pay('Venmo', w.venmo?venmoUrl(w.venmo):'', '', w.venmo)+
+      pay('Cash App', w.cashapp?cashUrl(w.cashapp):'', '', w.cashapp)+
       pay('PayPal', w.paypal?paypalUrl(w.paypal):'', 'assets/wall/paypal-photo.jpeg', w.paypal)+
     '</div>'+
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
     '<div class="wall-foot" style="opacity:.35;font-size:11px">tap the title to manage</div>'+
   '</div>';
+}
+/* tap-to-open: pay & Collectr links capture name+phone the FIRST time on a device, then bypass; socials open directly */
+function leadRegistered(){ try{ return !!localStorage.getItem('hoc_lead'); }catch(e){ return false; } }
+function openUrl(url){ try{ window.open(url,'_blank','noopener'); }catch(e){ location.href=url; } }
+function gateOpen(url){ if(leadRegistered()){ openUrl(url); return; } openLeadGate(url); }
+function saveLead(name,phone){ saveTextSignup(name,phone); try{ localStorage.setItem('hoc_lead','1'); }catch(e){} cloudLead(name,phone); }
+function cloudLead(name,phone){ const cfg=window.HOC_CONFIG||{}; const base=(cfg.SUPABASE_URL||'').replace(/\/$/,''); const key=cfg.SUPABASE_ANON_KEY||''; if(!base||!key)return;
+  try{ fetch(base+'/rest/v1/leads',{method:'POST',headers:{'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({name:name,phone:phone,created_at:new Date().toISOString()})}).catch(()=>{}); }catch(e){} }
+function openLeadGate(url){
+  const w=document.createElement('div'); w.className='scanmodal';
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="font-size:20px;color:var(--gold)">Quick intro first 👋</h3>'+
+    '<div class="muted" style="margin-bottom:10px">Drop your name &amp; number once — then you\'re set and won\'t see this again on this phone.</div>'+
+    '<label class="fld"><span>Your name</span><input id="lg_name" autocomplete="name" placeholder="First name"/></label>'+
+    '<label class="fld"><span>Mobile number</span><input id="lg_phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(555) 123-4567"/></label>'+
+    '<div class="row" style="margin-top:10px"><button class="gold" id="lg_go" style="flex:1">Continue →</button><button class="ghost" id="lg_cancel">Cancel</button></div></div>';
+  document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.querySelector('#lg_cancel').onclick=close;
+  w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.querySelector('#lg_go').onclick=()=>{ const name=(w.querySelector('#lg_name').value||'').trim(); const phone=(w.querySelector('#lg_phone').value||'').trim();
+    if(phone.replace(/\D/g,'').length<10){ toast('Please enter a valid 10-digit mobile number.'); return; }
+    saveLead(name,phone); close(); openUrl(url); };
+  setTimeout(()=>{ const n=w.querySelector('#lg_name'); if(n)n.focus(); },60);
 }
 function sharePage(){ const url=location.href;
   if(navigator.share){ navigator.share({title:'House of Cards', text:'House of Cards — cards, breaks & deals', url:url}).catch(()=>{}); return; }
@@ -396,7 +425,7 @@ function openTextSignup(){
     const name=(w.querySelector('#w_name').value||'').trim();
     const phone=(w.querySelector('#w_phone').value||'').trim();
     if(phone.replace(/\D/g,'').length<10){ toast('Please enter a valid 10-digit mobile number.'); return; }
-    saveTextSignup(name,phone);
+    saveLead(name,phone);
     w.innerHTML='<div class="card" style="max-width:420px;width:100%;text-align:center"><div style="font-size:40px">🎉</div><h3 style="font-size:22px;color:var(--gold)">You\'re in!</h3><div class="muted" style="margin:8px 0 14px">Thanks'+(name?(', '+esc(name)):'')+' — watch your phone for updates from House of Cards.</div><button class="gold" onclick="this.closest(\'.scanmodal\').remove()">Done</button></div>';
   };
   setTimeout(()=>{ const n=w.querySelector('#w_name'); if(n)n.focus(); },60);
