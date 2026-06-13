@@ -99,6 +99,7 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .mcomments{margin-top:8px;display:grid;gap:5px}
 .cmt{background:#11131c;border:1px solid #2c2f42;border-radius:9px;padding:6px 9px;font-size:13px;color:var(--cream)}
 .cmt b{color:var(--gold)}
+.cmtdel{background:transparent;border:none;box-shadow:none;color:var(--red);font-weight:900;font-size:13px;padding:0 4px;cursor:pointer;float:right}
 input,select,textarea{font-family:inherit;font-weight:700;background:#0b0c11;color:var(--cream);
   border:2px solid #2a2e40;border-radius:10px;padding:10px 11px;font-size:15px;width:100%}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold)}
@@ -264,8 +265,8 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260613n"></script>
-<script src="social.js?v=20260613n"></script>
-<script src="app.js?v=20260613n"></script>
+<script src="config.js?v=20260613o"></script>
+<script src="social.js?v=20260613o"></script>
+<script src="app.js?v=20260613o"></script>
 </body>
 </html>

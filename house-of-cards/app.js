@@ -455,6 +455,8 @@ function openReview(){
 /* ---- Show photo/video gallery (admin = the 5 staff phones; everyone can view/like/comment) ---- */
 const ADMIN_PHONES=['7313639478','7313639465','3213059361','2567633389','8505438759'];
 function myName(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); const l=a[a.length-1]; return (l&&l.name)||''; }catch(e){ return ''; } }
+function savedName(){ let n=''; try{ n=localStorage.getItem('hoc_name')||''; }catch(e){} return n||myName()||''; }
+function rememberName(n){ n=(n||'').trim(); if(n){ try{ localStorage.setItem('hoc_name',n); }catch(e){} } }
 function myPhone(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); const l=a[a.length-1]; return (l&&l.phone)||''; }catch(e){ return ''; } }
 function isAdmin(){ let p=''; try{ p=localStorage.getItem('hoc_admin_phone')||''; }catch(e){} if(!p)p=myPhone(); p=String(p).replace(/\D/g,'').slice(-10); return !!p && ADMIN_PHONES.some(n=>n.slice(-10)===p); }
 let _mediaTaps=0,_mediaTapT=0;
@@ -482,18 +484,21 @@ async function toggleLike(id){ const liked=mediaLiked(id); const delta=liked?-1:
   try{ if(liked)localStorage.removeItem(likedKey(id)); else localStorage.setItem(likedKey(id),'1'); }catch(e){}
   const n=await sbRpc('like_media',{mid:id,delta:delta}); const s=el('lk'+id); if(s&&typeof n==='number')s.textContent=n;
   const b=el('lb'+id); if(b)b.classList.toggle('gold',!liked); }
-async function loadComments(id){ const c=el('cm'+id); if(!c)return; const list=await sbGet('media_comments?select=name,body,created_at&media_id=eq.'+id+'&order=created_at.asc&limit=100');
-  if(Array.isArray(list)) c.innerHTML=list.map(x=>'<div class="cmt"><b>'+(x.name?esc(x.name):'Anon')+':</b> '+esc(x.body)+'</div>').join(''); }
+async function loadComments(id){ const c=el('cm'+id); if(!c)return; const list=await sbGet('media_comments?select=id,name,body,created_at&media_id=eq.'+id+'&order=created_at.asc&limit=100');
+  if(Array.isArray(list)) c.innerHTML=list.map(x=>'<div class="cmt"><b>'+(x.name?esc(x.name):'Anon')+':</b> '+esc(x.body)+(isAdmin()?(' <button class="cmtdel" onclick="deleteComment('+x.id+','+id+')">✕</button>'):'')+'</div>').join(''); }
+async function deleteComment(cid,mid){ if(!isAdmin())return; if(!confirm('Delete this comment?'))return; const {base,key}=sbBase();
+  try{ await fetch(base+'/rest/v1/media_comments?id=eq.'+cid,{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}); }catch(e){} loadComments(mid); }
 function openComments(id){ const w=document.createElement('div'); w.className='scanmodal';
   w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="color:var(--gold)">Add a comment</h3>'+
-    '<label class="fld"><span>Name (optional)</span><input id="cm_n" autocomplete="name"/></label>'+
+    '<label class="fld"><span>Name (required)</span><input id="cm_n" autocomplete="name" value="'+esc(savedName())+'"/></label>'+
     '<label class="fld"><span>Comment</span><textarea id="cm_b" rows="3"></textarea></label>'+
     '<div class="row"><button class="gold" id="cm_go" style="flex:1">Post</button><button class="ghost" id="cm_x">Cancel</button></div></div>';
   document.body.appendChild(w); const close=()=>w.remove(); w.querySelector('#cm_x').onclick=close; w.addEventListener('click',e=>{ if(e.target===w)close(); });
   w.querySelector('#cm_go').onclick=async()=>{ const name=(w.querySelector('#cm_n').value||'').trim(); const body=(w.querySelector('#cm_b').value||'').trim();
-    if(!body){ toast('Type a comment first.'); return; } const ok=await sbInsert('media_comments',{media_id:id,name:name||null,body:body});
+    if(!name){ toast('Please enter your name.'); return; } if(!body){ toast('Type a comment first.'); return; }
+    rememberName(name); const ok=await sbInsert('media_comments',{media_id:id,name:name,body:body});
     if(!ok){ toast('Couldn\'t post comment.'); return; } close(); loadComments(id); };
-  setTimeout(()=>{ const b=w.querySelector('#cm_b'); if(b)b.focus(); },60); }
+  setTimeout(()=>{ const f=w.querySelector(savedName()?'#cm_b':'#cm_n'); if(f)f.focus(); },60); }
 function mediaCard(it){
   const media=(it.kind==='video')?('<video class="mmedia" src="'+esc(it.url)+'" controls playsinline preload="metadata"></video>'):('<img class="mmedia" loading="lazy" src="'+esc(it.url)+'"/>');
   const del=isAdmin()?('<button class="sm red" onclick="deleteMedia('+it.id+')">Delete</button>'):'';
