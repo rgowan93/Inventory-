@@ -328,7 +328,8 @@ const WALL_LINKS = {
   venmo:'https://venmo.com/code?user_id=2145411963813888862&created=1779586134',
   cashapp:'https://cash.app/$rgowan',
   paypal:'',   // PayPal uses the clean QR screenshot in assets/wall/paypal-photo.jpeg
-  collectr:[ {name:'Reggie', url:'https://app.getcollectr.com/showcase/profile/f60bc1b7-32a8-44e8-a3ed-4016dfb6d4f6'} ],  // add Manny here later
+  collectr:[ {name:'Reggie', url:'https://app.getcollectr.com/showcase/profile/f60bc1b7-32a8-44e8-a3ed-4016dfb6d4f6'},
+             {name:'Manny',  url:'https://app.getcollectr.com/showcase/profile/6a3e41fe-4604-4024-ba28-e005ef4ff3a6'} ],
   website:'', tagline:'Singles • Slabs • Breaks • Sealed'
 };
 function wallCfg(){ return Object.assign({}, WALL_LINKS, (state.settings&&state.settings.wall)||{}); }
