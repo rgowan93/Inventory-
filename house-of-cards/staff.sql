@@ -158,4 +158,107 @@ grant execute on function public.staff_reset(text, text, text)             to an
 grant execute on function public.staff_update(text, text, text, text)      to anon, authenticated;
 grant execute on function public.staff_create(text, text, text, text)      to anon, authenticated;
 grant execute on function public.staff_members(text, text)                 to anon, authenticated;
-grant execute on function public.staff_create(text, text, text, text)      to anon, authenticated;
+
+
+-- ============================================================================
+-- Wall write lockdown (migration: lock_down_wall_writes)
+-- Admin actions on the public wall (add/delete shows, set flyer, add/delete
+-- gallery posts, delete comments) require a verified staff member. The anon key
+-- can no longer write shows/media directly. Public reads, public comments,
+-- public reviews, and lead capture remain open.
+-- ============================================================================
+
+-- Reusable guard used by every write RPC below.
+create or replace function public.staff_ok(p_user text, p_pass text)
+returns boolean
+language sql security definer set search_path = public stable as $$
+  select exists(
+    select 1 from public.staff
+    where lower(username) = lower(trim(p_user)) and claimed = true and pass = p_pass
+  );
+$$;
+
+create or replace function public.show_add(p_user text, p_pass text, p_name text, p_address text, p_date date, p_time text, p_flyer text)
+returns bigint language plpgsql security definer set search_path = public as $$
+declare nid bigint;
+begin
+  if not public.staff_ok(p_user, p_pass) then return null; end if;
+  if coalesce(trim(p_name),'') = '' or p_date is null then return null; end if;
+  insert into public.shows(name, address, event_date, event_time, flyer_url)
+  values (trim(p_name), nullif(trim(p_address),''), p_date, nullif(trim(p_time),''), nullif(trim(p_flyer),''))
+  returning id into nid;
+  return nid;
+end;$$;
+
+create or replace function public.show_set_flyer(p_user text, p_pass text, p_id bigint, p_flyer text)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare n int; begin
+  if not public.staff_ok(p_user, p_pass) then return false; end if;
+  update public.shows set flyer_url = nullif(trim(p_flyer),'') where id = p_id;
+  get diagnostics n = row_count; return n > 0;
+end;$$;
+
+create or replace function public.show_delete(p_user text, p_pass text, p_id bigint)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare n int; begin
+  if not public.staff_ok(p_user, p_pass) then return false; end if;
+  delete from public.shows where id = p_id;
+  get diagnostics n = row_count; return n > 0;
+end;$$;
+
+create or replace function public.show_purge_past(p_user text, p_pass text)
+returns integer language plpgsql security definer set search_path = public as $$
+declare n int; begin
+  if not public.staff_ok(p_user, p_pass) then return -1; end if;
+  delete from public.shows where event_date < current_date;
+  get diagnostics n = row_count; return n;
+end;$$;
+
+create or replace function public.media_add(p_user text, p_pass text, p_kind text, p_path text, p_url text, p_caption text, p_uploader text)
+returns bigint language plpgsql security definer set search_path = public as $$
+declare nid bigint;
+begin
+  if not public.staff_ok(p_user, p_pass) then return null; end if;
+  if coalesce(trim(p_url),'') = '' then return null; end if;
+  insert into public.media(kind, path, url, caption, uploader)
+  values (coalesce(nullif(trim(p_kind),''),'photo'), nullif(trim(p_path),''), trim(p_url), nullif(trim(p_caption),''), nullif(trim(p_uploader),''))
+  returning id into nid;
+  return nid;
+end;$$;
+
+create or replace function public.media_delete(p_user text, p_pass text, p_id bigint)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare n int; begin
+  if not public.staff_ok(p_user, p_pass) then return false; end if;
+  delete from public.media_comments where media_id = p_id;  -- clear comments first (FK)
+  delete from public.media where id = p_id;
+  get diagnostics n = row_count; return n > 0;
+end;$$;
+
+create or replace function public.comment_delete(p_user text, p_pass text, p_id bigint)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare n int; begin
+  if not public.staff_ok(p_user, p_pass) then return false; end if;
+  delete from public.media_comments where id = p_id;
+  get diagnostics n = row_count; return n > 0;
+end;$$;
+
+grant execute on function public.staff_ok(text,text)                            to anon, authenticated;
+grant execute on function public.show_add(text,text,text,text,date,text,text)   to anon, authenticated;
+grant execute on function public.show_set_flyer(text,text,bigint,text)          to anon, authenticated;
+grant execute on function public.show_delete(text,text,bigint)                  to anon, authenticated;
+grant execute on function public.show_purge_past(text,text)                     to anon, authenticated;
+grant execute on function public.media_add(text,text,text,text,text,text,text)  to anon, authenticated;
+grant execute on function public.media_delete(text,text,bigint)                 to anon, authenticated;
+grant execute on function public.comment_delete(text,text,bigint)               to anon, authenticated;
+
+-- Remove the permissive anon write policies (keep public SELECT; keep public
+-- comment INSERT, review INSERT, and lead INSERT).
+drop policy if exists shows_insert on public.shows;
+drop policy if exists shows_delete on public.shows;
+drop policy if exists media_insert on public.media;
+drop policy if exists media_delete on public.media;
+drop policy if exists mc_delete   on public.media_comments;
+
+-- Enable RLS on the visit counter (bump_visits is SECURITY DEFINER, so it keeps working).
+alter table public.page_stats enable row level security;

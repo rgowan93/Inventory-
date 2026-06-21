@@ -496,7 +496,7 @@ function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.get
 async function loadShows(){
   const adm=el('wShowsAdmin'); if(adm){ adm.innerHTML = isAdmin()
     ? '<div class="row" style="justify-content:center;margin-bottom:12px"><button class="gold" onclick="openAddShow()">＋ Add a show</button></div>' : ''; }
-  if(isAdmin()){ const {base,key}=sbBase(); if(base&&key){ try{ fetch(base+'/rest/v1/shows?event_date=lt.'+todayStr(),{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}).catch(()=>{}); }catch(e){} } }  // purge past shows
+  if(staffSession()&&_staffPw){ sbRpc('show_purge_past',{p_user:staffSession().username,p_pass:_staffPw}); }  // purge past shows (staff only; display already filters to upcoming)
   const cont=el('wShows'); if(!cont)return;
   const s=await sbGet('shows?select=id,name,address,event_date,event_time,flyer_url&event_date=gte.'+todayStr()+'&order=event_date.asc&limit=50');
   if(!Array.isArray(s)){ cont.innerHTML='<div class="muted" style="text-align:center">Coming soon.</div>'; return; }
@@ -522,20 +522,18 @@ function openAddShow(){ if(!isAdmin()){ staffUnlock(); return; }
   w.querySelector('#sh_go').onclick=async()=>{ const name=(w.querySelector('#sh_name').value||'').trim(); if(!name){ toast('Enter a show name.'); return; }
     const date=w.querySelector('#sh_date').value; if(!date){ toast('Please pick a show date (it auto-removes the day after).'); return; }
     const addr=(w.querySelector('#sh_addr').value||'').trim(); const time=(w.querySelector('#sh_time').value||'').trim()||null;
-    const ok=await sbInsert('shows',{name:name,address:addr||null,event_date:date,event_time:time,flyer_url:flyer?flyer.url:null});
-    if(!ok){ toast('Couldn\'t add the show.'); return; } close(); toast('Show added.'); loadShows(); };
+    const id=await staffDo('show_add',{p_name:name,p_address:addr,p_date:date,p_time:time,p_flyer:flyer?flyer.url:null},'Show added.');
+    if(id){ close(); loadShows(); } };
   setTimeout(()=>{ const n=w.querySelector('#sh_name'); if(n)n.focus(); },60);
 }
 async function showFlyer(id){ if(!isAdmin()){ staffUnlock(); return; }
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
   inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading flyer…'); const up=await uploadMedia(f); if(!up)return;
-    const {base,key}=sbBase(); let ok=false;
-    try{ const r=await fetch(base+'/rest/v1/shows?id=eq.'+id,{method:'PATCH',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({flyer_url:up.url})}); ok=r.ok; }catch(e){}
-    if(!ok){ toast('Couldn\'t save the flyer.'); return; } toast('Flyer saved.'); loadShows(); };
+    const ok=await staffDo('show_set_flyer',{p_id:id,p_flyer:up.url},'Flyer saved.'); if(ok)loadShows(); };
   inp.click();
 }
-async function deleteShow(id){ if(!isAdmin())return; if(!confirm('Remove this show?'))return; const {base,key}=sbBase();
-  try{ await fetch(base+'/rest/v1/shows?id=eq.'+id,{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}); }catch(e){} loadShows(); }
+async function deleteShow(id){ if(!isAdmin())return; if(!confirm('Remove this show?'))return;
+  const ok=await staffDo('show_delete',{p_id:id}); if(ok)loadShows(); }
 function openReview(){
   let chosen=5;
   const w=document.createElement('div'); w.className='scanmodal';
@@ -565,8 +563,18 @@ function rememberName(n){ n=(n||'').trim(); if(n){ try{ localStorage.setItem('ho
 function myPhone(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); const l=a[a.length-1]; return (l&&l.phone)||''; }catch(e){ return ''; } }
 function staffSession(){ try{ return JSON.parse(localStorage.getItem('hoc_staff')||'null'); }catch(e){ return null; } }
 function setStaffSession(o){ try{ if(o)localStorage.setItem('hoc_staff',JSON.stringify(o)); else localStorage.removeItem('hoc_staff'); }catch(e){} }
-let _staffPw=null;  // in-memory only: the signed-in staff member's password hash, so the Members list doesn't re-prompt each view
+let _staffPw=null;  // in-memory only: the signed-in staff member's password hash, so admin actions don't re-prompt each time
 function staffLogout(){ setStaffSession(null); _staffPw=null; ui.wallTab='home'; toast('Signed out.'); render(); }
+// Run a staff-only write RPC (add/delete shows, flyers, media, comments). Requires a real
+// staff sign-in; confirms the password once per session, then caches it in memory.
+async function staffDo(fn,args,okMsg){
+  const s=staffSession(); if(!s){ toast('Please sign in as staff to do that.'); openStaffLogin(); return null; }
+  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(p===null||p==='')return null; _staffPw=hashPass(p); }
+  const res=await sbRpc(fn,Object.assign({p_user:s.username,p_pass:_staffPw},args||{}));
+  if(res===null||res===false){ _staffPw=null; toast('Couldn’t verify your staff password — try again.'); return null; }
+  if(okMsg)toast(okMsg);
+  return res;
+}
 async function loadMembers(){
   const cont=el('wMemberList'); if(!cont)return;
   const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
@@ -673,11 +681,11 @@ async function uploadMedia(file){ const {base,key}=sbBase(); if(!base||!key){ to
 function pickMedia(){ if(!isAdmin()){ staffUnlock(); return; } const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*,video/*';
   inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading…'); const up=await uploadMedia(f); if(!up)return;
     const caption=(prompt('Add a caption (optional):')||'').trim(); const kind=(f.type||'').indexOf('video')===0?'video':'photo';
-    const ok=await sbInsert('media',{kind:kind,path:up.path,url:up.url,caption:caption||null,uploader:myName()||null});
-    if(!ok){ toast('File uploaded but saving the post failed.'); return; } toast('Posted! 🎉'); loadMedia(); };
+    const id=await staffDo('media_add',{p_kind:kind,p_path:up.path,p_url:up.url,p_caption:caption,p_uploader:myName()||null},'Posted! 🎉');
+    if(id)loadMedia(); };
   inp.click(); }
-async function deleteMedia(id){ if(!isAdmin())return; if(!confirm('Delete this post?'))return; const {base,key}=sbBase();
-  try{ await fetch(base+'/rest/v1/media?id=eq.'+id,{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}); }catch(e){} toast('Deleted.'); loadMedia(); }
+async function deleteMedia(id){ if(!isAdmin())return; if(!confirm('Delete this post?'))return;
+  const ok=await staffDo('media_delete',{p_id:id},'Deleted.'); if(ok)loadMedia(); }
 function likedKey(id){ return 'hoc_like_'+id; }
 function mediaLiked(id){ try{ return !!localStorage.getItem(likedKey(id)); }catch(e){ return false; } }
 async function toggleLike(id){ const liked=mediaLiked(id); const delta=liked?-1:1;
@@ -686,8 +694,8 @@ async function toggleLike(id){ const liked=mediaLiked(id); const delta=liked?-1:
   const b=el('lb'+id); if(b)b.classList.toggle('gold',!liked); }
 async function loadComments(id){ const c=el('cm'+id); if(!c)return; const list=await sbGet('media_comments?select=id,name,body,created_at&media_id=eq.'+id+'&order=created_at.asc&limit=100');
   if(Array.isArray(list)) c.innerHTML=list.map(x=>'<div class="cmt"><b>'+(x.name?esc(x.name):'Anon')+':</b> '+esc(x.body)+(isAdmin()?(' <button class="cmtdel" onclick="deleteComment('+x.id+','+id+')">✕</button>'):'')+'</div>').join(''); }
-async function deleteComment(cid,mid){ if(!isAdmin())return; if(!confirm('Delete this comment?'))return; const {base,key}=sbBase();
-  try{ await fetch(base+'/rest/v1/media_comments?id=eq.'+cid,{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}); }catch(e){} loadComments(mid); }
+async function deleteComment(cid,mid){ if(!isAdmin())return; if(!confirm('Delete this comment?'))return;
+  const ok=await staffDo('comment_delete',{p_id:cid}); if(ok)loadComments(mid); }
 function openComments(id){ const w=document.createElement('div'); w.className='scanmodal';
   w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="color:var(--gold)">Add a comment</h3>'+
     '<label class="fld"><span>Name (required)</span><input id="cm_n" autocomplete="name" value="'+esc(savedName())+'"/></label>'+
