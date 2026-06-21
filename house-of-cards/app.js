@@ -569,13 +569,27 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Change password (optional):</div>'+
     '<label class="fld"><span>Current password</span><input id="a_old" type="password"/></label>'+
     '<label class="fld"><span>New password</span><input id="a_new" type="password"/></label>'+
-    '<div class="row" style="margin-top:8px"><button class="gold" id="a_save" style="flex:1">Save</button><button class="ghost" id="a_x">Close</button></div></div>';
+    '<div class="row" style="margin-top:8px"><button class="gold" id="a_save" style="flex:1">Save</button><button class="ghost" id="a_x">Close</button></div>'+
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">Add a staff member <span style="opacity:.8">— they pick their own password on first sign-in via “First time / forgot password?”.</span></div>'+
+    '<label class="fld"><span>New staff username</span><input id="ns_u" autocapitalize="off"/></label>'+
+    '<label class="fld"><span>Their phone (optional)</span><input id="ns_ph" inputmode="tel"/></label>'+
+    '<label class="fld"><span>Your password (to authorize)</span><input id="ns_pw" type="password"/></label>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="ns_go" style="flex:1">Create staff account</button></div></div>';
   w.querySelector('#a_x').onclick=close;
   w.querySelector('#a_save').onclick=async()=>{ const email=(w.querySelector('#a_e').value||'').trim(); const oldp=w.querySelector('#a_old').value||''; const newp=w.querySelector('#a_new').value||'';
     if(!oldp){ toast('Enter your current password to save changes.'); return; } if(newp&&newp.length<4){ toast('New password must be 4+ characters.'); return; }
     const ok=await sbRpc('staff_update',{p_user:s.username,p_old:hashPass(oldp),p_newpass:newp?hashPass(newp):'',p_email:email});
     if(ok===true){ s.email=email; setStaffSession(s); close(); toast('Saved.'); render(); }
     else toast('Current password is incorrect.'); };
+  w.querySelector('#ns_go').onclick=async()=>{ const nu=(w.querySelector('#ns_u').value||'').trim(); const nph=(w.querySelector('#ns_ph').value||'').replace(/\D/g,''); const pw=w.querySelector('#ns_pw').value||'';
+    if(!/^[a-z0-9_]{2,}$/.test(nu.toLowerCase())){ toast('Username: 2+ letters/numbers, no spaces.'); return; }
+    if(!pw){ toast('Enter your own password to authorize.'); return; }
+    const res=await sbRpc('staff_create',{p_user:s.username,p_pass:hashPass(pw),p_newuser:nu,p_newphone:nph||null});
+    if(res==='ok'){ toast(nu.toLowerCase()+' added — they sign in with “First time / forgot password?”.'); w.querySelector('#ns_u').value=''; w.querySelector('#ns_ph').value=''; w.querySelector('#ns_pw').value=''; }
+    else if(res==='exists') toast('That username already exists.');
+    else if(res==='baduser') toast('Username: 2+ letters/numbers, no spaces.');
+    else if(res==='auth') toast('Your password is incorrect.');
+    else toast('Couldn’t add staff (cloud not reachable).'); };
 }
 let _mediaTaps=0,_mediaTapT=0;
 function mediaSecTap(){ const n=Date.now(); if(n-_mediaTapT>1500)_mediaTaps=0; _mediaTapT=n; if(++_mediaTaps>=4){ _mediaTaps=0; staffUnlock(); } }  // hidden: 4 taps on the section title to unlock staff upload

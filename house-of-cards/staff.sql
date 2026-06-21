@@ -25,11 +25,14 @@ create table if not exists public.staff (
 alter table public.staff enable row level security;
 -- (intentionally no policies: anon/authenticated cannot read or write the table directly)
 
--- Seed the three House of Cards owners (unclaimed until they set a password on first sign-in).
+-- Seed the five House of Cards staff (unclaimed until they set a password on first sign-in).
+-- Reggie/Manny/Hailey are also on the public Contact Us page; Taylor and Ryan are staff only.
 insert into public.staff (username, phone, claimed) values
   ('reggie', '7313639478', false),
   ('manny',  '2567633389', false),
-  ('hailey', '3213059361', false)
+  ('hailey', '3213059361', false),
+  ('taylor', '7313639465', false),
+  ('ryan',   '8505438759', false)
 on conflict (username) do nothing;
 
 -- staff_status: does this username exist, is it claimed, and what is its security question?
@@ -93,9 +96,40 @@ begin
 end;
 $$;
 
+-- staff_create: an existing, claimed staff member (verified by their own username+password)
+-- can add a new staff account. The new account starts unclaimed; the new person sets their
+-- own password via the normal "First time / forgot password?" claim flow. This is the ONLY
+-- way to add accounts — there is no public self-signup.
+-- Returns a status string: 'ok' | 'auth' | 'exists' | 'baduser'.
+create or replace function public.staff_create(p_user text, p_pass text, p_newuser text, p_newphone text)
+returns text
+language plpgsql security definer set search_path = public as $$
+declare caller_ok boolean; clean text;
+begin
+  select true into caller_ok from public.staff
+   where lower(username) = lower(trim(p_user)) and claimed = true and pass = p_pass;
+  if not coalesce(caller_ok, false) then
+    return 'auth';
+  end if;
+
+  clean := lower(trim(p_newuser));
+  if clean = '' or clean !~ '^[a-z0-9_]{2,}$' then
+    return 'baduser';
+  end if;
+  if exists (select 1 from public.staff where lower(username) = clean) then
+    return 'exists';
+  end if;
+
+  insert into public.staff (username, phone, claimed)
+  values (clean, nullif(trim(p_newphone), ''), false);
+  return 'ok';
+end;
+$$;
+
 -- Allow the app (anon key) and signed-in users to call these RPCs.
 grant execute on function public.staff_status(text)                        to anon, authenticated;
 grant execute on function public.staff_login(text, text)                   to anon, authenticated;
 grant execute on function public.staff_claim(text, text, text, text, text) to anon, authenticated;
 grant execute on function public.staff_reset(text, text, text)             to anon, authenticated;
 grant execute on function public.staff_update(text, text, text, text)      to anon, authenticated;
+grant execute on function public.staff_create(text, text, text, text)      to anon, authenticated;
