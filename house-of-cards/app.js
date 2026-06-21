@@ -396,7 +396,9 @@ function viewWall(){
     '<div class="wall-sec" onclick="mediaSecTap()">Show Photos &amp; Videos</div>'+
     '<div id="wMediaAdmin"></div>'+
     '<div id="wMedia" class="mediagrid"><div class="muted" style="text-align:center">Loading…</div></div>'+
-    '<div class="wall-foot"><button class="staff-signin" onclick="staffUnlock()">Staff</button></div>'+
+    (staffSession()
+      ? '<div class="wall-foot"><span style="color:var(--muted);font-size:11px">Staff: '+esc(staffSession().username)+' · </span><button class="staff-signin" onclick="openStaffAccount()">Account</button><button class="staff-signin" onclick="staffLogout()">Sign out</button></div>'
+      : '<div class="wall-foot"><button class="staff-signin" onclick="openStaffLogin()">Staff</button></div>')+
   '</div>';
 }
 /* tap-to-open: pay & Collectr links capture name+phone the FIRST time on a device, then bypass; socials open directly */
@@ -450,13 +452,15 @@ function showCardWall(s){
   const del=isAdmin()?('<div style="margin-top:8px"><button class="sm red" onclick="deleteShow('+s.id+')">Delete</button></div>'):'';
   return '<div class="showcard"><div class="showname">'+esc(s.name)+'</div>'+(when?('<div class="showwhen">'+esc(when)+'</div>'):'')+addr+del+'</div>';
 }
+function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 async function loadShows(){
   const adm=el('wShowsAdmin'); if(adm){ adm.innerHTML = isAdmin()
     ? '<div class="row" style="justify-content:center;margin-bottom:12px"><button class="gold" onclick="openAddShow()">＋ Add a show</button></div>' : ''; }
+  if(isAdmin()){ const {base,key}=sbBase(); if(base&&key){ try{ fetch(base+'/rest/v1/shows?event_date=lt.'+todayStr(),{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}).catch(()=>{}); }catch(e){} } }  // purge past shows
   const cont=el('wShows'); if(!cont)return;
-  const s=await sbGet('shows?select=id,name,address,event_date,event_time&order=event_date.asc.nullslast&limit=50');
+  const s=await sbGet('shows?select=id,name,address,event_date,event_time&event_date=gte.'+todayStr()+'&order=event_date.asc&limit=50');
   if(!Array.isArray(s)){ cont.innerHTML='<div class="muted" style="text-align:center">Coming soon.</div>'; return; }
-  if(!s.length){ cont.innerHTML='<div class="muted" style="text-align:center">No shows posted yet — check back soon!</div>'; return; }
+  if(!s.length){ cont.innerHTML='<div class="muted" style="text-align:center">No upcoming shows posted yet — check back soon!</div>'; return; }
   cont.innerHTML=s.map(showCardWall).join('');
 }
 function openAddShow(){ if(!isAdmin()){ staffUnlock(); return; }
@@ -469,7 +473,8 @@ function openAddShow(){ if(!isAdmin()){ staffUnlock(); return; }
     '<div class="row" style="margin-top:10px"><button class="gold" id="sh_go" style="flex:1">Add show</button><button class="ghost" id="sh_x">Cancel</button></div></div>';
   document.body.appendChild(w); const close=()=>w.remove(); w.querySelector('#sh_x').onclick=close; w.addEventListener('click',e=>{ if(e.target===w)close(); });
   w.querySelector('#sh_go').onclick=async()=>{ const name=(w.querySelector('#sh_name').value||'').trim(); if(!name){ toast('Enter a show name.'); return; }
-    const addr=(w.querySelector('#sh_addr').value||'').trim(); const date=w.querySelector('#sh_date').value||null; const time=(w.querySelector('#sh_time').value||'').trim()||null;
+    const date=w.querySelector('#sh_date').value; if(!date){ toast('Please pick a show date (it auto-removes the day after).'); return; }
+    const addr=(w.querySelector('#sh_addr').value||'').trim(); const time=(w.querySelector('#sh_time').value||'').trim()||null;
     const ok=await sbInsert('shows',{name:name,address:addr||null,event_date:date,event_time:time});
     if(!ok){ toast('Couldn\'t add the show.'); return; } close(); toast('Show added.'); loadShows(); };
   setTimeout(()=>{ const n=w.querySelector('#sh_name'); if(n)n.focus(); },60);
@@ -503,7 +508,75 @@ function myName(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups
 function savedName(){ let n=''; try{ n=localStorage.getItem('hoc_name')||''; }catch(e){} return n||myName()||''; }
 function rememberName(n){ n=(n||'').trim(); if(n){ try{ localStorage.setItem('hoc_name',n); }catch(e){} } }
 function myPhone(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); const l=a[a.length-1]; return (l&&l.phone)||''; }catch(e){ return ''; } }
-function isAdmin(){ let p=''; try{ p=localStorage.getItem('hoc_admin_phone')||''; }catch(e){} if(!p)p=myPhone(); p=String(p).replace(/\D/g,'').slice(-10); return !!p && ADMIN_PHONES.some(n=>n.slice(-10)===p); }
+function staffSession(){ try{ return JSON.parse(localStorage.getItem('hoc_staff')||'null'); }catch(e){ return null; } }
+function setStaffSession(o){ try{ if(o)localStorage.setItem('hoc_staff',JSON.stringify(o)); else localStorage.removeItem('hoc_staff'); }catch(e){} }
+function staffLogout(){ setStaffSession(null); toast('Signed out.'); render(); }
+function isAdmin(){ if(staffSession())return true; let p=''; try{ p=localStorage.getItem('hoc_admin_phone')||''; }catch(e){} if(!p)p=myPhone(); p=String(p).replace(/\D/g,'').slice(-10); return !!p && ADMIN_PHONES.some(n=>n.slice(-10)===p); }
+/* ---- Staff sign-in (username + password; claim on first use; secret-question reset) ---- */
+function openStaffLogin(){
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  function shell(inner){ w.innerHTML='<div class="card" style="max-width:400px;width:100%">'+inner+'</div>'; }
+  function loginStep(){
+    shell('<h3 style="color:var(--gold)">Staff sign in</h3>'+
+      '<label class="fld"><span>Username</span><input id="st_u" autocapitalize="off"/></label>'+
+      '<label class="fld"><span>Password</span><input id="st_p" type="password"/></label>'+
+      '<div class="row" style="margin-top:8px"><button class="gold" id="st_go" style="flex:1">Sign in</button><button class="ghost" id="st_x">Close</button></div>'+
+      '<div style="text-align:center;margin-top:10px"><button class="btn-link" id="st_first">First time / forgot password?</button></div>');
+    w.querySelector('#st_x').onclick=close;
+    w.querySelector('#st_go').onclick=async()=>{ const u=(w.querySelector('#st_u').value||'').trim(); const p=w.querySelector('#st_p').value||'';
+      if(!u||!p){ toast('Enter username and password.'); return; }
+      const r=await sbRpc('staff_login',{p_user:u,p_pass:hashPass(p)});
+      if(Array.isArray(r)&&r.length){ setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); close(); toast('Welcome, '+r[0].username+'!'); render(); }
+      else toast('Wrong username or password.'); };
+    w.querySelector('#st_first').onclick=async()=>{ const u=(w.querySelector('#st_u').value||'').trim(); if(!u){ toast('Type your username first.'); return; }
+      const st=await sbRpc('staff_status',{p_user:u});
+      if(!Array.isArray(st)||!st.length){ toast('No staff account with that username.'); return; }
+      if(st[0].claimed) forgotStep(u, st[0].sec_q); else claimStep(u); };
+  }
+  function claimStep(u){
+    shell('<h3 style="color:var(--gold)">Set up your account</h3><div class="muted" style="margin-bottom:8px">First sign-in for <b>'+esc(u)+'</b> — pick a password and a security question.</div>'+
+      '<label class="fld"><span>New password</span><input id="c_p" type="password"/></label>'+
+      '<label class="fld"><span>Email</span><input id="c_e" type="email"/></label>'+
+      '<label class="fld"><span>Security question</span><input id="c_q" placeholder="e.g. First pet\'s name"/></label>'+
+      '<label class="fld"><span>Answer</span><input id="c_a"/></label>'+
+      '<div class="row" style="margin-top:8px"><button class="gold" id="c_go" style="flex:1">Create account</button><button class="ghost" id="c_b">Back</button></div>');
+    w.querySelector('#c_b').onclick=loginStep;
+    w.querySelector('#c_go').onclick=async()=>{ const p=w.querySelector('#c_p').value||''; const e=(w.querySelector('#c_e').value||'').trim(); const q=(w.querySelector('#c_q').value||'').trim(); const a=(w.querySelector('#c_a').value||'').trim();
+      if(p.length<4){ toast('Password must be at least 4 characters.'); return; } if(!q||!a){ toast('Set a security question and answer.'); return; }
+      const ok=await sbRpc('staff_claim',{p_user:u,p_pass:hashPass(p),p_email:e||null,p_q:q,p_a:hashPass(a.toLowerCase())});
+      if(ok===true){ setStaffSession({username:u,email:e}); close(); toast('Account created — you\'re signed in!'); render(); }
+      else toast('That account is already set up — try signing in.'); };
+  }
+  function forgotStep(u,q){
+    shell('<h3 style="color:var(--gold)">Reset password</h3><div class="muted" style="margin-bottom:8px">Security question:</div><div style="font-weight:800;margin-bottom:8px">'+esc(q||'(none set)')+'</div>'+
+      '<label class="fld"><span>Your answer</span><input id="f_a"/></label>'+
+      '<label class="fld"><span>New password</span><input id="f_p" type="password"/></label>'+
+      '<div class="row" style="margin-top:8px"><button class="gold" id="f_go" style="flex:1">Reset &amp; sign in</button><button class="ghost" id="f_b">Back</button></div>');
+    w.querySelector('#f_b').onclick=loginStep;
+    w.querySelector('#f_go').onclick=async()=>{ const a=(w.querySelector('#f_a').value||'').trim(); const p=w.querySelector('#f_p').value||'';
+      if(!a||p.length<4){ toast('Enter your answer and a new password (4+ chars).'); return; }
+      const ok=await sbRpc('staff_reset',{p_user:u,p_ans:hashPass(a.toLowerCase()),p_newpass:hashPass(p)});
+      if(ok===true){ const r=await sbRpc('staff_login',{p_user:u,p_pass:hashPass(p)}); if(Array.isArray(r)&&r.length){ setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); } close(); toast('Password reset — signed in!'); render(); }
+      else toast('That answer doesn\'t match.'); };
+  }
+  loginStep();
+}
+function openStaffAccount(){ const s=staffSession(); if(!s)return;
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w); const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:400px;width:100%"><h3 style="color:var(--gold)">'+esc(s.username)+'’s account</h3>'+
+    '<label class="fld"><span>Email</span><input id="a_e" type="email" value="'+esc(s.email||'')+'"/></label>'+
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">Change password (optional):</div>'+
+    '<label class="fld"><span>Current password</span><input id="a_old" type="password"/></label>'+
+    '<label class="fld"><span>New password</span><input id="a_new" type="password"/></label>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="a_save" style="flex:1">Save</button><button class="ghost" id="a_x">Close</button></div></div>';
+  w.querySelector('#a_x').onclick=close;
+  w.querySelector('#a_save').onclick=async()=>{ const email=(w.querySelector('#a_e').value||'').trim(); const oldp=w.querySelector('#a_old').value||''; const newp=w.querySelector('#a_new').value||'';
+    if(!oldp){ toast('Enter your current password to save changes.'); return; } if(newp&&newp.length<4){ toast('New password must be 4+ characters.'); return; }
+    const ok=await sbRpc('staff_update',{p_user:s.username,p_old:hashPass(oldp),p_newpass:newp?hashPass(newp):'',p_email:email});
+    if(ok===true){ s.email=email; setStaffSession(s); close(); toast('Saved.'); render(); }
+    else toast('Current password is incorrect.'); };
+}
 let _mediaTaps=0,_mediaTapT=0;
 function mediaSecTap(){ const n=Date.now(); if(n-_mediaTapT>1500)_mediaTaps=0; _mediaTapT=n; if(++_mediaTaps>=4){ _mediaTaps=0; staffUnlock(); } }  // hidden: 4 taps on the section title to unlock staff upload
 function staffUnlock(){ const p=(prompt('Staff: enter your mobile number to unlock uploads')||'').replace(/\D/g,''); if(!p)return;
