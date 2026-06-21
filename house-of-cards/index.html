@@ -92,9 +92,18 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .showflyer{width:100%;max-height:420px;object-fit:contain;background:#000;border-radius:12px;border:2px solid #2c2f42;margin-bottom:10px;cursor:pointer;display:block}
 .memcount{color:var(--muted);font-weight:800;text-align:center;margin-bottom:10px}
 .memrow{display:flex;align-items:center;gap:10px;background:#11131c;border:1px solid #2c2f42;border-radius:10px;padding:9px 12px;margin-bottom:8px}
-.memname{font-weight:800;color:var(--cream);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.memmain{flex:1;min-width:0}
+.memname{font-weight:800;color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mememail{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.membadge{display:inline-block;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.5px;padding:1px 6px;border-radius:6px;background:#2a2e40;color:var(--muted);vertical-align:middle;margin-left:4px}
+.membadge.acct{background:var(--gold);color:#1a1300}
 .memphone{font-weight:800;color:var(--gold);text-decoration:none;white-space:nowrap}
 .memdate{color:var(--muted);font-size:11px;white-space:nowrap}
+.memdel{background:transparent;border:none;box-shadow:none;color:var(--red);font-weight:900;font-size:16px;padding:0 4px;cursor:pointer}
+.custbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.custhi{font-weight:800;color:var(--cream);font-size:13px;margin-right:auto}
+.custbtn{background:#1c1e2b;border:2px solid #2c2f42;color:var(--cream);font-weight:800;font-size:12px;border-radius:999px;padding:7px 13px;cursor:pointer;white-space:nowrap}
+.custbtn.gold{background:var(--gold);color:#1a1300;border-color:#000}
 .wall-stats{margin-top:16px;color:var(--cream);font-weight:700;font-size:14px;display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
 .wall-stats b{color:var(--gold);font-size:17px}.wall-stats .dot{color:#3a3550}
 .revcard{text-align:center}
@@ -280,8 +289,8 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260621w"></script>
-<script src="social.js?v=20260621w"></script>
-<script src="app.js?v=20260621w"></script>
+<script src="config.js?v=20260621x"></script>
+<script src="social.js?v=20260621x"></script>
+<script src="app.js?v=20260621x"></script>
 </body>
 </html>

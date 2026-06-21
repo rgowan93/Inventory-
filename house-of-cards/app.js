@@ -254,7 +254,7 @@ function render(){
     else if(av==='signup'){ stopBounce(); el('view').innerHTML=viewSignup(); }
     else if(av==='subscribe'){ stopBounce(); el('view').innerHTML=viewSubscribe(); }
     else if(av==='landing'){ el('view').innerHTML=viewLanding(); startBounce(); }
-    else { stopBounce(); el('view').innerHTML=viewWall(); if(typeof wallLoadStats==='function')wallLoadStats(); }
+    else { stopBounce(); el('view').innerHTML=viewWall(); if(typeof wallLoadStats==='function')wallLoadStats(); if(typeof wallEnsureCustomer==='function')wallEnsureCustomer(); }
     const bn0=el('botnav'); if(bn0)bn0.style.display='none';
     afterRenderFocus(); updateImgChip(); return; }
   stopBounce();
@@ -353,6 +353,11 @@ function viewWall(){
   const pageUrl=(location.href||'').split('#')[0];
   const contacts=(w.contact||[]).filter(c=>c&&c.phone);
   const staff=!!staffSession();
+  const cust=wallCustomer;
+  const custBar = cloudOn() ? ('<div class="custbar">'+(cust
+    ? '<span class="custhi">👤 '+esc(cust.name||cust.email||'Member')+'</span><button class="custbtn" onclick="openCustomerAccount()">My account</button><button class="custbtn" onclick="customerSignOut()">Sign out</button>'
+    : '<span class="custhi muted">Customer portal</span><button class="custbtn gold" onclick="openCustomerLogin()">Sign in</button><button class="custbtn" onclick="openCustomerSignup()">Create account</button>'
+  )+'</div>') : '';
   let active=ui.wallTab||'home'; if(active==='members'&&!staff) active='home';
   const TABS=[['home','🏠 Home'],['share','Share Us!!'],['social','Follow on Social'],['pay','Pay at Show'],['contact','Contact Us'],['reviews','Reviews'],['photos','Photos & Videos']];
   if(staff) TABS.push(['members','Members']);
@@ -406,11 +411,14 @@ function viewWall(){
     '<div id="wMemberList"><div class="muted" style="text-align:center">Loading…</div></div>';
 
   return '<div class="wall">'+
+    custBar+
     '<div class="wall-hero">'+
       '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
-      '<button class="wall-cta" onclick="openTextSignup()">📲 Join our page</button>'+
+      (cust
+        ? '<button class="wall-cta" onclick="openCustomerAccount()">👋 Welcome back, '+esc((cust.name||'').split(' ')[0]||'friend')+'</button>'
+        : '<button class="wall-cta" onclick="openCustomerSignup()">📲 Create your free account</button>')+
       '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
       '<div class="wall-stats"><span>👥 <b id="wMembers">—</b> members</span><span class="dot">•</span><span>👀 <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
@@ -584,8 +592,123 @@ async function loadMembers(){
   if(!res||res.ok!==true){ _staffPw=null; cont.innerHTML='<div class="muted" style="text-align:center">Couldn\'t verify your password. <button class="sm ghost" onclick="loadMembers()">Try again</button></div>'; return; }
   const m=res.members||[];
   if(!m.length){ cont.innerHTML='<div class="muted" style="text-align:center">No members have joined yet.</div>'; return; }
-  cont.innerHTML='<div class="memcount">'+m.length+' member'+(m.length===1?'':'s')+'</div>'+m.map(x=>{ const ph=String(x.phone||'').replace(/[^\d+]/g,''); const d=x.created_at?new Date(x.created_at).toLocaleDateString():'';
-    return '<div class="memrow"><div class="memname">'+esc(x.name||'(no name)')+'</div>'+(ph?('<a class="memphone" href="tel:'+ph+'">'+esc(x.phone)+'</a>'):'<span class="memphone">—</span>')+'<div class="memdate">'+esc(d)+'</div></div>'; }).join('');
+  const accts=m.filter(x=>x.kind==='account').length;
+  cont.innerHTML='<div class="memcount">'+m.length+' member'+(m.length===1?'':'s')+' · '+accts+' with account'+(accts===1?'':'s')+'</div>'+m.map(x=>{
+    const ph=String(x.phone||'').replace(/[^\d+]/g,''); const d=x.created_at?new Date(x.created_at).toLocaleDateString():'';
+    const badge=x.kind==='account'?'<span class="membadge acct">account</span>':'<span class="membadge">contact</span>';
+    const idJs=JSON.stringify(String(x.id)); const nmJs=JSON.stringify(x.name||x.phone||'this member');
+    return '<div class="memrow"><div class="memmain"><div class="memname">'+esc(x.name||'(no name)')+' '+badge+'</div>'+
+      (x.email?('<div class="mememail">'+esc(x.email)+'</div>'):'')+'</div>'+
+      (ph?('<a class="memphone" href="tel:'+ph+'">'+esc(x.phone)+'</a>'):'<span class="memphone">—</span>')+
+      '<div class="memdate">'+esc(d)+'</div>'+
+      '<button class="memdel" title="Remove" onclick=\'removeMember("'+esc(x.kind)+'",'+idJs+','+nmJs+')\'>✕</button></div>'; }).join('');
+}
+async function removeMember(kind,id,name){
+  if(!staffSession()){ openStaffLogin(); return; }
+  if(!confirm('Remove '+(name||'this member')+'? This deletes their '+(kind==='account'?'account':'contact')+'.')) return;
+  const ok=await staffDo('staff_member_delete',{p_kind:kind,p_id:String(id)});
+  if(ok){ toast('Removed.'); loadMembers(); }
+}
+/* ---- Customer accounts (marketplace): Supabase Auth + customers table (one phone per account) ---- */
+let wallCustomer=null;       // signed-in customer's profile {id,name,email,phone} or null
+let _wallCustInit=false;
+async function ensureCustomerRow(u){
+  if(!u) return null;
+  try{ const {data:row}=await sb.from('customers').select('id,name,email,phone').eq('id',u.id).maybeSingle();
+    if(row) return row;
+    const md=u.user_metadata||{};   // back-fill from signup metadata (covers the email-confirm-on flow)
+    const {data:ins}=await sb.from('customers').insert({id:u.id,name:md.name||'',email:u.email||'',phone:md.phone||null}).select('id,name,email,phone').maybeSingle();
+    return ins||{id:u.id,email:u.email||'',name:md.name||'',phone:md.phone||''};
+  }catch(e){ return {id:u.id,email:u.email||'',name:'',phone:''}; }
+}
+async function loadWallCustomer(){
+  if(!cloudOn()){ wallCustomer=null; return; }
+  try{ const {data}=await sb.auth.getSession();
+    if(data&&data.session){ wallCustomer=await ensureCustomerRow(data.session.user); }
+    else wallCustomer=null;
+  }catch(e){ wallCustomer=null; }
+}
+function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(()=>{ if(wallCustomer)render(); }).catch(()=>{}); }
+async function customerSignUp(name,email,phone,pass){
+  if(!cloudOn()) return {error:'Accounts are offline right now.'};
+  const free=await sbRpc('phone_available',{p_phone:phone});
+  if(free===false) return {error:'That phone number already has an account.'};
+  const {data,error}=await sb.auth.signUp({email,password:pass,options:{data:{name:name,phone:phone}}});
+  if(error) return {error:error.message};
+  if(!data.session) return {ok:true,needsConfirm:true};
+  const ins=await sb.from('customers').insert({id:data.user.id,name:name,email:email,phone:phone});
+  if(ins.error) return {error:/duplicate|unique/i.test(ins.error.message)?'That phone number already has an account.':ins.error.message};
+  wallCustomer={id:data.user.id,name:name,email:email,phone:phone};
+  return {ok:true};
+}
+async function customerSignIn(email,pass){
+  if(!cloudOn()) return {error:'Accounts are offline right now.'};
+  const {data,error}=await sb.auth.signInWithPassword({email,password:pass});
+  if(error) return {error:/confirm/i.test(error.message)?'Please confirm your email first, then sign in.':error.message};
+  await loadWallCustomer();
+  if(wallCustomer&&!wallCustomer.name){ /* legacy/edge: profile row missing — leave as-is for now */ }
+  return {ok:true};
+}
+async function customerSignOut(){ try{ await sb.auth.signOut(); }catch(e){} wallCustomer=null; toast('Signed out.'); render(); }
+function openCustomerSignup(){
+  if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="color:var(--gold)">Create your account</h3>'+
+    '<div class="muted" style="margin-bottom:8px">One account per phone number. Use it to buy and track orders.</div>'+
+    '<label class="fld"><span>Full name</span><input id="cu_n" autocomplete="name"/></label>'+
+    '<label class="fld"><span>Email</span><input id="cu_e" type="email" autocomplete="email" autocapitalize="off"/></label>'+
+    '<label class="fld"><span>Mobile phone</span><input id="cu_ph" type="tel" inputmode="tel" autocomplete="tel"/></label>'+
+    '<label class="fld"><span>Password</span><input id="cu_p" type="password" autocomplete="new-password"/></label>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="cu_go" style="flex:1">Create account</button><button class="ghost" id="cu_x">Close</button></div>'+
+    '<div style="text-align:center;margin-top:10px"><button class="btn-link" id="cu_have">Already have an account? Sign in</button></div></div>';
+  w.querySelector('#cu_x').onclick=close;
+  w.querySelector('#cu_have').onclick=()=>{ close(); openCustomerLogin(); };
+  w.querySelector('#cu_go').onclick=async()=>{
+    const name=(w.querySelector('#cu_n').value||'').trim(); const email=(w.querySelector('#cu_e').value||'').trim();
+    const phone=(w.querySelector('#cu_ph').value||'').trim(); const pass=w.querySelector('#cu_p').value||'';
+    if(!name){ toast('Enter your name.'); return; }
+    if(!/^\S+@\S+\.\S+$/.test(email)){ toast('Enter a valid email.'); return; }
+    if(phone.replace(/\D/g,'').length<10){ toast('Enter a valid 10-digit phone.'); return; }
+    if(pass.length<6){ toast('Password must be at least 6 characters.'); return; }
+    const r=await customerSignUp(name,email,phone,pass);
+    if(r.error){ toast(r.error); return; }
+    if(r.needsConfirm){ close(); toast('Check your email to confirm, then sign in.'); return; }
+    close(); toast('Welcome, '+name+'!'); render();
+  };
+  setTimeout(()=>{ const n=w.querySelector('#cu_n'); if(n)n.focus(); },60);
+}
+function openCustomerLogin(){
+  if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:400px;width:100%"><h3 style="color:var(--gold)">Sign in</h3>'+
+    '<label class="fld"><span>Email</span><input id="ci_e" type="email" autocomplete="email" autocapitalize="off"/></label>'+
+    '<label class="fld"><span>Password</span><input id="ci_p" type="password" autocomplete="current-password"/></label>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="ci_go" style="flex:1">Sign in</button><button class="ghost" id="ci_x">Close</button></div>'+
+    '<div style="text-align:center;margin-top:10px"><button class="btn-link" id="ci_new">New here? Create an account</button></div></div>';
+  w.querySelector('#ci_x').onclick=close;
+  w.querySelector('#ci_new').onclick=()=>{ close(); openCustomerSignup(); };
+  w.querySelector('#ci_go').onclick=async()=>{
+    const email=(w.querySelector('#ci_e').value||'').trim(); const pass=w.querySelector('#ci_p').value||'';
+    if(!email||!pass){ toast('Enter your email and password.'); return; }
+    const r=await customerSignIn(email,pass);
+    if(r.error){ toast(r.error); return; }
+    close(); toast('Welcome back'+(wallCustomer&&wallCustomer.name?', '+wallCustomer.name.split(' ')[0]:'')+'!'); render();
+  };
+  setTimeout(()=>{ const e=w.querySelector('#ci_e'); if(e)e.focus(); },60);
+}
+function openCustomerAccount(){
+  const c=wallCustomer; if(!c){ openCustomerLogin(); return; }
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:400px;width:100%"><h3 style="color:var(--gold)">Your account</h3>'+
+    '<div class="memrow"><div class="memmain"><div class="memname">'+esc(c.name||'(no name)')+'</div>'+(c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+'</div></div>'+
+    (c.phone?('<div class="muted" style="margin:8px 2px">📱 '+esc(c.phone)+'</div>'):'')+
+    '<div class="muted" style="margin:8px 2px">🛒 Marketplace &amp; order history are coming soon.</div>'+
+    '<div class="row" style="margin-top:8px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button><button class="gold" id="ca_x">Close</button></div></div>';
+  w.querySelector('#ca_x').onclick=close;
+  w.querySelector('#ca_out').onclick=()=>{ close(); customerSignOut(); };
 }
 function isAdmin(){ return !!staffSession(); }  // add/delete/edit show only for a signed-in staff member (old phone-unlock retired)
 /* ---- Staff sign-in (username + password; claim on first use; secret-question reset) ---- */
