@@ -331,7 +331,7 @@ const WALL_LINKS = {
   collectr:[ {name:'Reggie', url:'https://app.getcollectr.com/showcase/profile/f60bc1b7-32a8-44e8-a3ed-4016dfb6d4f6'},
              {name:'Manny',  url:'https://app.getcollectr.com/showcase/profile/6a3e41fe-4604-4024-ba28-e005ef4ff3a6'},
              {name:'Hailey', url:'https://app.getcollectr.com/showcase/profile/2c06f053-9f8a-4883-8e45-6a38e97d027e'} ],
-  contact:[ {name:'Reggie', phone:''}, {name:'Manny', phone:''} ],  // fill phones in for the Contact Us text links
+  contact:[ {name:'Reggie', phone:'7313639478'}, {name:'Manny', phone:'2567633389'}, {name:'Hailey', phone:'3213059361'} ],
   website:'', tagline:'Singles • Slabs • Sealed'
 };
 function wallCfg(){ return Object.assign({}, WALL_LINKS, (state.settings&&state.settings.wall)||{}); }
