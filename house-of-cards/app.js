@@ -331,6 +331,7 @@ const WALL_LINKS = {
   collectr:[ {name:'Reggie', url:'https://app.getcollectr.com/showcase/profile/f60bc1b7-32a8-44e8-a3ed-4016dfb6d4f6'},
              {name:'Manny',  url:'https://app.getcollectr.com/showcase/profile/6a3e41fe-4604-4024-ba28-e005ef4ff3a6'},
              {name:'Hailey', url:'https://app.getcollectr.com/showcase/profile/2c06f053-9f8a-4883-8e45-6a38e97d027e'} ],
+  contact:[ {name:'Reggie', phone:''}, {name:'Manny', phone:''} ],  // fill phones in for the Contact Us text links
   website:'', tagline:'Singles • Slabs • Sealed'
 };
 function wallCfg(){ return Object.assign({}, WALL_LINKS, (state.settings&&state.settings.wall)||{}); }
@@ -350,6 +351,7 @@ function viewWall(){
   const pay=(label,url,photo,sub)=>tile(label, url?qrImg(url):(photo?('<img class="qr qrphoto" loading="lazy" src="'+photo+'"/>'):'<div class="qrmiss">coming soon</div>'), sub, url?("gateOpen('"+j(url)+"')"):'');
   const coll=c=>tile(esc(c.name)+'&rsquo;s cards', qrImg(c.url), 'Scan to view on Collectr', "gateOpen('"+j(c.url)+"')");
   const pageUrl=(location.href||'').split('#')[0];
+  const contacts=(w.contact||[]).filter(c=>c&&c.phone);
   return '<div class="wall">'+
     '<div class="wall-hero">'+
       '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
@@ -381,6 +383,11 @@ function viewWall(){
       pay('Cash App', w.cashapp?cashUrl(w.cashapp):'', '', w.cashapp)+
       pay('PayPal', w.paypal?paypalUrl(w.paypal):'', 'assets/wall/paypal-photo.jpeg', w.paypal)+
     '</div>'+
+    (contacts.length?(
+      '<div class="wall-sec">Contact Us</div>'+
+      '<div class="muted" style="text-align:center;margin:-6px 0 12px">Questions or requests? Text us:</div>'+
+      '<div class="qrgrid">'+contacts.map(c=>{ const sms='sms:'+String(c.phone).replace(/[^\d+]/g,''); return tile('Text '+esc(c.name), qrImg(sms), 'Tap to text', "openUrl('"+sms+"')"); }).join('')+'</div>'
+    ):'')+
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
     '<div class="wall-sec">Reviews</div>'+
     '<div class="card revcard"><div id="wRevAvg" class="revavg">Loading reviews…</div>'+
@@ -389,7 +396,7 @@ function viewWall(){
     '<div class="wall-sec" onclick="mediaSecTap()">Show Photos &amp; Videos</div>'+
     '<div id="wMediaAdmin"></div>'+
     '<div id="wMedia" class="mediagrid"><div class="muted" style="text-align:center">Loading…</div></div>'+
-    '<div class="wall-foot" style="opacity:.35;font-size:11px">tap the title to manage</div>'+
+    '<div class="wall-foot"><button class="staff-signin" onclick="staffUnlock()">Staff</button></div>'+
   '</div>';
 }
 /* tap-to-open: pay & Collectr links capture name+phone the FIRST time on a device, then bypass; socials open directly */
