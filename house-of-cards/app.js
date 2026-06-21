@@ -359,6 +359,9 @@ function viewWall(){
       '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
       '<div class="wall-stats"><span>👥 <b id="wMembers">—</b> members</span><span class="dot">•</span><span>👀 <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
+    '<div class="wall-sec" onclick="mediaSecTap()">Follow Us On Our Journey</div>'+
+    '<div id="wShowsAdmin"></div>'+
+    '<div id="wShows" class="showlist"><div class="muted" style="text-align:center">Loading…</div></div>'+
     '<div class="wall-sec">Visit our page</div><div class="qrgrid">'+
       '<div class="qrtile tap" onclick="sharePage()"><div class="qrlabel">Our Page</div>'+qrImg(pageUrl)+'<div class="qrsub">Scan it — or tap to share the link</div></div>'+
     '</div>'+
@@ -429,8 +432,43 @@ async function wallLoadStats(){
     set('wRevAvg', n?(avg.toFixed(1)+' ★  ·  '+n+' review'+(n===1?'':'s')):'No reviews yet — be the first!');
     const list=el('wRevList'); if(list){ list.innerHTML=rev.slice(0,12).map(r=>'<div class="rev"><div class="revstars">'+starStr(r.stars)+'</div>'+(r.comment?('<div class="revtext">'+esc(r.comment)+'</div>'):'')+'<div class="revby">— '+(r.name?esc(r.name):'Anonymous')+'</div></div>').join(''); }
   } else { set('wRevAvg','Reviews open soon'); }
+  loadShows();
   loadMedia();
 }
+/* ---- Follow Us On Our Journey: staff post shows (name/address/date/time); everyone sees them ---- */
+function showCardWall(s){
+  const date=s.event_date?new Date(s.event_date+'T00:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}):'';
+  const when=[date,s.event_time].filter(Boolean).join(' · ');
+  const addr=s.address?('<a class="showaddr" href="https://maps.google.com/?q='+encodeURIComponent(s.address)+'" target="_blank" rel="noopener">📍 '+esc(s.address)+'</a>'):'';
+  const del=isAdmin()?('<div style="margin-top:8px"><button class="sm red" onclick="deleteShow('+s.id+')">Delete</button></div>'):'';
+  return '<div class="showcard"><div class="showname">'+esc(s.name)+'</div>'+(when?('<div class="showwhen">'+esc(when)+'</div>'):'')+addr+del+'</div>';
+}
+async function loadShows(){
+  const adm=el('wShowsAdmin'); if(adm){ adm.innerHTML = isAdmin()
+    ? '<div class="row" style="justify-content:center;margin-bottom:12px"><button class="gold" onclick="openAddShow()">＋ Add a show</button></div>' : ''; }
+  const cont=el('wShows'); if(!cont)return;
+  const s=await sbGet('shows?select=id,name,address,event_date,event_time&order=event_date.asc.nullslast&limit=50');
+  if(!Array.isArray(s)){ cont.innerHTML='<div class="muted" style="text-align:center">Coming soon.</div>'; return; }
+  if(!s.length){ cont.innerHTML='<div class="muted" style="text-align:center">No shows posted yet — check back soon!</div>'; return; }
+  cont.innerHTML=s.map(showCardWall).join('');
+}
+function openAddShow(){ if(!isAdmin()){ staffUnlock(); return; }
+  const w=document.createElement('div'); w.className='scanmodal';
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="color:var(--gold)">Add a show</h3>'+
+    '<label class="fld"><span>Show name</span><input id="sh_name" placeholder="e.g. Pensacola Card Show"/></label>'+
+    '<label class="fld"><span>Address</span><input id="sh_addr" placeholder="123 Main St, City, ST"/></label>'+
+    '<div class="grid2"><label class="fld" style="margin:0"><span>Date</span><input id="sh_date" type="date"/></label>'+
+    '<label class="fld" style="margin:0"><span>Time</span><input id="sh_time" type="text" placeholder="10am–4pm"/></label></div>'+
+    '<div class="row" style="margin-top:10px"><button class="gold" id="sh_go" style="flex:1">Add show</button><button class="ghost" id="sh_x">Cancel</button></div></div>';
+  document.body.appendChild(w); const close=()=>w.remove(); w.querySelector('#sh_x').onclick=close; w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.querySelector('#sh_go').onclick=async()=>{ const name=(w.querySelector('#sh_name').value||'').trim(); if(!name){ toast('Enter a show name.'); return; }
+    const addr=(w.querySelector('#sh_addr').value||'').trim(); const date=w.querySelector('#sh_date').value||null; const time=(w.querySelector('#sh_time').value||'').trim()||null;
+    const ok=await sbInsert('shows',{name:name,address:addr||null,event_date:date,event_time:time});
+    if(!ok){ toast('Couldn\'t add the show.'); return; } close(); toast('Show added.'); loadShows(); };
+  setTimeout(()=>{ const n=w.querySelector('#sh_name'); if(n)n.focus(); },60);
+}
+async function deleteShow(id){ if(!isAdmin())return; if(!confirm('Remove this show?'))return; const {base,key}=sbBase();
+  try{ await fetch(base+'/rest/v1/shows?id=eq.'+id,{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}); }catch(e){} loadShows(); }
 function openReview(){
   let chosen=5;
   const w=document.createElement('div'); w.className='scanmodal';
