@@ -503,7 +503,7 @@ async function loadShows(){
   if(!s.length){ cont.innerHTML='<div class="muted" style="text-align:center">No upcoming shows posted yet — check back soon!</div>'; return; }
   cont.innerHTML=s.map(showCardWall).join('');
 }
-function openAddShow(){ if(!isAdmin()){ staffUnlock(); return; }
+function openAddShow(){ if(!staffSession()){ openStaffLogin(); return; }
   const w=document.createElement('div'); w.className='scanmodal';
   let flyer=null;  // {path,url} once a flyer image is uploaded
   w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="color:var(--gold)">Add a show</h3>'+
@@ -526,7 +526,7 @@ function openAddShow(){ if(!isAdmin()){ staffUnlock(); return; }
     if(id){ close(); loadShows(); } };
   setTimeout(()=>{ const n=w.querySelector('#sh_name'); if(n)n.focus(); },60);
 }
-async function showFlyer(id){ if(!isAdmin()){ staffUnlock(); return; }
+async function showFlyer(id){ if(!staffSession()){ openStaffLogin(); return; }
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
   inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading flyer…'); const up=await uploadMedia(f); if(!up)return;
     const ok=await staffDo('show_set_flyer',{p_id:id,p_flyer:up.url},'Flyer saved.'); if(ok)loadShows(); };
@@ -587,7 +587,7 @@ async function loadMembers(){
   cont.innerHTML='<div class="memcount">'+m.length+' member'+(m.length===1?'':'s')+'</div>'+m.map(x=>{ const ph=String(x.phone||'').replace(/[^\d+]/g,''); const d=x.created_at?new Date(x.created_at).toLocaleDateString():'';
     return '<div class="memrow"><div class="memname">'+esc(x.name||'(no name)')+'</div>'+(ph?('<a class="memphone" href="tel:'+ph+'">'+esc(x.phone)+'</a>'):'<span class="memphone">—</span>')+'<div class="memdate">'+esc(d)+'</div></div>'; }).join('');
 }
-function isAdmin(){ if(staffSession())return true; let p=''; try{ p=localStorage.getItem('hoc_admin_phone')||''; }catch(e){} if(!p)p=myPhone(); p=String(p).replace(/\D/g,'').slice(-10); return !!p && ADMIN_PHONES.some(n=>n.slice(-10)===p); }
+function isAdmin(){ return !!staffSession(); }  // add/delete/edit show only for a signed-in staff member (old phone-unlock retired)
 /* ---- Staff sign-in (username + password; claim on first use; secret-question reset) ---- */
 function openStaffLogin(){
   const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
@@ -678,7 +678,7 @@ async function uploadMedia(file){ const {base,key}=sbBase(); if(!base||!key){ to
   try{ const r=await fetch(base+'/storage/v1/object/show-media/'+path,{method:'POST',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},body:file});
     if(!r.ok){ toast('Upload failed ('+r.status+').'); return null; }
     return {path:path, url:base+'/storage/v1/object/public/show-media/'+path}; }catch(e){ toast('Upload failed.'); return null; } }
-function pickMedia(){ if(!isAdmin()){ staffUnlock(); return; } const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*,video/*';
+function pickMedia(){ if(!staffSession()){ openStaffLogin(); return; } const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*,video/*';
   inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading…'); const up=await uploadMedia(f); if(!up)return;
     const caption=(prompt('Add a caption (optional):')||'').trim(); const kind=(f.type||'').indexOf('video')===0?'video':'photo';
     const id=await staffDo('media_add',{p_kind:kind,p_path:up.path,p_url:up.url,p_caption:caption,p_uploader:myName()||null},'Posted! 🎉');
