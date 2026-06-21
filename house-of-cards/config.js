@@ -15,5 +15,14 @@ window.HOC_CONFIG = {
 
   /* Subscription checkout. Paste a Stripe Payment Link (or other hosted checkout) URL here.
      Leave empty to let new sign-ups start a free trial until billing is connected. */
-  SUBSCRIBE_URL: ""
+  SUBSCRIBE_URL: "",
+
+  /* Square (marketplace checkout — Phase 3).
+     - SQUARE_APP_ID and SQUARE_LOCATION_ID are PUBLIC (used by the in-page card form). Safe to ship.
+     - The Square ACCESS TOKEN is a SECRET and must NEVER go here. It lives only as a
+       Supabase Edge Function secret named SQUARE_ACCESS_TOKEN.
+     - Use "sandbox" while testing, then switch to "production" with live values. */
+  SQUARE_ENV: "sandbox",
+  SQUARE_APP_ID: "sandbox-sq0idb-tXgXopZO7RcUCNTI__pvjg",
+  SQUARE_LOCATION_ID: ""   // fill once we grab it (see below) — needed by the card form + charge
 };
