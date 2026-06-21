@@ -352,6 +352,59 @@ function viewWall(){
   const coll=c=>tile(esc(c.name)+'&rsquo;s cards', qrImg(c.url), 'Scan to view on Collectr', "gateOpen('"+j(c.url)+"')");
   const pageUrl=(location.href||'').split('#')[0];
   const contacts=(w.contact||[]).filter(c=>c&&c.phone);
+  const staff=!!staffSession();
+  let active=ui.wallTab||'home'; if(active==='members'&&!staff) active='home';
+  const TABS=[['home','🏠 Home'],['share','Share Us!!'],['social','Follow on Social'],['pay','Pay at Show'],['contact','Contact Us'],['reviews','Reviews'],['photos','Photos & Videos']];
+  if(staff) TABS.push(['members','Members']);
+  const tabbar='<div class="walltabs">'+TABS.map(t=>'<button class="walltab'+(t[0]===active?' on':'')+'" data-k="'+t[0]+'" onclick="setWallTab(\''+t[0]+'\')">'+t[1]+'</button>').join('')+'</div>';
+  const panel=(k,inner)=>'<div class="wpanel" data-wtab="'+k+'"'+(k===active?'':' style="display:none"')+'>'+inner+'</div>';
+
+  const homePanel=
+    '<div class="wall-sec" onclick="mediaSecTap()">Follow Us On Our Journey</div>'+
+    '<div id="wShowsAdmin"></div>'+
+    '<div id="wShows" class="showlist"><div class="muted" style="text-align:center">Loading…</div></div>'+
+    ((w.collectr&&w.collectr.filter(c=>c&&c.url).length)?(
+      '<div class="wall-sec">Our Collection</div><div class="qrgrid">'+
+      w.collectr.filter(c=>c&&c.url).map(coll).join('')+'</div>'
+    ):'');
+  const sharePanel=
+    '<div class="wall-sec">Share our page</div><div class="qrgrid">'+
+      '<div class="qrtile tap" onclick="sharePage()"><div class="qrlabel">Our Page</div>'+qrImg(pageUrl)+'<div class="qrsub">Scan it — or tap to share the link</div></div>'+
+    '</div>';
+  const socialPanel=
+    '<div class="wall-sec">Follow on Social Media</div>'+
+    '<div class="qrgrid">'+
+      social('Facebook', w.facebook, 'Scan to follow')+
+      social('Instagram', w.instagram?igUrl(w.instagram):'', w.instagram?('@'+String(w.instagram).replace(/^@/,'')):'')+
+      social('TikTok', w.tiktok?ttUrl(w.tiktok):'', w.tiktok?('@'+String(w.tiktok).replace(/^@/,'')):'')+
+    '</div>';
+  const payPanel=
+    '<div class="wall-sec">Pay at Show</div>'+
+    '<div class="qrgrid">'+
+      pay('Venmo', w.venmo?venmoUrl(w.venmo):'', '', w.venmo)+
+      pay('Cash App', w.cashapp?cashUrl(w.cashapp):'', '', w.cashapp)+
+      pay('PayPal', w.paypal?paypalUrl(w.paypal):'', 'assets/wall/paypal-photo.jpeg', w.paypal)+
+    '</div>';
+  const contactPanel=
+    '<div class="wall-sec">Contact Us</div>'+
+    (contacts.length?(
+      '<div class="muted" style="text-align:center;margin:-6px 0 12px">Questions or requests? Text us:</div>'+
+      '<div class="qrgrid">'+contacts.map(c=>{ const sms='sms:'+String(c.phone).replace(/[^\d+]/g,''); return tile('Text '+esc(c.name), qrImg(sms), 'Tap to text', "openUrl('"+sms+"')"); }).join('')+'</div>'
+    ):'<div class="muted" style="text-align:center">Contact info coming soon.</div>');
+  const reviewsPanel=
+    '<div class="wall-sec">Reviews</div>'+
+    '<div class="card revcard"><div id="wRevAvg" class="revavg">Loading reviews…</div>'+
+      '<button class="wall-share" onclick="openReview()">★ Leave a review</button>'+
+      '<div id="wRevList" class="revlist"></div></div>';
+  const photosPanel=
+    '<div class="wall-sec" onclick="mediaSecTap()">Show Photos &amp; Videos</div>'+
+    '<div id="wMediaAdmin"></div>'+
+    '<div id="wMedia" class="mediagrid"><div class="muted" style="text-align:center">Loading…</div></div>';
+  const membersPanel=
+    '<div class="wall-sec">Members</div>'+
+    '<div class="muted" style="text-align:center;margin:-6px 0 12px">Everyone who joined the page — staff only.</div>'+
+    '<div id="wMemberList"><div class="muted" style="text-align:center">Loading…</div></div>';
+
   return '<div class="wall">'+
     '<div class="wall-hero">'+
       '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
@@ -361,45 +414,28 @@ function viewWall(){
       '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
       '<div class="wall-stats"><span>👥 <b id="wMembers">—</b> members</span><span class="dot">•</span><span>👀 <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
-    '<div class="wall-sec" onclick="mediaSecTap()">Follow Us On Our Journey</div>'+
-    '<div id="wShowsAdmin"></div>'+
-    '<div id="wShows" class="showlist"><div class="muted" style="text-align:center">Loading…</div></div>'+
-    '<div class="wall-sec">Visit our page</div><div class="qrgrid">'+
-      '<div class="qrtile tap" onclick="sharePage()"><div class="qrlabel">Our Page</div>'+qrImg(pageUrl)+'<div class="qrsub">Scan it — or tap to share the link</div></div>'+
+    tabbar+
+    '<div class="walltabwrap">'+
+      panel('home',homePanel)+
+      panel('share',sharePanel)+
+      panel('social',socialPanel)+
+      panel('pay',payPanel)+
+      panel('contact',contactPanel)+
+      panel('reviews',reviewsPanel)+
+      panel('photos',photosPanel)+
+      (staff?panel('members',membersPanel):'')+
     '</div>'+
-    ((w.collectr&&w.collectr.filter(c=>c&&c.url).length)?(
-      '<div class="wall-sec">Our Collection</div><div class="qrgrid">'+
-      w.collectr.filter(c=>c&&c.url).map(coll).join('')+'</div>'
-    ):'')+
-    '<div class="wall-sec">Follow us</div>'+
-    '<div class="qrgrid">'+
-      social('Facebook', w.facebook, 'Scan to follow')+
-      social('Instagram', w.instagram?igUrl(w.instagram):'', w.instagram?('@'+String(w.instagram).replace(/^@/,'')):'')+
-      social('TikTok', w.tiktok?ttUrl(w.tiktok):'', w.tiktok?('@'+String(w.tiktok).replace(/^@/,'')):'')+
-    '</div>'+
-    '<div class="wall-sec">Pay us</div>'+
-    '<div class="qrgrid">'+
-      pay('Venmo', w.venmo?venmoUrl(w.venmo):'', '', w.venmo)+
-      pay('Cash App', w.cashapp?cashUrl(w.cashapp):'', '', w.cashapp)+
-      pay('PayPal', w.paypal?paypalUrl(w.paypal):'', 'assets/wall/paypal-photo.jpeg', w.paypal)+
-    '</div>'+
-    (contacts.length?(
-      '<div class="wall-sec">Contact Us</div>'+
-      '<div class="muted" style="text-align:center;margin:-6px 0 12px">Questions or requests? Text us:</div>'+
-      '<div class="qrgrid">'+contacts.map(c=>{ const sms='sms:'+String(c.phone).replace(/[^\d+]/g,''); return tile('Text '+esc(c.name), qrImg(sms), 'Tap to text', "openUrl('"+sms+"')"); }).join('')+'</div>'
-    ):'')+
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
-    '<div class="wall-sec">Reviews</div>'+
-    '<div class="card revcard"><div id="wRevAvg" class="revavg">Loading reviews…</div>'+
-      '<button class="wall-share" onclick="openReview()">★ Leave a review</button>'+
-      '<div id="wRevList" class="revlist"></div></div>'+
-    '<div class="wall-sec" onclick="mediaSecTap()">Show Photos &amp; Videos</div>'+
-    '<div id="wMediaAdmin"></div>'+
-    '<div id="wMedia" class="mediagrid"><div class="muted" style="text-align:center">Loading…</div></div>'+
-    (staffSession()
+    (staff
       ? '<div class="wall-foot"><span style="color:var(--muted);font-size:11px">Staff: '+esc(staffSession().username)+' · </span><button class="staff-signin" onclick="openStaffAccount()">Account</button><button class="staff-signin" onclick="staffLogout()">Sign out</button></div>'
       : '<div class="wall-foot"><button class="staff-signin" onclick="openStaffLogin()">Staff</button></div>')+
   '</div>';
+}
+function setWallTab(key){ ui.wallTab=key;
+  document.querySelectorAll('.walltab').forEach(b=>b.classList.toggle('on', b.dataset.k===key));
+  document.querySelectorAll('.wpanel').forEach(p=>{ p.style.display=(p.dataset.wtab===key)?'':'none'; });
+  if(key==='members') loadMembers();
+  try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){ try{ window.scrollTo(0,0); }catch(_){} }
 }
 /* tap-to-open: pay & Collectr links capture name+phone the FIRST time on a device, then bypass; socials open directly */
 function leadRegistered(){ try{ return !!localStorage.getItem('hoc_lead'); }catch(e){ return false; } }
@@ -443,14 +479,18 @@ async function wallLoadStats(){
   } else { set('wRevAvg','Reviews open soon'); }
   loadShows();
   loadMedia();
+  if(ui.wallTab==='members'&&staffSession()) loadMembers();
 }
 /* ---- Follow Us On Our Journey: staff post shows (name/address/date/time); everyone sees them ---- */
 function showCardWall(s){
   const date=s.event_date?new Date(s.event_date+'T00:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}):'';
   const when=[date,s.event_time].filter(Boolean).join(' · ');
   const addr=s.address?('<a class="showaddr" href="https://maps.google.com/?q='+encodeURIComponent(s.address)+'" target="_blank" rel="noopener">📍 '+esc(s.address)+'</a>'):'';
-  const del=isAdmin()?('<div style="margin-top:8px"><button class="sm red" onclick="deleteShow('+s.id+')">Delete</button></div>'):'';
-  return '<div class="showcard"><div class="showname">'+esc(s.name)+'</div>'+(when?('<div class="showwhen">'+esc(when)+'</div>'):'')+addr+del+'</div>';
+  const flyer=s.flyer_url?('<img class="showflyer" loading="lazy" src="'+esc(s.flyer_url)+'" onclick="openUrl(\''+esc(s.flyer_url)+'\')"/>'):'';
+  const adminRow=isAdmin()?('<div class="row" style="gap:8px;margin-top:8px;justify-content:center">'+
+    '<button class="sm ghost" onclick="showFlyer('+s.id+')">'+(s.flyer_url?'Edit flyer':'Add flyer')+'</button>'+
+    '<button class="sm red" onclick="deleteShow('+s.id+')">Delete</button></div>'):'';
+  return '<div class="showcard">'+flyer+'<div class="showname">'+esc(s.name)+'</div>'+(when?('<div class="showwhen">'+esc(when)+'</div>'):'')+addr+adminRow+'</div>';
 }
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 async function loadShows(){
@@ -458,26 +498,41 @@ async function loadShows(){
     ? '<div class="row" style="justify-content:center;margin-bottom:12px"><button class="gold" onclick="openAddShow()">＋ Add a show</button></div>' : ''; }
   if(isAdmin()){ const {base,key}=sbBase(); if(base&&key){ try{ fetch(base+'/rest/v1/shows?event_date=lt.'+todayStr(),{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}).catch(()=>{}); }catch(e){} } }  // purge past shows
   const cont=el('wShows'); if(!cont)return;
-  const s=await sbGet('shows?select=id,name,address,event_date,event_time&event_date=gte.'+todayStr()+'&order=event_date.asc&limit=50');
+  const s=await sbGet('shows?select=id,name,address,event_date,event_time,flyer_url&event_date=gte.'+todayStr()+'&order=event_date.asc&limit=50');
   if(!Array.isArray(s)){ cont.innerHTML='<div class="muted" style="text-align:center">Coming soon.</div>'; return; }
   if(!s.length){ cont.innerHTML='<div class="muted" style="text-align:center">No upcoming shows posted yet — check back soon!</div>'; return; }
   cont.innerHTML=s.map(showCardWall).join('');
 }
 function openAddShow(){ if(!isAdmin()){ staffUnlock(); return; }
   const w=document.createElement('div'); w.className='scanmodal';
+  let flyer=null;  // {path,url} once a flyer image is uploaded
   w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="color:var(--gold)">Add a show</h3>'+
     '<label class="fld"><span>Show name</span><input id="sh_name" placeholder="e.g. Pensacola Card Show"/></label>'+
     '<label class="fld"><span>Address</span><input id="sh_addr" placeholder="123 Main St, City, ST"/></label>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>Date</span><input id="sh_date" type="date"/></label>'+
     '<label class="fld" style="margin:0"><span>Time</span><input id="sh_time" type="text" placeholder="10am–4pm"/></label></div>'+
+    '<label class="fld"><span>Flyer image (optional)</span><div class="row" style="gap:8px"><button class="ghost" id="sh_flyer" style="flex:1">📷 Upload flyer</button></div></label>'+
+    '<div id="sh_flyerprev"></div>'+
     '<div class="row" style="margin-top:10px"><button class="gold" id="sh_go" style="flex:1">Add show</button><button class="ghost" id="sh_x">Cancel</button></div></div>';
   document.body.appendChild(w); const close=()=>w.remove(); w.querySelector('#sh_x').onclick=close; w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.querySelector('#sh_flyer').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
+    inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading flyer…'); const up=await uploadMedia(f); if(!up)return; flyer=up;
+      const pv=w.querySelector('#sh_flyerprev'); if(pv)pv.innerHTML='<img class="showflyer" src="'+esc(up.url)+'"/>'; w.querySelector('#sh_flyer').textContent='✓ Flyer ready — tap to replace'; };
+    inp.click(); };
   w.querySelector('#sh_go').onclick=async()=>{ const name=(w.querySelector('#sh_name').value||'').trim(); if(!name){ toast('Enter a show name.'); return; }
     const date=w.querySelector('#sh_date').value; if(!date){ toast('Please pick a show date (it auto-removes the day after).'); return; }
     const addr=(w.querySelector('#sh_addr').value||'').trim(); const time=(w.querySelector('#sh_time').value||'').trim()||null;
-    const ok=await sbInsert('shows',{name:name,address:addr||null,event_date:date,event_time:time});
+    const ok=await sbInsert('shows',{name:name,address:addr||null,event_date:date,event_time:time,flyer_url:flyer?flyer.url:null});
     if(!ok){ toast('Couldn\'t add the show.'); return; } close(); toast('Show added.'); loadShows(); };
   setTimeout(()=>{ const n=w.querySelector('#sh_name'); if(n)n.focus(); },60);
+}
+async function showFlyer(id){ if(!isAdmin()){ staffUnlock(); return; }
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
+  inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading flyer…'); const up=await uploadMedia(f); if(!up)return;
+    const {base,key}=sbBase(); let ok=false;
+    try{ const r=await fetch(base+'/rest/v1/shows?id=eq.'+id,{method:'PATCH',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({flyer_url:up.url})}); ok=r.ok; }catch(e){}
+    if(!ok){ toast('Couldn\'t save the flyer.'); return; } toast('Flyer saved.'); loadShows(); };
+  inp.click();
 }
 async function deleteShow(id){ if(!isAdmin())return; if(!confirm('Remove this show?'))return; const {base,key}=sbBase();
   try{ await fetch(base+'/rest/v1/shows?id=eq.'+id,{method:'DELETE',headers:{apikey:key,Authorization:'Bearer '+key}}); }catch(e){} loadShows(); }
@@ -510,7 +565,20 @@ function rememberName(n){ n=(n||'').trim(); if(n){ try{ localStorage.setItem('ho
 function myPhone(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignups')||'[]'); const l=a[a.length-1]; return (l&&l.phone)||''; }catch(e){ return ''; } }
 function staffSession(){ try{ return JSON.parse(localStorage.getItem('hoc_staff')||'null'); }catch(e){ return null; } }
 function setStaffSession(o){ try{ if(o)localStorage.setItem('hoc_staff',JSON.stringify(o)); else localStorage.removeItem('hoc_staff'); }catch(e){} }
-function staffLogout(){ setStaffSession(null); toast('Signed out.'); render(); }
+let _staffPw=null;  // in-memory only: the signed-in staff member's password hash, so the Members list doesn't re-prompt each view
+function staffLogout(){ setStaffSession(null); _staffPw=null; ui.wallTab='home'; toast('Signed out.'); render(); }
+async function loadMembers(){
+  const cont=el('wMemberList'); if(!cont)return;
+  const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
+  if(!_staffPw){ const p=prompt('Confirm your staff password to view members:'); if(!p){ cont.innerHTML='<div class="muted" style="text-align:center">Enter your password to view members. <button class="sm ghost" onclick="loadMembers()">Try again</button></div>'; return; } _staffPw=hashPass(p); }
+  cont.innerHTML='<div class="muted" style="text-align:center">Loading…</div>';
+  const res=await sbRpc('staff_members',{p_user:s.username,p_pass:_staffPw});
+  if(!res||res.ok!==true){ _staffPw=null; cont.innerHTML='<div class="muted" style="text-align:center">Couldn\'t verify your password. <button class="sm ghost" onclick="loadMembers()">Try again</button></div>'; return; }
+  const m=res.members||[];
+  if(!m.length){ cont.innerHTML='<div class="muted" style="text-align:center">No members have joined yet.</div>'; return; }
+  cont.innerHTML='<div class="memcount">'+m.length+' member'+(m.length===1?'':'s')+'</div>'+m.map(x=>{ const ph=String(x.phone||'').replace(/[^\d+]/g,''); const d=x.created_at?new Date(x.created_at).toLocaleDateString():'';
+    return '<div class="memrow"><div class="memname">'+esc(x.name||'(no name)')+'</div>'+(ph?('<a class="memphone" href="tel:'+ph+'">'+esc(x.phone)+'</a>'):'<span class="memphone">—</span>')+'<div class="memdate">'+esc(d)+'</div></div>'; }).join('');
+}
 function isAdmin(){ if(staffSession())return true; let p=''; try{ p=localStorage.getItem('hoc_admin_phone')||''; }catch(e){} if(!p)p=myPhone(); p=String(p).replace(/\D/g,'').slice(-10); return !!p && ADMIN_PHONES.some(n=>n.slice(-10)===p); }
 /* ---- Staff sign-in (username + password; claim on first use; secret-question reset) ---- */
 function openStaffLogin(){
@@ -527,7 +595,7 @@ function openStaffLogin(){
     w.querySelector('#st_go').onclick=async()=>{ const u=(w.querySelector('#st_u').value||'').trim(); const p=w.querySelector('#st_p').value||'';
       if(!u||!p){ toast('Enter username and password.'); return; }
       const r=await sbRpc('staff_login',{p_user:u,p_pass:hashPass(p)});
-      if(Array.isArray(r)&&r.length){ setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); close(); toast('Welcome, '+r[0].username+'!'); render(); }
+      if(Array.isArray(r)&&r.length){ _staffPw=hashPass(p); setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); close(); toast('Welcome, '+r[0].username+'!'); render(); }
       else toast('Wrong username or password.'); };
     w.querySelector('#st_first').onclick=async()=>{ const u=(w.querySelector('#st_u').value||'').trim(); if(!u){ toast('Type your username first.'); return; }
       const st=await sbRpc('staff_status',{p_user:u});
@@ -545,7 +613,7 @@ function openStaffLogin(){
     w.querySelector('#c_go').onclick=async()=>{ const p=w.querySelector('#c_p').value||''; const e=(w.querySelector('#c_e').value||'').trim(); const q=(w.querySelector('#c_q').value||'').trim(); const a=(w.querySelector('#c_a').value||'').trim();
       if(p.length<4){ toast('Password must be at least 4 characters.'); return; } if(!q||!a){ toast('Set a security question and answer.'); return; }
       const ok=await sbRpc('staff_claim',{p_user:u,p_pass:hashPass(p),p_email:e||null,p_q:q,p_a:hashPass(a.toLowerCase())});
-      if(ok===true){ setStaffSession({username:u,email:e}); close(); toast('Account created — you\'re signed in!'); render(); }
+      if(ok===true){ _staffPw=hashPass(p); setStaffSession({username:u,email:e}); close(); toast('Account created — you\'re signed in!'); render(); }
       else toast('That account is already set up — try signing in.'); };
   }
   function forgotStep(u,q){
@@ -557,7 +625,7 @@ function openStaffLogin(){
     w.querySelector('#f_go').onclick=async()=>{ const a=(w.querySelector('#f_a').value||'').trim(); const p=w.querySelector('#f_p').value||'';
       if(!a||p.length<4){ toast('Enter your answer and a new password (4+ chars).'); return; }
       const ok=await sbRpc('staff_reset',{p_user:u,p_ans:hashPass(a.toLowerCase()),p_newpass:hashPass(p)});
-      if(ok===true){ const r=await sbRpc('staff_login',{p_user:u,p_pass:hashPass(p)}); if(Array.isArray(r)&&r.length){ setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); } close(); toast('Password reset — signed in!'); render(); }
+      if(ok===true){ _staffPw=hashPass(p); const r=await sbRpc('staff_login',{p_user:u,p_pass:hashPass(p)}); if(Array.isArray(r)&&r.length){ setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); } close(); toast('Password reset — signed in!'); render(); }
       else toast('That answer doesn\'t match.'); };
   }
   loginStep();
@@ -579,7 +647,7 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
   w.querySelector('#a_save').onclick=async()=>{ const email=(w.querySelector('#a_e').value||'').trim(); const oldp=w.querySelector('#a_old').value||''; const newp=w.querySelector('#a_new').value||'';
     if(!oldp){ toast('Enter your current password to save changes.'); return; } if(newp&&newp.length<4){ toast('New password must be 4+ characters.'); return; }
     const ok=await sbRpc('staff_update',{p_user:s.username,p_old:hashPass(oldp),p_newpass:newp?hashPass(newp):'',p_email:email});
-    if(ok===true){ s.email=email; setStaffSession(s); close(); toast('Saved.'); render(); }
+    if(ok===true){ _staffPw=hashPass(newp||oldp); s.email=email; setStaffSession(s); close(); toast('Saved.'); render(); }
     else toast('Current password is incorrect.'); };
   w.querySelector('#ns_go').onclick=async()=>{ const nu=(w.querySelector('#ns_u').value||'').trim(); const nph=(w.querySelector('#ns_ph').value||'').replace(/\D/g,''); const pw=w.querySelector('#ns_pw').value||'';
     if(!/^[a-z0-9_]{2,}$/.test(nu.toLowerCase())){ toast('Username: 2+ letters/numbers, no spaces.'); return; }

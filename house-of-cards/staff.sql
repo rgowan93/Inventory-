@@ -126,10 +126,36 @@ begin
 end;
 $$;
 
+-- staff_members: a claimed staff member (verified by their own username+password) can read
+-- the member list (the "Join our page" sign-ups in public.leads). leads has no public SELECT
+-- policy, so phone numbers are never exposed to the anon key except through this gated call.
+-- Returns { ok:false } on bad auth, or { ok:true, members:[{name,phone,created_at}, ...] }.
+create or replace function public.staff_members(p_user text, p_pass text)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare caller_ok boolean; js jsonb;
+begin
+  select true into caller_ok from public.staff
+   where lower(username) = lower(trim(p_user)) and claimed = true and pass = p_pass;
+  if not coalesce(caller_ok, false) then
+    return jsonb_build_object('ok', false);
+  end if;
+  select coalesce(
+           jsonb_agg(jsonb_build_object('name', name, 'phone', phone, 'created_at', created_at)
+                     order by created_at desc),
+           '[]'::jsonb)
+    into js
+    from public.leads;
+  return jsonb_build_object('ok', true, 'members', js);
+end;
+$$;
+
 -- Allow the app (anon key) and signed-in users to call these RPCs.
 grant execute on function public.staff_status(text)                        to anon, authenticated;
 grant execute on function public.staff_login(text, text)                   to anon, authenticated;
 grant execute on function public.staff_claim(text, text, text, text, text) to anon, authenticated;
 grant execute on function public.staff_reset(text, text, text)             to anon, authenticated;
 grant execute on function public.staff_update(text, text, text, text)      to anon, authenticated;
+grant execute on function public.staff_create(text, text, text, text)      to anon, authenticated;
+grant execute on function public.staff_members(text, text)                 to anon, authenticated;
 grant execute on function public.staff_create(text, text, text, text)      to anon, authenticated;
