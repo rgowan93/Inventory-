@@ -931,7 +931,8 @@ function openFeedback(orderId,role,rateeId){
 }
 async function openSellerSales(){
   if(!wallCustomer)return;
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const ex=document.querySelector('.salesmodal'); if(ex)ex.remove();
+  const w=document.createElement('div'); w.className='scanmodal salesmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
   w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="ss_x">✕</button><h3 style="color:var(--gold)">My sales</h3><div id="ss_list"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#ss_x').onclick=close;
@@ -941,13 +942,21 @@ async function openSellerSales(){
   list.innerHTML=rows.map(o=>{ const items=(o.order_items||[]).map(i=>esc(i.title)).join(', ');
     const addr=[o.ship_name,o.ship_address1,o.ship_city,o.ship_state,o.ship_zip].filter(Boolean).join(', ');
     const fb=(o.status==='complete')?('<div style="margin-top:6px"><button class="sm gold" onclick="openFeedback('+o.id+',\'seller_to_buyer\','+(o.customer_id?('\''+o.customer_id+'\''):'null')+')">★ Rate buyer</button></div>'):'';
+    const ful=(o.status!=='complete'&&o.status!=='canceled')?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="sm ghost" onclick="sellerShip('+o.id+')">Add tracking / Shipped</button><button class="sm gold" onclick="sellerCompleteSale('+o.id+')">Mark complete</button></div>'):'';
     return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
       '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+'</div>'+
       (addr?('<div class="muted" style="margin-top:4px">📦 '+esc(addr)+(o.ship_phone?(' · '+esc(o.ship_phone)):'')+'</div>'):'')+
       (items?('<div style="font-size:13px;margin-top:4px">'+items+'</div>'):'')+
       (o.tracking_number?('<div class="muted">Tracking: '+esc(o.tracking_number)+'</div>'):'')+
-      '<div class="muted" style="font-size:11px;margin-top:4px">House of Cards handles fulfillment status; you keep your sale minus the 5% fee.</div>'+fb+'</div>'; }).join('');
+      '<div class="muted" style="font-size:11px;margin-top:4px">You keep your sale minus the 5% fee.</div>'+ful+fb+'</div>'; }).join('');
 }
+async function sellerFulfill(id,status,tracking){
+  const {data,error}=await sb.functions.invoke('seller-fulfill',{body:{id:id,status:status,tracking:tracking||''}});
+  let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+  if(out&&out.ok){ return true; } toast((out&&out.error)||'Could not update.'); return false;
+}
+async function sellerShip(id){ const t=prompt('Tracking number (optional):'); if(t===null)return; if(await sellerFulfill(id,'shipped',t)){ toast('Marked shipped — buyer notified.'); openSellerSales(); } }
+async function sellerCompleteSale(id){ if(!confirm('Mark this sale complete?'))return; if(await sellerFulfill(id,'complete','')){ toast('Marked complete.'); openSellerSales(); } }
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];
 let _mktItems=[]; let _mktSub='active', _mktSort='new', _mktSearch='', _mktPortal='selling';
