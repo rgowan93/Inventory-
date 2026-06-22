@@ -28,5 +28,12 @@ window.HOC_CONFIG = {
 
   /* Web Push (app notifications). Public VAPID key only — safe to ship.
      The matching PRIVATE key lives only as a Supabase Edge Function secret (VAPID_PRIVATE). */
-  VAPID_PUBLIC: "BBB0LbkZgmMqssDZq5kjI5_UFD_5PjBvQUwt-lKx8zRs3TAOjXF5WCL2Jhic732hZAl53OtUTdhiPei_DcSC8Jc"
+  VAPID_PUBLIC: "BBB0LbkZgmMqssDZq5kjI5_UFD_5PjBvQUwt-lKx8zRs3TAOjXF5WCL2Jhic732hZAl53OtUTdhiPei_DcSC8Jc",
+
+  /* Stripe Connect (third-party seller payments). Publishable key only — safe to ship.
+     Secret key lives only as a Supabase Edge Function secret (STRIPE_SECRET_KEY).
+     Currently TEST mode. Live publishable key (swap both this and the secret to go live):
+       pk_live_51TkzbXITh3Oog0PeUEriBuNXA37HTLJIzjmGK9DMFm6JWWRLLycmTHD6lQnYnHg0LeBbmfWInHULT74WoM7ut7kp00fKXvdyH1 */
+  STRIPE_ENV: "test",
+  STRIPE_PUBLISHABLE_KEY: "pk_test_51TkzbXITh3Oog0PeUuBkbbQytC1lxVk89aP5gzLesb8VazpmO8kuE9ytRwMy3oQM729Wfa6OEoVVUOPoWVMiuPBE00PRbOVcPp"
 };

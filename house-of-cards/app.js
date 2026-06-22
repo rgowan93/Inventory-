@@ -686,10 +686,20 @@ async function sellerAction(id,status,verified){ const r=await staffDo('seller_s
 /* ---- Customer: request a seller account ---- */
 async function loadSellerStatus(cont){
   if(!cont||!wallCustomer)return;
-  try{ const {data}=await sb.from('sellers').select('status,verified').eq('id',wallCustomer.id).maybeSingle();
+  try{ const {data}=await sb.from('sellers').select('status,verified,payouts_enabled').eq('id',wallCustomer.id).maybeSingle();
     if(!data){ cont.innerHTML='<div class="muted" style="margin-bottom:6px">Want to sell your own cards here?</div><button class="ghost" id="be_seller" style="width:100%">Request a seller account</button>'; const b=cont.querySelector('#be_seller'); if(b)b.onclick=()=>requestSeller(cont); }
     else if(data.status==='requested') cont.innerHTML='<div class="muted">⏳ Seller request pending staff approval.</div>';
-    else if(data.status==='approved'){ cont.innerHTML='<div>✅ Approved seller'+(data.verified?' · ✔ verified':'')+'</div><div class="muted" style="margin:4px 0 8px">List your own cards now. Buyers can purchase once seller payments (Stripe) go live.</div><button class="gold" id="my_listings" style="width:100%">Manage my listings</button>'; const b=cont.querySelector('#my_listings'); if(b)b.onclick=openSellerListings; }
+    else if(data.status==='approved'){
+      const payout = data.payouts_enabled
+        ? '<div style="margin:4px 0">💳 Payouts active ✅</div>'
+        : '<div class="muted" style="margin:4px 0">Set up payouts to start selling.</div><div class="row" style="gap:6px"><button class="gold" id="sl_onboard" style="flex:1">Set up payouts (Stripe)</button><button class="ghost" id="sl_refresh">Refresh</button></div>';
+      cont.innerHTML='<div>✅ Approved seller'+(data.verified?' · ✔ verified':'')+'</div>'+payout+
+        '<div class="muted" style="margin:6px 0 8px">A flat 5% fee applies when an item sells.</div>'+
+        '<button class="'+(data.payouts_enabled?'gold':'ghost')+'" id="my_listings" style="width:100%">Manage my listings</button>';
+      const mb=cont.querySelector('#my_listings'); if(mb)mb.onclick=openSellerListings;
+      const ob=cont.querySelector('#sl_onboard'); if(ob)ob.onclick=sellerOnboard;
+      const rb=cont.querySelector('#sl_refresh'); if(rb)rb.onclick=()=>sellerRefreshPayouts(cont);
+    }
     else if(data.status==='banned') cont.innerHTML='<div class="muted">Selling is disabled for this account.</div>';
     else cont.innerHTML='';
   }catch(e){ cont.innerHTML=''; }
@@ -702,6 +712,19 @@ async function requestSeller(cont){
   else if(data==='banned') toast('Selling is disabled for this account.');
   else toast('Please sign in first.');
   loadSellerStatus(cont);
+}
+async function sellerOnboard(){
+  toast('Opening Stripe setup…');
+  const {data,error}=await sb.functions.invoke('connect-onboard',{body:{action:'link'}});
+  let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+  if(out&&out.ok&&out.url){ try{ window.open(out.url,'_blank'); }catch(e){ location.href=out.url; } toast('Finish in Stripe, then tap Refresh.'); }
+  else toast((out&&out.error)||'Could not start Stripe setup.');
+}
+async function sellerRefreshPayouts(cont){
+  const {data,error}=await sb.functions.invoke('connect-onboard',{body:{action:'refresh'}});
+  let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+  if(out&&out.ok){ toast(out.payouts_enabled?'Payouts active! ✅':'Not finished yet — complete Stripe onboarding.'); loadSellerStatus(cont); }
+  else toast((out&&out.error)||'Could not refresh.');
 }
 /* ---- Seller: manage own listings (Supabase RLS scoped to seller_id) ---- */
 let _sellerListings=[], _sellerDraw=null;
