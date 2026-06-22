@@ -689,7 +689,7 @@ async function loadSellerStatus(cont){
   try{ const {data}=await sb.from('sellers').select('status,verified').eq('id',wallCustomer.id).maybeSingle();
     if(!data){ cont.innerHTML='<div class="muted" style="margin-bottom:6px">Want to sell your own cards here?</div><button class="ghost" id="be_seller" style="width:100%">Request a seller account</button>'; const b=cont.querySelector('#be_seller'); if(b)b.onclick=()=>requestSeller(cont); }
     else if(data.status==='requested') cont.innerHTML='<div class="muted">⏳ Seller request pending staff approval.</div>';
-    else if(data.status==='approved') cont.innerHTML='<div>✅ Approved seller'+(data.verified?' · ✔ verified':'')+'.</div><div class="muted" style="margin-top:4px">Your selling tools arrive with the seller-payments update.</div>';
+    else if(data.status==='approved'){ cont.innerHTML='<div>✅ Approved seller'+(data.verified?' · ✔ verified':'')+'</div><div class="muted" style="margin:4px 0 8px">List your own cards now. Buyers can purchase once seller payments (Stripe) go live.</div><button class="gold" id="my_listings" style="width:100%">Manage my listings</button>'; const b=cont.querySelector('#my_listings'); if(b)b.onclick=openSellerListings; }
     else if(data.status==='banned') cont.innerHTML='<div class="muted">Selling is disabled for this account.</div>';
     else cont.innerHTML='';
   }catch(e){ cont.innerHTML=''; }
@@ -702,6 +702,56 @@ async function requestSeller(cont){
   else if(data==='banned') toast('Selling is disabled for this account.');
   else toast('Please sign in first.');
   loadSellerStatus(cont);
+}
+/* ---- Seller: manage own listings (Supabase RLS scoped to seller_id) ---- */
+let _sellerListings=[], _sellerDraw=null;
+async function openSellerListings(){
+  if(!wallCustomer)return;
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  async function draw(){
+    const {data}=await sb.from('listings').select('id,title,price_cents,status,condition,description,shipping_cents,photos,qty').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false});
+    _sellerListings=data||[];
+    const rows=_sellerListings.length?_sellerListings.map(it=>'<div class="memrow"><div class="memmain"><div class="memname">'+esc(it.title)+' <span class="membadge">'+esc(it.status)+'</span></div><div class="mememail">'+mUSD(it.price_cents)+'</div></div><button class="sm ghost" onclick="sellerEditListing('+it.id+')">Edit</button><button class="memdel" onclick="sellerDeleteListing('+it.id+')">✕</button></div>').join(''):'<div class="muted" style="text-align:center;margin:8px 0">No listings yet — add your first card.</div>';
+    w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="sl_x">✕</button><h3 style="color:var(--gold)">My listings</h3>'+rows+'<div class="row" style="margin-top:10px"><button class="gold" id="sl_add" style="flex:1">＋ Add listing</button></div></div>';
+    w.querySelector('#sl_x').onclick=close; w.querySelector('#sl_add').onclick=()=>openSellerListingEdit(null);
+  }
+  _sellerDraw=draw; draw();
+}
+function sellerEditListing(id){ const it=(_sellerListings||[]).find(x=>x.id===id); openSellerListingEdit(it||null); }
+async function sellerDeleteListing(id){ if(!confirm('Delete this listing?'))return; const {error}=await sb.from('listings').delete().eq('id',id); if(error){ toast('Could not delete.'); return; } toast('Deleted.'); if(_sellerDraw)_sellerDraw(); loadMarket(); }
+function openSellerListingEdit(it){
+  if(!wallCustomer)return;
+  let photos=(it&&Array.isArray(it.photos))?it.photos.slice():[];
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const condOpts=LISTING_CONDITIONS.map(c=>'<option'+((it&&it.condition===c)?' selected':'')+'>'+c+'</option>').join('');
+  function drawPhotos(){ const d=w.querySelector('#sp_thumbs'); if(!d)return; d.innerHTML=photos.length?photos.map((p,i)=>'<span class="lpthumb"><img src="'+esc(p)+'"/><button type="button" data-i="'+i+'" class="lpdel">✕</button></span>').join(''):'<span class="muted">No photos yet</span>'; d.querySelectorAll('.lpdel').forEach(b=>b.onclick=()=>{ photos.splice(+b.dataset.i,1); drawPhotos(); }); }
+  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="sp_x">✕</button><h3 style="color:var(--gold)">'+(it?'Edit listing':'Add listing')+'</h3>'+
+    '<label class="fld"><span>Title</span><input id="sp_title" value="'+esc(it?it.title:'')+'"/></label>'+
+    '<label class="fld"><span>Description</span><textarea id="sp_desc" rows="3">'+esc(it?(it.description||''):'')+'</textarea></label>'+
+    '<div class="grid2"><label class="fld" style="margin:0"><span>Price (USD)</span><input id="sp_price" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.price_cents||0)/100):'')+'"/></label>'+
+    '<label class="fld" style="margin:0"><span>Condition</span><select id="sp_cond">'+condOpts+'</select></label></div>'+
+    '<label class="fld"><span>Shipping cost (USD)</span><input id="sp_ship" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.shipping_cents||0)/100):'')+'"/></label>'+
+    '<div class="muted" style="margin:2px 0 6px">Items ship to the buyer. A flat 5% platform fee applies when an item sells.</div>'+
+    '<div class="fld"><span>Photos</span><div id="sp_thumbs" class="lpthumbs"></div><button class="ghost" id="sp_addphoto" style="margin-top:6px">📷 Add photo</button></div>'+
+    '<div class="row" style="margin-top:10px"><button class="gold" id="sp_save" style="flex:1">Save listing</button></div></div>';
+  w.querySelector('#sp_x').onclick=close; drawPhotos();
+  w.querySelector('#sp_addphoto').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading…'); const up=await uploadMedia(f); if(!up)return; photos.push(up.url); drawPhotos(); }; inp.click(); };
+  w.querySelector('#sp_save').onclick=async()=>{
+    const title=(w.querySelector('#sp_title').value||'').trim(); if(!title){ toast('Enter a title.'); return; }
+    const data={ seller_id:wallCustomer.id, created_by:(wallCustomer.username||wallCustomer.name||''), title:title,
+      description:(w.querySelector('#sp_desc').value||'').trim()||null, condition:w.querySelector('#sp_cond').value,
+      price_cents:Math.round((parseFloat(w.querySelector('#sp_price').value)||0)*100),
+      qty:(it&&it.qty!=null?it.qty:1), photos:photos, local_pickup:false, shipping_offered:true,
+      shipping_cents:Math.round((parseFloat(w.querySelector('#sp_ship').value)||0)*100), status:(it?it.status:'active') };
+    let error;
+    if(it){ ({error}=await sb.from('listings').update(data).eq('id',it.id)); }
+    else { ({error}=await sb.from('listings').insert(data)); }
+    if(error){ toast('Could not save: '+(error.message||'error')); return; }
+    toast('Listing saved.'); close(); if(_sellerDraw)_sellerDraw(); loadMarket();
+  };
+  setTimeout(()=>{ const t=w.querySelector('#sp_title'); if(t)t.focus(); },60);
 }
 /* ---- Customer accounts (marketplace): Supabase Auth + customers table (one phone per account) ---- */
 let wallCustomer=null;       // signed-in customer's profile {id,name,email,phone} or null
@@ -844,7 +894,7 @@ async function loadMarket(){
   const cont=el('wMarket'); if(!cont)return;
   let items=null;
   if(staffSession()&&_staffPw){ const r=await sbRpc('staff_listings',{p_user:staffSession().username,p_pass:_staffPw}); if(r&&r.ok)items=r.listings; }
-  if(!items){ const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,status&status=neq.hidden&order=created_at.desc&limit=200'); items=Array.isArray(r)?r:[]; }
+  if(!items){ const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,status,seller_id&status=neq.hidden&order=created_at.desc&limit=200'); items=Array.isArray(r)?r:[]; }
   _mktItems=items;
   drawMarketControls();
   renderMarketGrid();
@@ -975,6 +1025,7 @@ function cartCount(){ return cartGet().length; }
 function addToCart(id){
   const it=(_mktItems||[]).find(x=>x.id===id); if(!it){ toast('Item not found.'); return; }
   if(it.status!=='active'){ toast('That item isn’t available.'); return; }
+  if(it.seller_id){ toast('This seller’s online checkout is coming soon.'); return; }
   const cart=cartGet(); if(cart.some(x=>x.id===id)){ toast('Already in your cart.'); return; }
   cart.push({id:it.id,title:it.title,price_cents:it.price_cents,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,local_pickup:it.local_pickup,photo:(it.photos&&it.photos[0])||''});
   cartSet(cart); toast('Added to cart 🛒');
