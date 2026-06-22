@@ -125,6 +125,19 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .lpthumb img{width:60px;height:60px;object-fit:cover;border-radius:8px;border:2px solid #2c2f42;background:#000}
 .lpdel{position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;font-weight:900;cursor:pointer;padding:0;box-shadow:none}
 .cartsub{text-align:right;font-size:16px;color:var(--cream);margin-top:8px}.cartsub b{color:var(--gold)}
+.ckitems{margin:8px 0;border-top:1px solid #2c2f42}
+.ckrow{display:flex;justify-content:space-between;gap:10px;padding:4px 0;color:var(--cream);font-size:14px}
+.cktot{margin-top:8px;border-top:1px solid #2c2f42;padding-top:6px}
+.cktotal{font-weight:900;color:var(--gold);font-size:17px;border-top:1px dashed #3a3550;margin-top:4px;padding-top:6px}
+.sqcard{background:#fff;border-radius:10px;padding:6px 10px;min-height:48px}
+.ckerr{color:var(--red);font-weight:700;font-size:13px;min-height:16px;margin-top:6px}
+.ordcard{background:linear-gradient(180deg,#1c1e2b,#15161f);border:2px solid #2c2f42;border-radius:12px;padding:12px;margin-bottom:10px}
+.ordhead{display:flex;justify-content:space-between;align-items:center}
+.ordstatus{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.5px;padding:2px 8px;border-radius:7px;background:#2a2e40;color:var(--cream)}
+.ordstatus.s_paid{background:#2160B0;color:#fff}
+.ordstatus.s_ready,.ordstatus.s_shipped{background:#b8860b;color:#1a1300}
+.ordstatus.s_complete{background:var(--ok);color:#08210f}
+.ordstatus.s_canceled{background:#555;color:#fff}
 .wall-stats{margin-top:16px;color:var(--cream);font-weight:700;font-size:14px;display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
 .wall-stats b{color:var(--gold);font-size:17px}.wall-stats .dot{color:#3a3550}
 .revcard{text-align:center}
@@ -310,8 +323,8 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260622a"></script>
-<script src="social.js?v=20260622a"></script>
-<script src="app.js?v=20260622a"></script>
+<script src="config.js?v=20260622b"></script>
+<script src="social.js?v=20260622b"></script>
+<script src="app.js?v=20260622b"></script>
 </body>
 </html>

@@ -361,7 +361,7 @@ function viewWall(){
   )+'</div>') : '';
   let active=ui.wallTab||'home'; if(active==='members'&&!staff) active='home';
   const TABS=[['home','🏠 Home'],['market','🛒 Marketplace'],['share','Share Us!!'],['social','Follow on Social'],['pay','Pay at Show'],['contact','Contact Us'],['reviews','Reviews'],['photos','Photos & Videos']];
-  if(staff) TABS.push(['members','Members']);
+  if(staff) TABS.push(['orders','📦 Orders'],['members','Members']);
   const tabbar='<div class="walltabs">'+TABS.map(t=>'<button class="walltab'+(t[0]===active?' on':'')+'" data-k="'+t[0]+'" onclick="setWallTab(\''+t[0]+'\')">'+t[1]+'</button>').join('')+'</div>';
   const panel=(k,inner)=>'<div class="wpanel" data-wtab="'+k+'"'+(k===active?'':' style="display:none"')+'>'+inner+'</div>';
 
@@ -411,6 +411,10 @@ function viewWall(){
     '<div class="wall-sec" onclick="mediaSecTap()">Show Photos &amp; Videos</div>'+
     '<div id="wMediaAdmin"></div>'+
     '<div id="wMedia" class="mediagrid"><div class="muted" style="text-align:center">Loading…</div></div>';
+  const ordersPanel=
+    '<div class="wall-sec">Orders</div>'+
+    '<div class="muted" style="text-align:center;margin:-6px 0 12px">New orders land here — name, address, items, and payment status.</div>'+
+    '<div id="wOrders"><div class="muted" style="text-align:center">Loading…</div></div>';
   const membersPanel=
     '<div class="wall-sec">Members</div>'+
     '<div class="muted" style="text-align:center;margin:-6px 0 12px">Everyone who joined the page — staff only.</div>'+
@@ -438,6 +442,7 @@ function viewWall(){
       panel('contact',contactPanel)+
       panel('reviews',reviewsPanel)+
       panel('photos',photosPanel)+
+      (staff?panel('orders',ordersPanel):'')+
       (staff?panel('members',membersPanel):'')+
     '</div>'+
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
@@ -450,6 +455,7 @@ function setWallTab(key){ ui.wallTab=key;
   document.querySelectorAll('.walltab').forEach(b=>b.classList.toggle('on', b.dataset.k===key));
   document.querySelectorAll('.wpanel').forEach(p=>{ p.style.display=(p.dataset.wtab===key)?'':'none'; });
   if(key==='members') loadMembers();
+  if(key==='orders') loadOrders();
   if(key==='market') loadMarket();
   try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){ try{ window.scrollTo(0,0); }catch(_){} }
 }
@@ -498,6 +504,7 @@ async function wallLoadStats(){
   loadMedia();
   loadMarket();
   if(ui.wallTab==='members'&&staffSession()) loadMembers();
+  if(ui.wallTab==='orders'&&staffSession()) loadOrders();
 }
 /* ---- Follow Us On Our Journey: staff post shows (name/address/date/time); everyone sees them ---- */
 function showCardWall(s){
@@ -712,13 +719,25 @@ function openCustomerAccount(){
   const c=wallCustomer; if(!c){ openCustomerLogin(); return; }
   const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:400px;width:100%"><h3 style="color:var(--gold)">Your account</h3>'+
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:90vh;overflow:auto"><h3 style="color:var(--gold)">Your account</h3>'+
     '<div class="memrow"><div class="memmain"><div class="memname">'+esc(c.name||'(no name)')+'</div>'+(c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+'</div></div>'+
     (c.phone?('<div class="muted" style="margin:8px 2px">📱 '+esc(c.phone)+'</div>'):'')+
-    '<div class="muted" style="margin:8px 2px">🛒 Marketplace &amp; order history are coming soon.</div>'+
-    '<div class="row" style="margin-top:8px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button><button class="gold" id="ca_x">Close</button></div></div>';
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">My orders</div><div id="ca_orders"><div class="muted">Loading…</div></div>'+
+    '<div class="row" style="margin-top:10px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button><button class="gold" id="ca_x">Close</button></div></div>';
   w.querySelector('#ca_x').onclick=close;
   w.querySelector('#ca_out').onclick=()=>{ close(); customerSignOut(); };
+  loadMyOrders(w.querySelector('#ca_orders'));
+}
+async function loadMyOrders(cont){
+  if(!cont||!cloudOn())return;
+  try{ const { data, error } = await sb.from('orders').select('id,status,fulfillment,total_cents,created_at,tracking_number,pickup_slot,order_items(title,price_cents)').order('created_at',{ascending:false}).limit(50);
+    if(error||!data||!data.length){ cont.innerHTML='<div class="muted">No orders yet.</div>'; return; }
+    cont.innerHTML=data.map(o=>{ const items=(o.order_items||[]).map(i=>esc(i.title)).join(', ');
+      const extra=o.tracking_number?(' · Tracking: '+esc(o.tracking_number)):(o.pickup_slot?(' · Pickup: '+esc(o.pickup_slot)):'');
+      return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
+        '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+' · '+esc(o.fulfillment)+extra+'</div>'+
+        (items?('<div style="font-size:13px;margin-top:4px">'+items+'</div>'):'')+'</div>'; }).join('');
+  }catch(e){ cont.innerHTML='<div class="muted">Could not load orders.</div>'; }
 }
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];
@@ -849,7 +868,117 @@ function openCart(){
     (cart.length?('<div class="cartsub">Subtotal: <b>'+mUSD(sub)+'</b></div><div class="muted" style="margin:6px 0">Shipping, FL sales tax, and secure card payment are added at checkout.</div>'):'')+
     '<div class="row" style="margin-top:10px"><button class="gold" id="ck_go" style="flex:1"'+(cart.length?'':' disabled')+'>Checkout</button><button class="ghost" id="ck_x">Close</button></div></div>';
   w.querySelector('#ck_x').onclick=close;
-  const go=w.querySelector('#ck_go'); if(go)go.onclick=()=>{ toast('Online checkout is being connected — coming in the next update!'); };
+  const go=w.querySelector('#ck_go'); if(go)go.onclick=()=>{ close(); openCheckout(); };
+}
+/* ---- Checkout (Square Web Payments SDK -> checkout Edge Function) ---- */
+let _sqPayments=null,_sqCard=null;
+function squareSdkUrl(){ const env=((window.HOC_CONFIG||{}).SQUARE_ENV||'sandbox').toLowerCase(); return env==='production'?'https://web.squarecdn.com/v1/square.js':'https://sandbox.web.squarecdn.com/v1/square.js'; }
+function loadSquareSdk(){ return new Promise((res,rej)=>{ if(window.Square)return res(window.Square); const s=document.createElement('script'); s.src=squareSdkUrl(); s.onload=()=>res(window.Square); s.onerror=()=>rej(new Error('Square SDK failed to load')); document.head.appendChild(s); }); }
+async function openCheckout(){
+  const cfg=window.HOC_CONFIG||{};
+  if(!cfg.SQUARE_APP_ID||!cfg.SQUARE_LOCATION_ID){ toast('Payments aren’t configured yet.'); return; }
+  if(!wallCustomer){ toast('Please sign in to check out.'); openCustomerLogin(); return; }
+  const cart=cartGet(); if(!cart.length){ toast('Your cart is empty.'); return; }
+  const canShip=cart.every(x=>x.shipping_offered); const canPickup=cart.every(x=>x.local_pickup);
+  if(!canShip&&!canPickup){ toast('Your cart mixes pickup-only and ship-only items — please order them separately.'); return; }
+  let fulfillment=canPickup?'pickup':'ship';
+  const w=document.createElement('div'); w.className='scanmodal checkoutmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w&&!w.dataset.busy)close(); });
+  _sqCard=null;
+  function val2(id){ const e=w.querySelector('#'+id); return e?(e.value||'').trim():''; }
+  function totals(ful){ const sub=cart.reduce((a,x)=>a+(+x.price_cents||0),0); const ship=ful==='ship'?cart.reduce((a,x)=>a+(+x.shipping_cents||0),0):0; const tax=Math.round(sub*0.075); return {sub,ship,tax,total:sub+ship+tax}; }
+  function render(){
+    const t=totals(fulfillment);
+    const fulPick=(canShip&&canPickup)?('<div class="row" style="gap:8px;margin:8px 0"><button class="'+(fulfillment==='pickup'?'gold':'ghost')+'" id="ful_pickup" style="flex:1">Local pickup</button><button class="'+(fulfillment==='ship'?'gold':'ghost')+'" id="ful_ship" style="flex:1">Ship to me</button></div>'):('<div class="muted" style="margin:8px 0">'+(fulfillment==='ship'?'Shipping':'Local pickup only')+'</div>');
+    const addr=fulfillment==='ship'?(
+      '<label class="fld"><span>Full name</span><input id="sh_name" value="'+esc(wallCustomer.name||'')+'"/></label>'+
+      '<label class="fld"><span>Street address</span><input id="sh_a1"/></label>'+
+      '<label class="fld"><span>Apt/Suite (optional)</span><input id="sh_a2"/></label>'+
+      '<div class="grid2"><label class="fld" style="margin:0"><span>City</span><input id="sh_city"/></label><label class="fld" style="margin:0"><span>State</span><input id="sh_state"/></label></div>'+
+      '<div class="grid2"><label class="fld" style="margin:0"><span>ZIP</span><input id="sh_zip" inputmode="numeric"/></label><label class="fld" style="margin:0"><span>Phone</span><input id="sh_phone" type="tel" inputmode="tel" value="'+esc(wallCustomer.phone||'')+'"/></label></div>'
+    ):'<div class="muted" style="margin:6px 0">We’ll message you pickup details after payment.</div>';
+    w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:92vh;overflow:auto"><h3 style="color:var(--gold)">Checkout</h3>'+
+      '<div class="ckitems">'+cart.map(x=>'<div class="ckrow"><span>'+esc(x.title)+'</span><span>'+mUSD(x.price_cents)+'</span></div>').join('')+'</div>'+
+      fulPick+addr+
+      '<div class="cktot"><div class="ckrow"><span>Subtotal</span><span>'+mUSD(t.sub)+'</span></div>'+
+      (t.ship?('<div class="ckrow"><span>Shipping</span><span>'+mUSD(t.ship)+'</span></div>'):'')+
+      '<div class="ckrow"><span>Sales tax (7.5%)</span><span>'+mUSD(t.tax)+'</span></div>'+
+      '<div class="ckrow cktotal"><span>Total</span><span>'+mUSD(t.total)+'</span></div></div>'+
+      '<div class="muted" style="margin:8px 0 4px">Card details</div><div id="sq-card" class="sqcard"></div>'+
+      '<div id="sq-err" class="ckerr"></div>'+
+      '<div class="muted" style="font-size:11px;margin:6px 0">🔒 Secure payment by Square. <b>All sales final.</b></div>'+
+      '<div class="row" style="margin-top:8px"><button class="gold" id="ck_pay" style="flex:1">Pay '+mUSD(t.total)+'</button><button class="ghost" id="ck_cancel">Cancel</button></div></div>';
+    w.querySelector('#ck_cancel').onclick=close;
+    if(canShip&&canPickup){ w.querySelector('#ful_pickup').onclick=()=>{ if(fulfillment!=='pickup'){fulfillment='pickup';render();mountCard();} }; w.querySelector('#ful_ship').onclick=()=>{ if(fulfillment!=='ship'){fulfillment='ship';render();mountCard();} }; }
+    w.querySelector('#ck_pay').onclick=pay;
+  }
+  async function mountCard(){ const er=w.querySelector('#sq-err');
+    try{ const Square=await loadSquareSdk(); if(!_sqPayments)_sqPayments=Square.payments(cfg.SQUARE_APP_ID,cfg.SQUARE_LOCATION_ID);
+      const host=w.querySelector('#sq-card'); if(!host)return; host.innerHTML=''; _sqCard=await _sqPayments.card(); await _sqCard.attach('#sq-card');
+    }catch(e){ if(er)er.textContent='Could not load the secure card form. Refresh and try again.'; }
+  }
+  async function pay(){
+    const btn=w.querySelector('#ck_pay'); const er=w.querySelector('#sq-err'); if(er)er.textContent='';
+    if(!_sqCard){ if(er)er.textContent='The card form isn’t ready yet — one moment.'; return; }
+    let ship=null;
+    if(fulfillment==='ship'){ ship={name:val2('sh_name'),address1:val2('sh_a1'),address2:val2('sh_a2'),city:val2('sh_city'),state:val2('sh_state'),zip:val2('sh_zip'),phone:val2('sh_phone')};
+      if(!ship.name||!ship.address1||!ship.city||!ship.state||!ship.zip){ if(er)er.textContent='Please complete the shipping address.'; return; } }
+    w.dataset.busy='1'; btn.disabled=true; btn.textContent='Processing…';
+    let tok;
+    try{ const res=await _sqCard.tokenize(); if(res.status!=='OK')throw new Error((res.errors&&res.errors[0]&&res.errors[0].message)||'Please check your card details.'); tok=res.token; }
+    catch(e){ if(er)er.textContent=String(e.message||e); btn.disabled=false; btn.textContent='Pay'; delete w.dataset.busy; return; }
+    const payload={token:tok,idempotency_key:((crypto.randomUUID&&crypto.randomUUID())||String(Date.now())),item_ids:cart.map(x=>x.id),fulfillment:fulfillment,ship:ship,billing_same:true};
+    let out=null;
+    try{ const {data,error}=await sb.functions.invoke('checkout',{body:payload});
+      if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } } else out=data;
+    }catch(e){ out=null; }
+    if(out&&out.ok){ cartSet([]); close(); openOrderConfirm(out.order_id,out.total_cents); }
+    else { if(er)er.textContent=(out&&out.error)||'Payment didn’t go through. Please try again.'; btn.disabled=false; btn.textContent='Pay'; delete w.dataset.busy; }
+  }
+  render(); mountCard();
+}
+function openOrderConfirm(id,total){
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w); const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%;text-align:center"><h3 style="color:var(--gold)">Order placed! 🎉</h3>'+
+    '<div style="font-size:40px;margin:6px 0">✅</div>'+
+    '<div style="font-weight:800">Order #'+id+'</div><div class="muted" style="margin:6px 0">Paid '+mUSD(total)+'. We’ll be in touch with pickup or shipping details. You can see it under <b>My account → My orders</b>.</div>'+
+    '<button class="gold" id="oc_x" style="width:100%;margin-top:8px">Done</button></div>';
+  w.querySelector('#oc_x').onclick=close;
+  loadWallCustomer().then(()=>render());
+}
+/* ---- Staff Orders (view + basic fulfillment; full workflow in Phase 4) ---- */
+function orderActions(o){
+  if(o.status==='complete'||o.status==='canceled')return '';
+  const b=[];
+  if(o.fulfillment==='ship') b.push('<button class="sm ghost" onclick="orderShip('+o.id+')">Add tracking / Shipped</button>');
+  else b.push('<button class="sm ghost" onclick="orderReady('+o.id+')">Set pickup time / Ready</button>');
+  b.push('<button class="sm gold" onclick="orderComplete('+o.id+')">Mark complete</button>');
+  return '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+b.join('')+'</div>';
+}
+function orderCard(o){
+  const items=(o.items||[]).map(i=>'<div class="ckrow"><span>'+esc(i.title)+'</span><span>'+mUSD(i.price_cents)+'</span></div>').join('');
+  const addr=o.fulfillment==='ship'
+    ? '<div class="muted" style="margin:4px 0">📦 '+esc([o.ship_name,o.ship_address1,o.ship_address2,o.ship_city,o.ship_state,o.ship_zip].filter(Boolean).join(', '))+(o.ship_phone?(' · '+esc(o.ship_phone)):'')+'</div>'
+    : '<div class="muted" style="margin:4px 0">🏪 Local pickup</div>';
+  return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
+    '<div class="muted">'+new Date(o.created_at).toLocaleString()+'</div>'+
+    '<div style="margin-top:4px"><b>'+esc(o.customer_name||o.customer_email||'Customer')+'</b>'+(o.customer_email?(' · '+esc(o.customer_email)):'')+'</div>'+
+    addr+'<div class="ckitems">'+items+'</div>'+
+    '<div class="cktot"><div class="ckrow"><span>Subtotal</span><span>'+mUSD(o.subtotal_cents)+'</span></div>'+(o.shipping_cents?('<div class="ckrow"><span>Shipping</span><span>'+mUSD(o.shipping_cents)+'</span></div>'):'')+'<div class="ckrow"><span>Tax</span><span>'+mUSD(o.tax_cents)+'</span></div><div class="ckrow cktotal"><span>Total</span><span>'+mUSD(o.total_cents)+'</span></div></div>'+
+    (o.tracking_number?('<div class="muted">Tracking: '+esc(o.tracking_number)+'</div>'):'')+(o.pickup_slot?('<div class="muted">Pickup: '+esc(o.pickup_slot)+'</div>'):'')+
+    orderActions(o)+'</div>';
+}
+async function orderShip(id){ const t=prompt('Tracking number (optional):'); if(t===null)return; const r=await staffDo('order_set_status',{p_id:id,p_status:'shipped',p_tracking:t,p_pickup:''}); if(r){ toast('Marked shipped.'); loadOrders(); } }
+async function orderReady(id){ const s=prompt('Pickup location & available time slots:'); if(s===null)return; const r=await staffDo('order_set_status',{p_id:id,p_status:'ready',p_tracking:'',p_pickup:s}); if(r){ toast('Marked ready for pickup.'); loadOrders(); } }
+async function orderComplete(id){ if(!confirm('Mark this order complete?'))return; const r=await staffDo('order_set_status',{p_id:id,p_status:'complete',p_tracking:'',p_pickup:''}); if(r){ toast('Order complete.'); loadOrders(); } }
+async function loadOrders(){
+  const cont=el('wOrders'); if(!cont)return; const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
+  if(!_staffPw){ const p=prompt('Confirm your staff password to view orders:'); if(!p){ cont.innerHTML='<div class="muted" style="text-align:center">Enter your password. <button class="sm ghost" onclick="loadOrders()">Try again</button></div>'; return; } _staffPw=hashPass(p); }
+  cont.innerHTML='<div class="muted" style="text-align:center">Loading…</div>';
+  const r=await sbRpc('staff_orders',{p_user:s.username,p_pass:_staffPw});
+  if(!r||r.ok!==true){ _staffPw=null; cont.innerHTML='<div class="muted" style="text-align:center">Couldn’t verify your password. <button class="sm ghost" onclick="loadOrders()">Try again</button></div>'; return; }
+  const o=r.orders||[]; if(!o.length){ cont.innerHTML='<div class="muted" style="text-align:center">No orders yet.</div>'; return; }
+  cont.innerHTML='<div class="memcount">'+o.length+' order'+(o.length===1?'':'s')+'</div>'+o.map(orderCard).join('');
 }
 function isAdmin(){ return !!staffSession(); }  // add/delete/edit show only for a signed-in staff member (old phone-unlock retired)
 /* ---- Staff sign-in (username + password; claim on first use; secret-question reset) ---- */
