@@ -672,7 +672,8 @@ async function loadSellers(){
 }
 function sellerCard(x){
   const status=esc(x.status||'');
-  const badges='<span class="ordstatus s_'+status+'">'+status+'</span>'+(x.verified?' <span class="membadge acct">✔ verified</span>':'')+(x.banned?' <span class="membadge">banned</span>':'');
+  const rt=ratingStr(x.id);
+  const badges='<span class="ordstatus s_'+status+'">'+status+'</span>'+(x.verified?' <span class="membadge acct">✔ verified</span>':'')+(x.banned?' <span class="membadge">banned</span>':'')+(rt?(' <span class="membadge">'+rt+'</span>'):'');
   const b=[];
   if(x.status==='requested') b.push('<button class="sm gold" onclick="sellerAction(\''+x.id+'\',\'approved\',null)">Approve</button>');
   if(x.status==='approved') b.push('<button class="sm ghost" onclick="sellerAction(\''+x.id+'\',\'\','+(x.verified?'false':'true')+')">'+(x.verified?'Unverify':'Verify')+'</button>');
@@ -695,8 +696,9 @@ async function loadSellerStatus(cont){
         : '<div class="muted" style="margin:4px 0">Set up payouts to start selling.</div><div class="row" style="gap:6px"><button class="gold" id="sl_onboard" style="flex:1">Set up payouts (Stripe)</button><button class="ghost" id="sl_refresh">Refresh</button></div>';
       cont.innerHTML='<div>✅ Approved seller'+(data.verified?' · ✔ verified':'')+'</div>'+payout+
         '<div class="muted" style="margin:6px 0 8px">A flat 5% fee applies when an item sells.</div>'+
-        '<button class="'+(data.payouts_enabled?'gold':'ghost')+'" id="my_listings" style="width:100%">Manage my listings</button>';
+        '<div class="row" style="gap:6px"><button class="'+(data.payouts_enabled?'gold':'ghost')+'" id="my_listings" style="flex:1">My listings</button><button class="ghost" id="my_sales" style="flex:1">My sales</button></div>';
       const mb=cont.querySelector('#my_listings'); if(mb)mb.onclick=openSellerListings;
+      const sb2=cont.querySelector('#my_sales'); if(sb2)sb2.onclick=openSellerSales;
       const ob=cont.querySelector('#sl_onboard'); if(ob)ob.onclick=sellerOnboard;
       const rb=cont.querySelector('#sl_refresh'); if(rb)rb.onclick=()=>sellerRefreshPayouts(cont);
     }
@@ -795,7 +797,10 @@ async function loadWallCustomer(){
     else wallCustomer=null;
   }catch(e){ wallCustomer=null; }
 }
-function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(()=>{ if(wallCustomer)render(); }).catch(()=>{}); }
+function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(()=>{ if(wallCustomer)render(); checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
+let _sellerRatings={};
+async function loadSellerRatings(){ try{ const r=await sbRpc('seller_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.seller_id]=x; }); _sellerRatings=m; if(el('wMarket'))renderMarketGrid(); } }catch(e){} }
+function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
 async function customerSignUp(p){
   if(!cloudOn()) return {error:'Accounts are offline right now.'};
   const name=((p.first||'')+' '+(p.last||'')).trim();
@@ -895,14 +900,53 @@ function openCustomerAccount(){
 }
 async function loadMyOrders(cont){
   if(!cont||!cloudOn())return;
-  try{ const { data, error } = await sb.from('orders').select('id,status,fulfillment,total_cents,created_at,tracking_number,pickup_slot,order_items(listing_id,title,price_cents)').order('created_at',{ascending:false}).limit(50);
+  try{ const { data, error } = await sb.from('orders').select('id,status,fulfillment,total_cents,created_at,tracking_number,pickup_slot,seller_id,order_items(listing_id,title,price_cents)').order('created_at',{ascending:false}).limit(50);
     if(error||!data||!data.length){ cont.innerHTML='<div class="muted">No orders yet.</div>'; return; }
     cont.innerHTML=data.map(o=>{ const items=(o.order_items||[]).map(i=>'<button class="lnkitem" onclick="openPurchasedListing('+(i.listing_id||0)+')">'+esc(i.title)+'</button>').join('');
       const extra=o.tracking_number?(' · Tracking: '+esc(o.tracking_number)):(o.pickup_slot?(' · Pickup: '+esc(o.pickup_slot)):'');
+      const fb=(o.status==='complete')?('<div style="margin-top:6px"><button class="sm gold" onclick="openFeedback('+o.id+',\'buyer_to_seller\','+(o.seller_id?('\''+o.seller_id+'\''):'null')+')">★ Leave feedback</button></div>'):'';
       return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
         '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+' · '+esc(o.fulfillment)+extra+'</div>'+
-        (items?('<div class="lnkitems">'+items+'</div>'):'')+'</div>'; }).join('');
+        (items?('<div class="lnkitems">'+items+'</div>'):'')+fb+'</div>'; }).join('');
   }catch(e){ cont.innerHTML='<div class="muted">Could not load orders.</div>'; }
+}
+function openFeedback(orderId,role,rateeId){
+  if(!wallCustomer){ openLogin(); return; }
+  let chosen=5;
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:400px;width:100%;position:relative"><button class="modalx" id="fb_x">✕</button><h3 style="color:var(--gold)">'+(role==='seller_to_buyer'?'Rate the buyer':'Rate your '+(rateeId?'seller':'experience'))+'</h3>'+
+    '<div id="fbStars" class="rvstars">'+[1,2,3,4,5].map(i=>'<span data-v="'+i+'">★</span>').join('')+'</div>'+
+    '<label class="fld"><span>Comment (optional)</span><textarea id="fb_c" rows="3"></textarea></label>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="fb_go" style="flex:1">Submit</button></div></div>';
+  const paint=()=>w.querySelectorAll('#fbStars span').forEach(s=>s.classList.toggle('on',(+s.dataset.v)<=chosen));
+  w.querySelectorAll('#fbStars span').forEach(s=>s.onclick=()=>{ chosen=+s.dataset.v; paint(); }); paint();
+  w.querySelector('#fb_x').onclick=close;
+  w.querySelector('#fb_go').onclick=async()=>{
+    const comment=(w.querySelector('#fb_c').value||'').trim();
+    const {error}=await sb.from('feedback').insert({order_id:orderId,rater_id:wallCustomer.id,ratee_id:(rateeId||null),role:role,stars:chosen,comment:comment||null});
+    if(error){ toast(/duplicate|unique/i.test(error.message||'')?'You already left feedback for this order.':'Could not submit feedback.'); return; }
+    close(); toast('Thanks for your feedback! ★'); loadSellerRatings();
+  };
+}
+async function openSellerSales(){
+  if(!wallCustomer)return;
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="ss_x">✕</button><h3 style="color:var(--gold)">My sales</h3><div id="ss_list"><div class="muted">Loading…</div></div></div>';
+  w.querySelector('#ss_x').onclick=close;
+  const {data}=await sb.from('orders').select('id,status,total_cents,created_at,customer_id,customer_name,ship_name,ship_address1,ship_city,ship_state,ship_zip,ship_phone,tracking_number,order_items(title,price_cents)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(50);
+  const list=w.querySelector('#ss_list'); const rows=data||[];
+  if(!rows.length){ list.innerHTML='<div class="muted" style="text-align:center">No sales yet.</div>'; return; }
+  list.innerHTML=rows.map(o=>{ const items=(o.order_items||[]).map(i=>esc(i.title)).join(', ');
+    const addr=[o.ship_name,o.ship_address1,o.ship_city,o.ship_state,o.ship_zip].filter(Boolean).join(', ');
+    const fb=(o.status==='complete')?('<div style="margin-top:6px"><button class="sm gold" onclick="openFeedback('+o.id+',\'seller_to_buyer\','+(o.customer_id?('\''+o.customer_id+'\''):'null')+')">★ Rate buyer</button></div>'):'';
+    return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
+      '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+'</div>'+
+      (addr?('<div class="muted" style="margin-top:4px">📦 '+esc(addr)+(o.ship_phone?(' · '+esc(o.ship_phone)):'')+'</div>'):'')+
+      (items?('<div style="font-size:13px;margin-top:4px">'+items+'</div>'):'')+
+      (o.tracking_number?('<div class="muted">Tracking: '+esc(o.tracking_number)+'</div>'):'')+
+      '<div class="muted" style="font-size:11px;margin-top:4px">House of Cards handles fulfillment status; you keep your sale minus the 5% fee.</div>'+fb+'</div>'; }).join('');
 }
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];
@@ -966,6 +1010,7 @@ function mktCard(it,asBuyer){
     '<div class="mkttitle">'+esc(it.title)+'</div>'+
     '<div class="mktprice">'+mUSD(it.price_cents)+'</div>'+
     (it.condition?('<div class="mktcond">'+esc(it.condition)+'</div>'):'')+
+    (it.seller_id?('<div class="mktcond">🧑 Seller'+(ratingStr(it.seller_id)?(' · '+ratingStr(it.seller_id)):'')+'</div>'):'')+
     (tags.length?('<div class="mkttags">'+tags.map(t=>'<span class="mkttag">'+esc(t)+'</span>').join('')+'</div>'):'')+
     (buy?('<div style="margin-top:8px">'+buy+'</div>'):'')+staffCtl+'</div>';
 }
@@ -1048,10 +1093,26 @@ function cartCount(){ return cartGet().length; }
 function addToCart(id){
   const it=(_mktItems||[]).find(x=>x.id===id); if(!it){ toast('Item not found.'); return; }
   if(it.status!=='active'){ toast('That item isn’t available.'); return; }
-  if(it.seller_id){ toast('This seller’s online checkout is coming soon.'); return; }
   const cart=cartGet(); if(cart.some(x=>x.id===id)){ toast('Already in your cart.'); return; }
-  cart.push({id:it.id,title:it.title,price_cents:it.price_cents,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,local_pickup:it.local_pickup,photo:(it.photos&&it.photos[0])||''});
+  cart.push({id:it.id,title:it.title,price_cents:it.price_cents,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,seller_id:it.seller_id||null,photo:(it.photos&&it.photos[0])||''});
   cartSet(cart); toast('Added to cart 🛒');
+}
+async function startSellerCheckout(cart){
+  toast('Opening secure checkout…');
+  const {data,error}=await sb.functions.invoke('seller-checkout',{body:{item_ids:cart.map(x=>x.id)}});
+  let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+  if(out&&out.ok&&out.url){ location.href=out.url; } else toast((out&&out.error)||'Could not start checkout.');
+}
+async function checkStripeReturn(){
+  try{ const p=new URLSearchParams(location.search);
+    if(p.get('stripe_cancel')){ history.replaceState({},'',location.pathname); toast('Checkout canceled.'); return; }
+    const sid=p.get('stripe_done'); if(!sid)return; history.replaceState({},'',location.pathname);
+    if(!cloudOn())return; toast('Confirming your order…');
+    const {data,error}=await sb.functions.invoke('seller-finalize',{body:{session_id:sid}});
+    let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+    if(out&&out.ok){ cartSet([]); openOrderConfirm(out.order_id,out.total_cents); }
+    else toast('Order is processing — if you were charged and don’t see it, contact us.');
+  }catch(e){}
 }
 function removeFromCart(id){ cartSet(cartGet().filter(x=>x.id!==id)); openCart(); }
 function openCart(){
@@ -1074,9 +1135,12 @@ function squareSdkUrl(){ const env=((window.HOC_CONFIG||{}).SQUARE_ENV||'sandbox
 function loadSquareSdk(){ return new Promise((res,rej)=>{ if(window.Square)return res(window.Square); const s=document.createElement('script'); s.src=squareSdkUrl(); s.onload=()=>res(window.Square); s.onerror=()=>rej(new Error('Square SDK failed to load')); document.head.appendChild(s); }); }
 async function openCheckout(){
   const cfg=window.HOC_CONFIG||{};
-  if(!cfg.SQUARE_APP_ID||!cfg.SQUARE_LOCATION_ID){ toast('Payments aren’t configured yet.'); return; }
   if(!wallCustomer){ toast('Please sign in to check out.'); openLogin(); return; }
   const cart=cartGet(); if(!cart.length){ toast('Your cart is empty.'); return; }
+  const merchants=Array.from(new Set(cart.map(x=>x.seller_id||'hoc')));
+  if(merchants.length>1){ toast('Please check out House of Cards items and seller items separately.'); return; }
+  if(merchants[0]!=='hoc'){ return startSellerCheckout(cart); }
+  if(!cfg.SQUARE_APP_ID||!cfg.SQUARE_LOCATION_ID){ toast('Payments aren’t configured yet.'); return; }
   let fulfillment='ship';   // shipping-only for now (local pickup removed)
   const w=document.createElement('div'); w.className='scanmodal checkoutmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w&&!w.dataset.busy)close(); });
