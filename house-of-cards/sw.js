@@ -14,6 +14,23 @@ self.addEventListener('activate', (e) => {
   })());
 });
 
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { d = { title: 'House of Cards', body: (e.data && e.data.text()) || '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'House of Cards', {
+    body: d.body || '', icon: 'logo.png', badge: 'logo.png', data: { url: d.url || './' }
+  }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil((async () => {
+    const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of all) { if ('focus' in c) { try { await c.focus(); } catch (_) {} return; } }
+    if (clients.openWindow) return clients.openWindow(url);
+  })());
+});
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;

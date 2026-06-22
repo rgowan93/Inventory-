@@ -24,5 +24,9 @@ window.HOC_CONFIG = {
      - Use "sandbox" while testing, then switch to "production" with live values. */
   SQUARE_ENV: "sandbox",
   SQUARE_APP_ID: "sandbox-sq0idb-tXgXopZO7RcUCNTI__pvjg",
-  SQUARE_LOCATION_ID: "L6KBN4VHSHK29"   // Sandbox Default Test Account (Main)
+  SQUARE_LOCATION_ID: "L6KBN4VHSHK29",   // Sandbox Default Test Account (Main)
+
+  /* Web Push (app notifications). Public VAPID key only — safe to ship.
+     The matching PRIVATE key lives only as a Supabase Edge Function secret (VAPID_PRIVATE). */
+  VAPID_PUBLIC: "BBB0LbkZgmMqssDZq5kjI5_UFD_5PjBvQUwt-lKx8zRs3TAOjXF5WCL2Jhic732hZAl53OtUTdhiPei_DcSC8Jc"
 };

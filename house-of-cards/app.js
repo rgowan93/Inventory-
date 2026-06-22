@@ -726,9 +726,11 @@ function openCustomerAccount(){
   w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:90vh;overflow:auto"><h3 style="color:var(--gold)">Your account</h3>'+
     '<div class="memrow"><div class="memmain"><div class="memname">'+esc(c.name||'(no name)')+'</div>'+(c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+'</div></div>'+
     (c.phone?('<div class="muted" style="margin:8px 2px">📱 '+esc(c.phone)+'</div>'):'')+
+    '<div class="row" style="margin:8px 0"><button class="ghost" id="cu_notif" style="flex:1">🔔 Enable order notifications</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">My orders</div><div id="ca_orders"><div class="muted">Loading…</div></div>'+
     '<div class="row" style="margin-top:10px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button><button class="gold" id="ca_x">Close</button></div></div>';
   w.querySelector('#ca_x').onclick=close;
+  w.querySelector('#cu_notif').onclick=()=>enableNotifications('customer');
   w.querySelector('#ca_out').onclick=()=>{ close(); customerSignOut(); };
   loadMyOrders(w.querySelector('#ca_orders'));
 }
@@ -1001,9 +1003,36 @@ function orderCard(o){
     (o.tracking_number?('<div class="muted">Tracking: '+esc(o.tracking_number)+'</div>'):'')+(o.pickup_slot?('<div class="muted">Pickup: '+esc(o.pickup_slot)+'</div>'):'')+
     orderActions(o)+'</div>';
 }
-async function orderShip(id){ const t=prompt('Tracking number (optional):'); if(t===null)return; const r=await staffDo('order_set_status',{p_id:id,p_status:'shipped',p_tracking:t,p_pickup:''}); if(r){ toast('Marked shipped.'); loadOrders(); } }
-async function orderReady(id){ const s=prompt('Pickup location & available time slots:'); if(s===null)return; const r=await staffDo('order_set_status',{p_id:id,p_status:'ready',p_tracking:'',p_pickup:s}); if(r){ toast('Marked ready for pickup.'); loadOrders(); } }
-async function orderComplete(id){ if(!confirm('Mark this order complete?'))return; const r=await staffDo('order_set_status',{p_id:id,p_status:'complete',p_tracking:'',p_pickup:''}); if(r){ toast('Order complete.'); loadOrders(); } }
+async function orderUpdate(id,status,tracking,pickup){
+  const s=staffSession(); if(!s){ openStaffLogin(); return null; }
+  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(p===null||p==='')return null; _staffPw=hashPass(p); }
+  const r=await sbFn('order-update',{p_user:s.username,p_pass:_staffPw,id:id,status:status,tracking:tracking||'',pickup:pickup||''});
+  if(!r||r.ok!==true){ _staffPw=null; toast((r&&r.error)||'Couldn’t update — check your password.'); return null; }
+  return r;
+}
+async function orderShip(id){ const t=prompt('Tracking number (optional):'); if(t===null)return; if(await orderUpdate(id,'shipped',t,'')){ toast('Marked shipped — customer notified.'); loadOrders(); } }
+async function orderReady(id){ const s=prompt('Pickup location & available time slots:'); if(s===null)return; if(await orderUpdate(id,'ready','',s)){ toast('Marked ready — customer notified.'); loadOrders(); } }
+async function orderComplete(id){ if(!confirm('Mark this order complete?'))return; if(await orderUpdate(id,'complete','','')){ toast('Order complete.'); loadOrders(); } }
+/* ---- Web Push (app notifications) ---- */
+function urlB64ToUint8(base64){ const pad='='.repeat((4-base64.length%4)%4); const b=(base64+pad).replace(/-/g,'+').replace(/_/g,'/'); const raw=atob(b); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i); return arr; }
+async function enableNotifications(kind){
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)||typeof Notification==='undefined'){ toast('Notifications aren’t supported on this device/browser.'); return; }
+  const cfg=window.HOC_CONFIG||{}; if(!cfg.VAPID_PUBLIC){ toast('Notifications aren’t configured yet.'); return; }
+  const standalone=(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)||window.navigator.standalone;
+  if(/iphone|ipad|ipod/i.test(navigator.userAgent||'') && !standalone){ toast('On iPhone: tap Share → Add to Home Screen, then open the app and enable notifications.'); return; }
+  try{
+    const perm=await Notification.requestPermission(); if(perm!=='granted'){ toast('Notifications were not enabled.'); return; }
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlB64ToUint8(cfg.VAPID_PUBLIC)});
+    const j=sub.toJSON()||{}; const keys=j.keys||{}; const endpoint=j.endpoint, p256dh=keys.p256dh, auth=keys.auth;
+    if(!endpoint||!p256dh||!auth){ toast('Could not set up notifications.'); return; }
+    if(kind==='staff'){ const s=staffSession(); if(!s){ toast('Sign in as staff first.'); return; } if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p)return; _staffPw=hashPass(p); }
+      const r=await sbRpc('push_subscribe_staff',{p_user:s.username,p_pass:_staffPw,p_endpoint:endpoint,p_p256dh:p256dh,p_auth:auth});
+      if(r===true) toast('🔔 Staff notifications enabled!'); else { _staffPw=null; toast('Could not enable (check your password).'); } }
+    else { if(!wallCustomer){ toast('Please sign in first.'); return; } const {error}=await sb.from('push_subscriptions').upsert({endpoint:endpoint,p256dh:p256dh,auth:auth,audience:'customer',customer_id:wallCustomer.id},{onConflict:'endpoint'}); if(!error) toast('🔔 Notifications enabled!'); else toast('Could not enable notifications.'); }
+  }catch(e){ toast('Could not enable notifications.'); }
+}
 let _ordSub='active', _ordersCache=[], _newOrderCount=0;
 async function loadOrders(){
   const cont=el('wOrders'); if(!cont)return; const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
@@ -1101,10 +1130,13 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     '<label class="fld"><span>Their phone (optional)</span><input id="ns_ph" inputmode="tel"/></label>'+
     '<label class="fld"><span>Your password (to authorize)</span><input id="ns_pw" type="password"/></label>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="ns_go" style="flex:1">Create staff account</button></div>'+
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">Phone notifications</div>'+
+    '<div class="row"><button class="ghost" id="st_notif" style="flex:1">🔔 Enable order alerts on this phone</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Square payments (setup check)</div>'+
     '<div class="row"><button class="ghost" id="sq_test" style="flex:1">Test Square connection</button></div>'+
     '<div id="sq_result" class="muted" style="margin-top:6px"></div></div>';
   w.querySelector('#a_x').onclick=close;
+  w.querySelector('#st_notif').onclick=()=>enableNotifications('staff');
   w.querySelector('#sq_test').onclick=async()=>{ const out=w.querySelector('#sq_result'); out.textContent='Checking…';
     const r=await sbFn('square-health');
     if(!r){ out.textContent='Could not reach the server.'; return; }
