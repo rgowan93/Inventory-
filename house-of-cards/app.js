@@ -355,9 +355,11 @@ function viewWall(){
   const staff=!!staffSession();
   const cust=wallCustomer;
   const cartBtn='<button class="custbtn" onclick="openCart()">🛒 Cart (<span id="cartCount">'+cartCount()+'</span>)</button>';
-  const custBar = cloudOn() ? ('<div class="custbar">'+(cust
-    ? '<span class="custhi">👤 '+esc(cust.name||cust.email||'Member')+'</span>'+cartBtn+'<button class="custbtn" onclick="openCustomerAccount()">My account</button><button class="custbtn" onclick="customerSignOut()">Sign out</button>'
-    : '<span class="custhi muted">Customer portal</span>'+cartBtn+'<button class="custbtn gold" onclick="openCustomerLogin()">Sign in</button><button class="custbtn" onclick="openCustomerSignup()">Create account</button>'
+  const signedIn = staff || !!cust;
+  const whoLabel = staff ? ('👤 '+esc(staffSession().username)+' · staff') : (cust ? ('👤 '+esc(cust.name||cust.email||'Member')) : '');
+  const custBar = cloudOn() ? ('<div class="custbar">'+(signedIn
+    ? '<span class="custhi">'+whoLabel+'</span>'+cartBtn+'<button class="custbtn" onclick="openAccount()">Account</button><button class="custbtn" onclick="signOutAll()">Sign out</button>'
+    : '<span class="custhi muted">House of Cards</span>'+cartBtn+'<button class="custbtn gold" onclick="openLogin()">Log in</button><button class="custbtn" onclick="openCustomerSignup()">Create account</button>'
   )+'</div>') : '';
   let active=ui.wallTab||'home'; if(active==='members'&&!staff) active='home';
   const TABS=[['home','🏠 Home'],['market','🛒 Marketplace'],['share','Share Us!!'],['social','Follow on Social'],['pay','Pay at Show'],['contact','Contact Us'],['reviews','Reviews'],['photos','Photos & Videos']];
@@ -428,8 +430,8 @@ function viewWall(){
       '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
-      (cust
-        ? '<button class="wall-cta" onclick="openCustomerAccount()">👋 Welcome back, '+esc((cust.name||'').split(' ')[0]||'friend')+'</button>'
+      (signedIn
+        ? '<button class="wall-cta" onclick="openAccount()">👋 Welcome'+(cust&&cust.name?' back, '+esc((cust.name||'').split(' ')[0]):'')+'</button>'
         : '<button class="wall-cta" onclick="openCustomerSignup()">📲 Create your free account</button>')+
       '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
       '<div class="wall-stats"><span>👥 <b id="wMembers">—</b> members</span><span class="dot">•</span><span>👀 <b id="wVisits">—</b> visits</span></div>'+
@@ -448,10 +450,30 @@ function viewWall(){
       (staff?panel('members',membersPanel):'')+
     '</div>'+
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
-    (staff
-      ? '<div class="wall-foot"><span style="color:var(--muted);font-size:11px">Staff: '+esc(staffSession().username)+' · </span><button class="staff-signin" onclick="openStaffAccount()">Account</button><button class="staff-signin" onclick="staffLogout()">Sign out</button></div>'
-      : '<div class="wall-foot"><button class="staff-signin" onclick="openStaffLogin()">Staff</button></div>')+
   '</div>';
+}
+function openAccount(){ if(staffSession())openStaffAccount(); else if(wallCustomer)openCustomerAccount(); else openLogin(); }
+function signOutAll(){ if(staffSession())staffLogout(); else if(wallCustomer)customerSignOut(); }
+function openLogin(){
+  if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:400px;width:100%;position:relative"><button class="modalx" id="lg_x2">✕</button><h3 style="color:var(--gold)">Log in</h3>'+
+    '<label class="fld"><span>Email (customers) or username (staff)</span><input id="lg_key" autocapitalize="off"/></label>'+
+    '<label class="fld"><span>Password</span><input id="lg_pw" type="password"/></label>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="lg_go" style="flex:1">Log in</button></div>'+
+    '<div style="text-align:center;margin-top:10px"><button class="btn-link" id="lg_new">New customer? Create an account</button></div>'+
+    '<div style="text-align:center;margin-top:8px"><button class="btn-link" id="lg_staff">First-time staff / forgot password</button></div></div>';
+  w.querySelector('#lg_x2').onclick=close;
+  w.querySelector('#lg_new').onclick=()=>{ close(); openCustomerSignup(); };
+  w.querySelector('#lg_staff').onclick=()=>{ close(); openStaffLogin(); };
+  w.querySelector('#lg_go').onclick=async()=>{
+    const key=(w.querySelector('#lg_key').value||'').trim(); const pass=w.querySelector('#lg_pw').value||'';
+    if(!key||!pass){ toast('Enter your login and password.'); return; }
+    if(key.indexOf('@')>=0){ const r=await customerSignIn(key,pass); if(r.error){ toast(r.error); return; } close(); toast('Welcome back'+(wallCustomer&&wallCustomer.name?', '+wallCustomer.name.split(' ')[0]:'')+'!'); render(); }
+    else { const r=await sbRpc('staff_login',{p_user:key,p_pass:hashPass(pass)}); if(Array.isArray(r)&&r.length){ _staffPw=hashPass(pass); setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); close(); toast('Welcome, '+r[0].username+'!'); render(); } else toast('Wrong login or password. (Staff first time? Use the link below.)'); }
+  };
+  setTimeout(()=>{ const k=w.querySelector('#lg_key'); if(k)k.focus(); },60);
 }
 function setWallTab(key){ ui.wallTab=key;
   document.querySelectorAll('.walltab').forEach(b=>b.classList.toggle('on', b.dataset.k===key));
@@ -552,7 +574,7 @@ function openAddShow(){ if(!staffSession()){ openStaffLogin(); return; }
     const date=w.querySelector('#sh_date').value; if(!date){ toast('Please pick a show date (it auto-removes the day after).'); return; }
     const addr=(w.querySelector('#sh_addr').value||'').trim(); const time=(w.querySelector('#sh_time').value||'').trim()||null;
     const id=await staffDo('show_add',{p_name:name,p_address:addr,p_date:date,p_time:time,p_flyer:flyer?flyer.url:null},'Show added.');
-    if(id){ close(); loadShows(); } };
+    if(id){ close(); loadShows(); notifyAll('New card show added!','We just added '+name+(date?(' on '+date):'')+'. Tap to see details.'); } };
   setTimeout(()=>{ const n=w.querySelector('#sh_name'); if(n)n.focus(); },60);
 }
 async function showFlyer(id){ if(!staffSession()){ openStaffLogin(); return; }
@@ -635,10 +657,10 @@ let wallCustomer=null;       // signed-in customer's profile {id,name,email,phon
 let _wallCustInit=false;
 async function ensureCustomerRow(u){
   if(!u) return null;
-  try{ const {data:row}=await sb.from('customers').select('id,name,email,phone').eq('id',u.id).maybeSingle();
+  try{ const {data:row}=await sb.from('customers').select('id,name,email,phone,username,first_name,last_name').eq('id',u.id).maybeSingle();
     if(row) return row;
     const md=u.user_metadata||{};   // back-fill from signup metadata (covers the email-confirm-on flow)
-    const {data:ins}=await sb.from('customers').insert({id:u.id,name:md.name||'',email:u.email||'',phone:md.phone||null}).select('id,name,email,phone').maybeSingle();
+    const {data:ins}=await sb.from('customers').insert({id:u.id,name:md.name||'',email:u.email||'',phone:md.phone||null,username:md.username||null,first_name:md.first_name||null,last_name:md.last_name||null}).select('id,name,email,phone,username,first_name,last_name').maybeSingle();
     return ins||{id:u.id,email:u.email||'',name:md.name||'',phone:md.phone||''};
   }catch(e){ return {id:u.id,email:u.email||'',name:'',phone:''}; }
 }
@@ -650,16 +672,20 @@ async function loadWallCustomer(){
   }catch(e){ wallCustomer=null; }
 }
 function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(()=>{ if(wallCustomer)render(); }).catch(()=>{}); }
-async function customerSignUp(name,email,phone,pass){
+async function customerSignUp(p){
   if(!cloudOn()) return {error:'Accounts are offline right now.'};
-  const free=await sbRpc('phone_available',{p_phone:phone});
-  if(free===false) return {error:'That phone number already has an account.'};
-  const {data,error}=await sb.auth.signUp({email,password:pass,options:{data:{name:name,phone:phone}}});
+  const name=((p.first||'')+' '+(p.last||'')).trim();
+  const freePhone=await sbRpc('phone_available',{p_phone:p.phone});
+  if(freePhone===false) return {error:'That phone number already has an account.'};
+  const freeUser=await sbRpc('username_available',{p_username:p.username});
+  if(freeUser===false) return {error:'That username is taken.'};
+  const md={name:name,first_name:p.first,last_name:p.last,username:p.username,phone:p.phone};
+  const {data,error}=await sb.auth.signUp({email:p.email,password:p.pass,options:{data:md}});
   if(error) return {error:error.message};
   if(!data.session) return {ok:true,needsConfirm:true};
-  const ins=await sb.from('customers').insert({id:data.user.id,name:name,email:email,phone:phone});
-  if(ins.error) return {error:/duplicate|unique/i.test(ins.error.message)?'That phone number already has an account.':ins.error.message};
-  wallCustomer={id:data.user.id,name:name,email:email,phone:phone};
+  const ins=await sb.from('customers').insert({id:data.user.id,name:name,email:p.email,phone:p.phone,username:p.username,first_name:p.first,last_name:p.last});
+  if(ins.error) return {error:/duplicate|unique/i.test(ins.error.message)?'That username or phone is already in use.':ins.error.message};
+  wallCustomer={id:data.user.id,name:name,email:p.email,phone:p.phone,username:p.username};
   return {ok:true};
 }
 async function customerSignIn(email,pass){
@@ -675,29 +701,36 @@ function openCustomerSignup(){
   if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
   const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:420px;width:100%"><h3 style="color:var(--gold)">Create your account</h3>'+
-    '<div class="muted" style="margin-bottom:8px">One account per phone number. Use it to buy and track orders.</div>'+
-    '<label class="fld"><span>Full name</span><input id="cu_n" autocomplete="name"/></label>'+
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:92vh;overflow:auto;position:relative"><button class="modalx" id="cu_x">✕</button><h3 style="color:var(--gold)">Create your account</h3>'+
+    '<div class="muted" style="margin-bottom:8px">One account per phone number.</div>'+
+    '<div class="grid2"><label class="fld" style="margin:0"><span>First name</span><input id="cu_first" autocomplete="given-name"/></label>'+
+    '<label class="fld" style="margin:0"><span>Last name</span><input id="cu_last" autocomplete="family-name"/></label></div>'+
+    '<label class="fld"><span>Username</span><input id="cu_u" autocapitalize="off" placeholder="letters & numbers"/></label>'+
     '<label class="fld"><span>Email</span><input id="cu_e" type="email" autocomplete="email" autocapitalize="off"/></label>'+
     '<label class="fld"><span>Mobile phone</span><input id="cu_ph" type="tel" inputmode="tel" autocomplete="tel"/></label>'+
     '<label class="fld"><span>Password</span><input id="cu_p" type="password" autocomplete="new-password"/></label>'+
-    '<div class="row" style="margin-top:8px"><button class="gold" id="cu_go" style="flex:1">Create account</button><button class="ghost" id="cu_x">Close</button></div>'+
-    '<div style="text-align:center;margin-top:10px"><button class="btn-link" id="cu_have">Already have an account? Sign in</button></div></div>';
+    '<label class="chkrow"><input type="checkbox" id="cu_alerts" checked/> <span>Enable order notifications on this device (required)</span></label>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="cu_go" style="flex:1">Create account</button></div>'+
+    '<div style="text-align:center;margin-top:10px"><button class="btn-link" id="cu_have">Already have an account? Log in</button></div></div>';
   w.querySelector('#cu_x').onclick=close;
-  w.querySelector('#cu_have').onclick=()=>{ close(); openCustomerLogin(); };
+  w.querySelector('#cu_have').onclick=()=>{ close(); openLogin(); };
   w.querySelector('#cu_go').onclick=async()=>{
-    const name=(w.querySelector('#cu_n').value||'').trim(); const email=(w.querySelector('#cu_e').value||'').trim();
+    const first=(w.querySelector('#cu_first').value||'').trim(); const last=(w.querySelector('#cu_last').value||'').trim();
+    const username=(w.querySelector('#cu_u').value||'').trim(); const email=(w.querySelector('#cu_e').value||'').trim();
     const phone=(w.querySelector('#cu_ph').value||'').trim(); const pass=w.querySelector('#cu_p').value||'';
-    if(!name){ toast('Enter your name.'); return; }
+    if(!first||!last){ toast('Enter your first and last name.'); return; }
+    if(!/^[a-z0-9_]{3,}$/i.test(username)){ toast('Username: 3+ letters/numbers, no spaces.'); return; }
     if(!/^\S+@\S+\.\S+$/.test(email)){ toast('Enter a valid email.'); return; }
     if(phone.replace(/\D/g,'').length<10){ toast('Enter a valid 10-digit phone.'); return; }
     if(pass.length<6){ toast('Password must be at least 6 characters.'); return; }
-    const r=await customerSignUp(name,email,phone,pass);
+    if(!w.querySelector('#cu_alerts').checked){ toast('You must enable order notifications to create an account.'); return; }
+    const r=await customerSignUp({first:first,last:last,username:username,email:email,phone:phone,pass:pass});
     if(r.error){ toast(r.error); return; }
-    if(r.needsConfirm){ close(); toast('Check your email to confirm, then sign in.'); return; }
-    close(); toast('Welcome, '+name+'!'); render();
+    if(r.needsConfirm){ close(); toast('Check your email to confirm, then log in.'); return; }
+    close(); toast('Welcome, '+first+'!'); render();
+    enableNotifications('customer');   // mandatory alerts: prompt OS permission now
   };
-  setTimeout(()=>{ const n=w.querySelector('#cu_n'); if(n)n.focus(); },60);
+  setTimeout(()=>{ const n=w.querySelector('#cu_first'); if(n)n.focus(); },60);
 }
 function openCustomerLogin(){
   if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
@@ -723,12 +756,12 @@ function openCustomerAccount(){
   const c=wallCustomer; if(!c){ openCustomerLogin(); return; }
   const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:90vh;overflow:auto"><h3 style="color:var(--gold)">Your account</h3>'+
-    '<div class="memrow"><div class="memmain"><div class="memname">'+esc(c.name||'(no name)')+'</div>'+(c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+'</div></div>'+
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="ca_x">✕</button><h3 style="color:var(--gold)">Your account</h3>'+
+    '<div class="memrow"><div class="memmain"><div class="memname">'+esc(c.name||'(no name)')+(c.username?(' <span class="membadge">@'+esc(c.username)+'</span>'):'')+'</div>'+(c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+'</div></div>'+
     (c.phone?('<div class="muted" style="margin:8px 2px">📱 '+esc(c.phone)+'</div>'):'')+
     '<div class="row" style="margin:8px 0"><button class="ghost" id="cu_notif" style="flex:1">🔔 Enable order notifications</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">My orders</div><div id="ca_orders"><div class="muted">Loading…</div></div>'+
-    '<div class="row" style="margin-top:10px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button><button class="gold" id="ca_x">Close</button></div></div>';
+    '<div class="row" style="margin-top:10px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button></div></div>';
   w.querySelector('#ca_x').onclick=close;
   w.querySelector('#cu_notif').onclick=()=>enableNotifications('customer');
   w.querySelector('#ca_out').onclick=()=>{ close(); customerSignOut(); };
@@ -849,8 +882,7 @@ async function openListingEdit(id){
     '<label class="fld" style="margin:0"><span>Condition</span><select id="lp_cond">'+condOpts+'</select></label></div>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>Quantity</span><input id="lp_qty" type="number" inputmode="numeric" value="'+(it&&it.qty!=null?it.qty:1)+'"/></label>'+
     '<label class="fld" style="margin:0"><span>Shipping cost (USD)</span><input id="lp_ship" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.shipping_cents||0)/100):'')+'"/></label></div>'+
-    '<label class="chkrow"><input type="checkbox" id="lp_pickup"'+((!it||it.local_pickup)?' checked':'')+'/> <span>Local pickup available</span></label>'+
-    '<label class="chkrow"><input type="checkbox" id="lp_shipoff"'+((it&&it.shipping_offered)?' checked':'')+'/> <span>Offer shipping (uses the cost above)</span></label>'+
+    '<div class="muted" style="margin:2px 0 6px">All items ship to the buyer. Set the shipping cost above.</div>'+
     '<div class="fld"><span>Photos</span><div id="lp_thumbs" class="lpthumbs"></div><button class="ghost" id="lp_addphoto" style="margin-top:6px">📷 Add photo</button></div>'+
     '<div class="row" style="margin-top:10px"><button class="gold" id="lp_save" style="flex:1">Save listing</button><button class="ghost" id="lp_x">Cancel</button></div></div>';
   w.querySelector('#lp_x').onclick=close; drawPhotos();
@@ -864,7 +896,7 @@ async function openListingEdit(id){
     const qty=Math.max(0,parseInt(w.querySelector('#lp_qty').value,10)||1);
     const data={title:title, description:(w.querySelector('#lp_desc').value||'').trim(), condition:w.querySelector('#lp_cond').value,
       price_cents:price_cents, qty:qty, photos:photos,
-      local_pickup:w.querySelector('#lp_pickup').checked, shipping_offered:w.querySelector('#lp_shipoff').checked,
+      local_pickup:false, shipping_offered:true,
       shipping_cents:ship_cents, status:(it?it.status:'active')};
     const r=await staffDo('listing_save',{p_id:(id!=null?id:null),p_data:data},'Listing saved.');
     if(r){ close(); loadMarket(); }
@@ -912,11 +944,9 @@ function loadSquareSdk(){ return new Promise((res,rej)=>{ if(window.Square)retur
 async function openCheckout(){
   const cfg=window.HOC_CONFIG||{};
   if(!cfg.SQUARE_APP_ID||!cfg.SQUARE_LOCATION_ID){ toast('Payments aren’t configured yet.'); return; }
-  if(!wallCustomer){ toast('Please sign in to check out.'); openCustomerLogin(); return; }
+  if(!wallCustomer){ toast('Please sign in to check out.'); openLogin(); return; }
   const cart=cartGet(); if(!cart.length){ toast('Your cart is empty.'); return; }
-  const canShip=cart.every(x=>x.shipping_offered); const canPickup=cart.every(x=>x.local_pickup);
-  if(!canShip&&!canPickup){ toast('Your cart mixes pickup-only and ship-only items — please order them separately.'); return; }
-  let fulfillment=canPickup?'pickup':'ship';
+  let fulfillment='ship';   // shipping-only for now (local pickup removed)
   const w=document.createElement('div'); w.className='scanmodal checkoutmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w&&!w.dataset.busy)close(); });
   _sqCard=null;
@@ -924,14 +954,14 @@ async function openCheckout(){
   function totals(ful){ const sub=cart.reduce((a,x)=>a+(+x.price_cents||0),0); const ship=ful==='ship'?cart.reduce((a,x)=>a+(+x.shipping_cents||0),0):0; const tax=Math.round(sub*0.075); return {sub,ship,tax,total:sub+ship+tax}; }
   function render(){
     const t=totals(fulfillment);
-    const fulPick=(canShip&&canPickup)?('<div class="row" style="gap:8px;margin:8px 0"><button class="'+(fulfillment==='pickup'?'gold':'ghost')+'" id="ful_pickup" style="flex:1">Local pickup</button><button class="'+(fulfillment==='ship'?'gold':'ghost')+'" id="ful_ship" style="flex:1">Ship to me</button></div>'):('<div class="muted" style="margin:8px 0">'+(fulfillment==='ship'?'Shipping':'Local pickup only')+'</div>');
-    const addr=fulfillment==='ship'?(
+    const fulPick='<div class="muted" style="margin:8px 0">📦 Shipped to your address</div>';
+    const addr=(
       '<label class="fld"><span>Full name</span><input id="sh_name" value="'+esc(wallCustomer.name||'')+'"/></label>'+
       '<label class="fld"><span>Street address</span><input id="sh_a1"/></label>'+
       '<label class="fld"><span>Apt/Suite (optional)</span><input id="sh_a2"/></label>'+
       '<div class="grid2"><label class="fld" style="margin:0"><span>City</span><input id="sh_city"/></label><label class="fld" style="margin:0"><span>State</span><input id="sh_state"/></label></div>'+
       '<div class="grid2"><label class="fld" style="margin:0"><span>ZIP</span><input id="sh_zip" inputmode="numeric"/></label><label class="fld" style="margin:0"><span>Phone</span><input id="sh_phone" type="tel" inputmode="tel" value="'+esc(wallCustomer.phone||'')+'"/></label></div>'
-    ):'<div class="muted" style="margin:6px 0">We’ll message you pickup details after payment.</div>';
+    );
     w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:92vh;overflow:auto"><h3 style="color:var(--gold)">Checkout</h3>'+
       '<div class="ckitems">'+cart.map(x=>'<div class="ckrow"><span>'+esc(x.title)+'</span><span>'+mUSD(x.price_cents)+'</span></div>').join('')+'</div>'+
       fulPick+addr+
@@ -944,7 +974,6 @@ async function openCheckout(){
       '<div class="muted" style="font-size:11px;margin:6px 0">🔒 Secure payment by Square. <b>All sales final.</b></div>'+
       '<div class="row" style="margin-top:8px"><button class="gold" id="ck_pay" style="flex:1">Pay '+mUSD(t.total)+'</button><button class="ghost" id="ck_cancel">Cancel</button></div></div>';
     w.querySelector('#ck_cancel').onclick=close;
-    if(canShip&&canPickup){ w.querySelector('#ful_pickup').onclick=()=>{ if(fulfillment!=='pickup'){fulfillment='pickup';render();mountCard();} }; w.querySelector('#ful_ship').onclick=()=>{ if(fulfillment!=='ship'){fulfillment='ship';render();mountCard();} }; }
     w.querySelector('#ck_pay').onclick=pay;
   }
   async function mountCard(){ const er=w.querySelector('#sq-err');
@@ -1013,6 +1042,7 @@ async function orderUpdate(id,status,tracking,pickup){
 async function orderShip(id){ const t=prompt('Tracking number (optional):'); if(t===null)return; if(await orderUpdate(id,'shipped',t,'')){ toast('Marked shipped — customer notified.'); loadOrders(); } }
 async function orderReady(id){ const s=prompt('Pickup location & available time slots:'); if(s===null)return; if(await orderUpdate(id,'ready','',s)){ toast('Marked ready — customer notified.'); loadOrders(); } }
 async function orderComplete(id){ if(!confirm('Mark this order complete?'))return; if(await orderUpdate(id,'complete','','')){ toast('Order complete.'); loadOrders(); } }
+async function notifyAll(title,body){ const s=staffSession(); if(!s||!_staffPw)return; try{ await sbFn('broadcast',{p_user:s.username,p_pass:_staffPw,title:title,body:body}); }catch(e){} }
 /* ---- Web Push (app notifications) ---- */
 function urlB64ToUint8(base64){ const pad='='.repeat((4-base64.length%4)%4); const b=(base64+pad).replace(/-/g,'+').replace(/_/g,'/'); const raw=atob(b); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i); return arr; }
 async function enableNotifications(kind){
@@ -1119,12 +1149,12 @@ function openStaffLogin(){
 }
 function openStaffAccount(){ const s=staffSession(); if(!s)return;
   const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w); const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:400px;width:100%"><h3 style="color:var(--gold)">'+esc(s.username)+'’s account</h3>'+
+  w.innerHTML='<div class="card" style="max-width:400px;width:100%;max-height:92vh;overflow:auto;position:relative"><button class="modalx" id="a_x">✕</button><h3 style="color:var(--gold)">'+esc(s.username)+'’s account</h3>'+
     '<label class="fld"><span>Email</span><input id="a_e" type="email" value="'+esc(s.email||'')+'"/></label>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Change password (optional):</div>'+
     '<label class="fld"><span>Current password</span><input id="a_old" type="password"/></label>'+
     '<label class="fld"><span>New password</span><input id="a_new" type="password"/></label>'+
-    '<div class="row" style="margin-top:8px"><button class="gold" id="a_save" style="flex:1">Save</button><button class="ghost" id="a_x">Close</button></div>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="a_save" style="flex:1">Save</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Add a staff member <span style="opacity:.8">— they pick their own password on first sign-in via “First time / forgot password?”.</span></div>'+
     '<label class="fld"><span>New staff username</span><input id="ns_u" autocapitalize="off"/></label>'+
     '<label class="fld"><span>Their phone (optional)</span><input id="ns_ph" inputmode="tel"/></label>'+
@@ -1173,7 +1203,7 @@ function pickMedia(){ if(!staffSession()){ openStaffLogin(); return; } const inp
   inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading…'); const up=await uploadMedia(f); if(!up)return;
     const caption=(prompt('Add a caption (optional):')||'').trim(); const kind=(f.type||'').indexOf('video')===0?'video':'photo';
     const id=await staffDo('media_add',{p_kind:kind,p_path:up.path,p_url:up.url,p_caption:caption,p_uploader:myName()||null},'Posted! 🎉');
-    if(id)loadMedia(); };
+    if(id){ loadMedia(); notifyAll('New '+kind+' posted 📸','House of Cards just shared a new '+kind+'. Take a look!'); } };
   inp.click(); }
 async function deleteMedia(id){ if(!isAdmin())return; if(!confirm('Delete this post?'))return;
   const ok=await staffDo('media_delete',{p_id:id},'Deleted.'); if(ok)loadMedia(); }

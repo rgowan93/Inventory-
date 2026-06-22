@@ -245,7 +245,8 @@ tr:hover td{background:#1c1f2b}
 .right{margin-left:auto}
 .cart-line{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #2a2e40}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#000;border:3px solid var(--gold);
-  color:var(--cream);padding:12px 18px;border-radius:12px;z-index:100;box-shadow:var(--shadow);font-weight:800;max-width:90%}
+  color:var(--cream);padding:12px 18px;border-radius:12px;z-index:100000;box-shadow:var(--shadow);font-weight:800;max-width:90%}
+.modalx{position:absolute;top:6px;right:8px;background:transparent;border:none;box-shadow:none;color:var(--red);font-size:24px;font-weight:900;line-height:1;cursor:pointer;padding:4px 9px;z-index:3}
 .empty{text-align:center;color:var(--muted);padding:40px 10px}
 .scanbar{display:flex;gap:8px;align-items:center}
 .scanbar input{font-size:18px;font-weight:900;letter-spacing:1px}
@@ -339,9 +340,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260622f"></script>
-<script src="social.js?v=20260622f"></script>
-<script src="app.js?v=20260622f"></script>
+<script src="config.js?v=20260622g"></script>
+<script src="social.js?v=20260622g"></script>
+<script src="app.js?v=20260622g"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
