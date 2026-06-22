@@ -950,7 +950,7 @@ async function openSellerSales(){
 }
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];
-let _mktItems=[]; let _mktSub='active', _mktSort='new', _mktSearch='';
+let _mktItems=[]; let _mktSub='active', _mktSort='new', _mktSearch='', _mktPortal='selling';
 function mUSD(c){ return '$'+(((+c||0)/100).toFixed(2)); }
 function listingPayload(it,ov){ return Object.assign({
   title:it.title||'', description:it.description||'', condition:it.condition||'',
