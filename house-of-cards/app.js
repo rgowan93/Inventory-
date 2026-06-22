@@ -363,7 +363,7 @@ function viewWall(){
   )+'</div>') : '';
   let active=ui.wallTab||'home'; if(active==='members'&&!staff) active='home';
   const TABS=[['home','🏠 Home'],['market','🛒 Marketplace'],['share','Share Us!!'],['social','Follow on Social'],['pay','Pay at Show'],['contact','Contact Us'],['reviews','Reviews'],['photos','Photos & Videos']];
-  if(staff) TABS.push(['orders','📦 Orders'+(_newOrderCount?(' <span class="tabbadge">'+_newOrderCount+'</span>'):'')],['members','Members']);
+  if(staff) TABS.push(['orders','📦 Orders'+(_newOrderCount?(' <span class="tabbadge">'+_newOrderCount+'</span>'):'')],['sellers','Sellers'],['members','Members']);
   const tabbar='<div class="walltabs">'+TABS.map(t=>'<button class="walltab'+(t[0]===active?' on':'')+'" data-k="'+t[0]+'" onclick="setWallTab(\''+t[0]+'\')">'+t[1]+'</button>').join('')+'</div>';
   const panel=(k,inner)=>'<div class="wpanel" data-wtab="'+k+'"'+(k===active?'':' style="display:none"')+'>'+inner+'</div>';
 
@@ -419,6 +419,10 @@ function viewWall(){
     '<div class="muted" style="text-align:center;margin:-6px 0 12px">New orders land here — name, address, items, and payment status.</div>'+
     '<div id="wOrdersControls"></div>'+
     '<div id="wOrders"><div class="muted" style="text-align:center">Loading…</div></div>';
+  const sellersPanel=
+    '<div class="wall-sec">Sellers</div>'+
+    '<div class="muted" style="text-align:center;margin:-6px 0 12px">Approve, verify, or ban people who want to sell.</div>'+
+    '<div id="wSellers"><div class="muted" style="text-align:center">Loading…</div></div>';
   const membersPanel=
     '<div class="wall-sec">Members</div>'+
     '<div class="muted" style="text-align:center;margin:-6px 0 12px">Everyone who joined the page — staff only.</div>'+
@@ -447,6 +451,7 @@ function viewWall(){
       panel('reviews',reviewsPanel)+
       panel('photos',photosPanel)+
       (staff?panel('orders',ordersPanel):'')+
+      (staff?panel('sellers',sellersPanel):'')+
       (staff?panel('members',membersPanel):'')+
     '</div>'+
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
@@ -479,6 +484,7 @@ function setWallTab(key){ ui.wallTab=key;
   document.querySelectorAll('.walltab').forEach(b=>b.classList.toggle('on', b.dataset.k===key));
   document.querySelectorAll('.wpanel').forEach(p=>{ p.style.display=(p.dataset.wtab===key)?'':'none'; });
   if(key==='members') loadMembers();
+  if(key==='sellers') loadSellers();
   if(key==='orders') loadOrders();
   if(key==='market') loadMarket();
   try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){ try{ window.scrollTo(0,0); }catch(_){} }
@@ -529,6 +535,7 @@ async function wallLoadStats(){
   loadMarket();
   if(staffSession()){
     if(ui.wallTab==='members') loadMembers();
+    if(ui.wallTab==='sellers') loadSellers();
     if(ui.wallTab==='orders') loadOrders(); else checkNewOrders();
   }
 }
@@ -652,6 +659,50 @@ async function removeMember(kind,id,name){
   const ok=await staffDo('staff_member_delete',{p_kind:kind,p_id:String(id)});
   if(ok){ toast('Removed.'); loadMembers(); }
 }
+/* ---- Staff: sellers list (approve / verify / ban) ---- */
+async function loadSellers(){
+  const cont=el('wSellers'); if(!cont)return; const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
+  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p){ cont.innerHTML='<div class="muted" style="text-align:center">Enter your password. <button class="sm ghost" onclick="loadSellers()">Try again</button></div>'; return; } _staffPw=hashPass(p); }
+  cont.innerHTML='<div class="muted" style="text-align:center">Loading…</div>';
+  const r=await sbRpc('staff_sellers',{p_user:s.username,p_pass:_staffPw});
+  if(!r||r.ok!==true){ _staffPw=null; cont.innerHTML='<div class="muted" style="text-align:center">Couldn’t verify your password. <button class="sm ghost" onclick="loadSellers()">Try again</button></div>'; return; }
+  const list=r.sellers||[];
+  if(!list.length){ cont.innerHTML='<div class="muted" style="text-align:center">No seller requests yet.</div>'; return; }
+  cont.innerHTML=list.map(sellerCard).join('');
+}
+function sellerCard(x){
+  const status=esc(x.status||'');
+  const badges='<span class="ordstatus s_'+status+'">'+status+'</span>'+(x.verified?' <span class="membadge acct">✔ verified</span>':'')+(x.banned?' <span class="membadge">banned</span>':'');
+  const b=[];
+  if(x.status==='requested') b.push('<button class="sm gold" onclick="sellerAction(\''+x.id+'\',\'approved\',null)">Approve</button>');
+  if(x.status==='approved') b.push('<button class="sm ghost" onclick="sellerAction(\''+x.id+'\',\'\','+(x.verified?'false':'true')+')">'+(x.verified?'Unverify':'Verify')+'</button>');
+  if(x.banned) b.push('<button class="sm ghost" onclick="sellerAction(\''+x.id+'\',\'approved\',null)">Unban</button>');
+  else b.push('<button class="sm red" onclick="sellerAction(\''+x.id+'\',\'banned\',null)">Ban</button>');
+  return '<div class="ordcard"><div class="ordhead"><b>'+esc(x.name||x.username||'User')+(x.username?(' <span class="membadge">@'+esc(x.username)+'</span>'):'')+'</b>'+badges+'</div>'+
+    (x.email?('<div class="mememail">'+esc(x.email)+'</div>'):'')+
+    '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+b.join('')+'</div></div>';
+}
+async function sellerAction(id,status,verified){ const r=await staffDo('seller_set_status',{p_id:id,p_status:status,p_verified:verified}); if(r){ toast('Updated.'); loadSellers(); } }
+/* ---- Customer: request a seller account ---- */
+async function loadSellerStatus(cont){
+  if(!cont||!wallCustomer)return;
+  try{ const {data}=await sb.from('sellers').select('status,verified').eq('id',wallCustomer.id).maybeSingle();
+    if(!data){ cont.innerHTML='<div class="muted" style="margin-bottom:6px">Want to sell your own cards here?</div><button class="ghost" id="be_seller" style="width:100%">Request a seller account</button>'; const b=cont.querySelector('#be_seller'); if(b)b.onclick=()=>requestSeller(cont); }
+    else if(data.status==='requested') cont.innerHTML='<div class="muted">⏳ Seller request pending staff approval.</div>';
+    else if(data.status==='approved') cont.innerHTML='<div>✅ Approved seller'+(data.verified?' · ✔ verified':'')+'.</div><div class="muted" style="margin-top:4px">Your selling tools arrive with the seller-payments update.</div>';
+    else if(data.status==='banned') cont.innerHTML='<div class="muted">Selling is disabled for this account.</div>';
+    else cont.innerHTML='';
+  }catch(e){ cont.innerHTML=''; }
+}
+async function requestSeller(cont){
+  const {data,error}=await sb.rpc('seller_request'); if(error){ toast('Could not submit request.'); return; }
+  if(data==='requested') toast('Seller request submitted! Staff will review it.');
+  else if(data==='pending') toast('Your request is already pending.');
+  else if(data==='approved') toast('You’re already an approved seller.');
+  else if(data==='banned') toast('Selling is disabled for this account.');
+  else toast('Please sign in first.');
+  loadSellerStatus(cont);
+}
 /* ---- Customer accounts (marketplace): Supabase Auth + customers table (one phone per account) ---- */
 let wallCustomer=null;       // signed-in customer's profile {id,name,email,phone} or null
 let _wallCustInit=false;
@@ -760,11 +811,13 @@ function openCustomerAccount(){
     '<div class="memrow"><div class="memmain"><div class="memname">'+esc(c.name||'(no name)')+(c.username?(' <span class="membadge">@'+esc(c.username)+'</span>'):'')+'</div>'+(c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+'</div></div>'+
     (c.phone?('<div class="muted" style="margin:8px 2px">📱 '+esc(c.phone)+'</div>'):'')+
     '<div class="row" style="margin:8px 0"><button class="ghost" id="cu_notif" style="flex:1">🔔 Enable order notifications</button></div>'+
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">Selling</div><div id="ca_seller"><div class="muted">…</div></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">My orders</div><div id="ca_orders"><div class="muted">Loading…</div></div>'+
     '<div class="row" style="margin-top:10px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button></div></div>';
   w.querySelector('#ca_x').onclick=close;
   w.querySelector('#cu_notif').onclick=()=>enableNotifications('customer');
   w.querySelector('#ca_out').onclick=()=>{ close(); customerSignOut(); };
+  loadSellerStatus(w.querySelector('#ca_seller'));
   loadMyOrders(w.querySelector('#ca_orders'));
 }
 async function loadMyOrders(cont){
@@ -789,8 +842,6 @@ function listingPayload(it,ov){ return Object.assign({
   shipping_cents:it.shipping_cents||0, status:it.status||'active' }, ov||{}); }
 async function loadMarket(){
   const cont=el('wMarket'); if(!cont)return;
-  const adm=el('wMarketAdmin'); if(adm) adm.innerHTML = staffSession()
-    ? '<div class="row" style="justify-content:center;margin-bottom:14px"><button class="gold" onclick="openListingEdit()">＋ Add listing</button></div>' : '';
   let items=null;
   if(staffSession()&&_staffPw){ const r=await sbRpc('staff_listings',{p_user:staffSession().username,p_pass:_staffPw}); if(r&&r.ok)items=r.listings; }
   if(!items){ const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,status&status=neq.hidden&order=created_at.desc&limit=200'); items=Array.isArray(r)?r:[]; }
@@ -798,36 +849,42 @@ async function loadMarket(){
   drawMarketControls();
   renderMarketGrid();
 }
+function marketAddBtn(){ const adm=el('wMarketAdmin'); if(!adm)return; adm.innerHTML=(staffSession()&&_mktPortal==='selling')?'<div class="row" style="justify-content:center;margin-bottom:12px"><button class="gold" onclick="openListingEdit()">＋ Add listing</button></div>':''; }
 function drawMarketControls(){
   const c=el('wMarketControls'); if(!c)return;
-  const subs=[['active','Active'],['sold','Sold']]; if(staffSession())subs.push(['hidden','Hidden']);
-  c.innerHTML='<div class="mktbar"><input id="mktSearch" class="mktsearch" placeholder="Search cards…" value="'+esc(_mktSearch)+'"/>'+
+  const staff=staffSession(); const selling = staff && _mktPortal==='selling';
+  const portalRow = staff ? ('<div class="mktsubs"><button class="mktsub'+(_mktPortal==='selling'?' on':'')+'" onclick="setMktPortal(\'selling\')">🏷️ Selling portal</button><button class="mktsub'+(_mktPortal==='customer'?' on':'')+'" onclick="setMktPortal(\'customer\')">🛍️ Customer portal</button></div>') : '';
+  const subs=[['active','Active'],['sold','Sold']]; if(selling)subs.push(['hidden','Hidden']);
+  c.innerHTML=portalRow+'<div class="mktbar"><input id="mktSearch" class="mktsearch" placeholder="Search cards…" value="'+esc(_mktSearch)+'"/>'+
     '<select id="mktSort" class="mktsort">'+['new:Newest','plow:Price ↑','phigh:Price ↓','name:Name A–Z'].map(o=>{const p=o.split(':');return '<option value="'+p[0]+'"'+(_mktSort===p[0]?' selected':'')+'>'+p[1]+'</option>';}).join('')+'</select></div>'+
     '<div class="mktsubs">'+subs.map(s=>'<button class="mktsub'+(_mktSub===s[0]?' on':'')+'" onclick="setMktSub(\''+s[0]+'\')">'+s[1]+'</button>').join('')+'</div>';
   const si=el('mktSearch'); if(si)si.oninput=()=>{ _mktSearch=si.value; renderMarketGrid(); };
   const so=el('mktSort'); if(so)so.onchange=()=>{ _mktSort=so.value; renderMarketGrid(); };
+  marketAddBtn();
 }
 function setMktSub(s){ _mktSub=s; drawMarketControls(); renderMarketGrid(); }
+function setMktPortal(p){ _mktPortal=p; if(p==='customer'&&_mktSub==='hidden')_mktSub='active'; drawMarketControls(); renderMarketGrid(); }
 function renderMarketGrid(){
   const cont=el('wMarket'); if(!cont)return;
+  const asBuyer = !staffSession() || _mktPortal==='customer';
   let items=(_mktItems||[]).slice();
   if(_mktSub==='sold') items=items.filter(x=>x.status==='sold');
-  else if(_mktSub==='hidden') items=items.filter(x=>x.status==='hidden');
+  else if(_mktSub==='hidden'&&!asBuyer) items=items.filter(x=>x.status==='hidden');
   else items=items.filter(x=>x.status!=='sold'&&x.status!=='hidden');
   const q=_mktSearch.trim().toLowerCase();
   if(q) items=items.filter(x=>(((x.title||'')+' '+(x.description||'')+' '+(x.condition||'')).toLowerCase().indexOf(q)>=0));
   items.sort((a,b)=>{ if(_mktSort==='plow')return (a.price_cents||0)-(b.price_cents||0); if(_mktSort==='phigh')return (b.price_cents||0)-(a.price_cents||0); if(_mktSort==='name')return String(a.title||'').localeCompare(String(b.title||'')); return (b.id||0)-(a.id||0); });
-  if(!items.length){ cont.innerHTML='<div class="muted" style="text-align:center">No '+(_mktSub==='sold'?'sold items':(_mktSub==='hidden'?'hidden items':'items'))+(q?' match your search':(staffSession()&&_mktSub==='active'?' yet — tap “Add listing”.':'.'))+'</div>'; return; }
-  cont.innerHTML=items.map(mktCard).join('');
+  if(!items.length){ cont.innerHTML='<div class="muted" style="text-align:center">No '+(_mktSub==='sold'?'sold items':(_mktSub==='hidden'?'hidden items':'items'))+(q?' match your search':((!asBuyer&&_mktSub==='active')?' yet — tap “Add listing”.':'.'))+'</div>'; return; }
+  cont.innerHTML=items.map(x=>mktCard(x,asBuyer)).join('');
 }
-function mktCard(it){
+function mktCard(it,asBuyer){
   const ph=(it.photos&&it.photos.length)?it.photos[0]:'';
   const sold=it.status==='sold'||(it.qty!=null&&it.qty<=0); const hidden=it.status==='hidden';
   const img=ph?('<img class="mktimg" loading="lazy" src="'+esc(ph)+'"/>'):'<div class="mktimg mktnoimg">No photo</div>';
-  const tags=[]; if(it.local_pickup)tags.push('Pickup'); if(it.shipping_offered)tags.push('Ships'+(it.shipping_cents?(' '+mUSD(it.shipping_cents)):''));
+  const tags=[]; if(it.shipping_offered)tags.push('Ships'+(it.shipping_cents?(' '+mUSD(it.shipping_cents)):''));
   const badge=sold?'<div class="mktflag sold">SOLD</div>':(hidden?'<div class="mktflag hid">HIDDEN</div>':'');
   const buy=(!sold&&!hidden)?('<button class="sm gold" onclick="event.stopPropagation();addToCart('+it.id+')">Add to cart</button>'):'';
-  const staffCtl=staffSession()?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+
+  const staffCtl=(staffSession()&&!asBuyer)?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+
     '<button class="sm ghost" onclick="event.stopPropagation();openListingEdit('+it.id+')">Edit</button>'+
     '<button class="sm ghost" onclick="event.stopPropagation();toggleListingHidden('+it.id+')">'+(hidden?'Unhide':'Hide')+'</button>'+
     '<button class="sm ghost" onclick="event.stopPropagation();markListingSold('+it.id+')">'+(sold?'Relist':'Mark sold')+'</button>'+
