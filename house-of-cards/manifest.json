@@ -1,0 +1,16 @@
+{
+  "name": "House of Cards",
+  "short_name": "House of Cards",
+  "description": "House of Cards — cards, singles, slabs & deals. Shop the marketplace, follow shows, pay, and track orders.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101117",
+  "theme_color": "#101117",
+  "icons": [
+    { "src": "logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "logo.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
