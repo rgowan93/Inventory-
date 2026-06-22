@@ -683,7 +683,13 @@ function sellerCard(x){
     (x.email?('<div class="mememail">'+esc(x.email)+'</div>'):'')+
     '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+b.join('')+'</div></div>';
 }
-async function sellerAction(id,status,verified){ const r=await staffDo('seller_set_status',{p_id:id,p_status:status,p_verified:verified}); if(r){ toast('Updated.'); loadSellers(); } }
+async function sellerAction(id,status,verified){
+  const s=staffSession(); if(!s){ openStaffLogin(); return; }
+  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p)return; _staffPw=hashPass(p); }
+  const r=await sbFn('seller-admin',{p_user:s.username,p_pass:_staffPw,id:id,status:status,verified:verified});
+  if(r&&r.ok){ toast('Updated — seller notified.'); loadSellers(); }
+  else if(r&&r.error){ toast(r.error); } else { _staffPw=null; toast('Couldn’t update (check your password).'); }
+}
 /* ---- Customer: request a seller account ---- */
 async function loadSellerStatus(cont){
   if(!cont||!wallCustomer)return;
@@ -707,25 +713,27 @@ async function loadSellerStatus(cont){
   }catch(e){ cont.innerHTML=''; }
 }
 async function requestSeller(cont){
-  const {data,error}=await sb.rpc('seller_request'); if(error){ toast('Could not submit request.'); return; }
-  if(data==='requested') toast('Seller request submitted! Staff will review it.');
-  else if(data==='pending') toast('Your request is already pending.');
-  else if(data==='approved') toast('You’re already an approved seller.');
-  else if(data==='banned') toast('Selling is disabled for this account.');
-  else toast('Please sign in first.');
+  const {data,error}=await sb.functions.invoke('seller-apply',{body:{}});
+  let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+  const st=out&&out.status;
+  if(st==='requested') toast('Seller request submitted! Staff will review it.');
+  else if(st==='pending') toast('Your request is already pending.');
+  else if(st==='approved') toast('You’re already an approved seller.');
+  else if(st==='banned') toast('Selling is disabled for this account.');
+  else { toast('Could not submit request.'); }
   loadSellerStatus(cont);
 }
 async function sellerOnboard(){
   toast('Opening Stripe setup…');
   const {data,error}=await sb.functions.invoke('connect-onboard',{body:{action:'link'}});
   let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
-  if(out&&out.ok&&out.url){ try{ window.open(out.url,'_blank'); }catch(e){ location.href=out.url; } toast('Finish in Stripe, then tap Refresh.'); }
+  if(out&&out.ok&&out.url){ location.href=out.url; }   // same-tab redirect (popups get blocked on mobile)
   else toast((out&&out.error)||'Could not start Stripe setup.');
 }
 async function sellerRefreshPayouts(cont){
   const {data,error}=await sb.functions.invoke('connect-onboard',{body:{action:'refresh'}});
   let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
-  if(out&&out.ok){ toast(out.payouts_enabled?'Payouts active! ✅':'Not finished yet — complete Stripe onboarding.'); loadSellerStatus(cont); }
+  if(out&&out.ok){ await loadMySeller(); marketAddBtn(); toast(out.payouts_enabled?'Payouts active! ✅':'Not finished yet — complete Stripe onboarding.'); loadSellerStatus(cont); }
   else toast((out&&out.error)||'Could not refresh.');
 }
 /* ---- Seller: manage own listings (Supabase RLS scoped to seller_id) ---- */
@@ -797,7 +805,9 @@ async function loadWallCustomer(){
     else wallCustomer=null;
   }catch(e){ wallCustomer=null; }
 }
-function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(()=>{ if(wallCustomer)render(); checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
+let _mySeller=null;
+async function loadMySeller(){ _mySeller=null; if(!wallCustomer)return; try{ const {data}=await sb.from('sellers').select('status,verified,payouts_enabled').eq('id',wallCustomer.id).maybeSingle(); _mySeller=data||null; }catch(e){} }
+function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); render(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
 let _sellerRatings={};
 async function loadSellerRatings(){ try{ const r=await sbRpc('seller_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.seller_id]=x; }); _sellerRatings=m; if(el('wMarket'))renderMarketGrid(); } }catch(e){} }
 function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
@@ -975,7 +985,16 @@ async function loadMarket(){
   drawMarketControls();
   renderMarketGrid();
 }
-function marketAddBtn(){ const adm=el('wMarketAdmin'); if(!adm)return; adm.innerHTML=(staffSession()&&_mktPortal==='selling')?'<div class="row" style="justify-content:center;margin-bottom:12px"><button class="gold" onclick="openListingEdit()">＋ Add listing</button></div>':''; }
+function marketAddBtn(){ const adm=el('wMarketAdmin'); if(!adm)return;
+  if(staffSession()&&_mktPortal==='selling'){ adm.innerHTML='<div class="row" style="justify-content:center;margin-bottom:12px"><button class="gold" onclick="openListingEdit()">＋ Add listing</button></div>'; return; }
+  if(_mySeller&&_mySeller.status==='approved'){
+    adm.innerHTML='<div class="row" style="gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:12px">'+
+      (_mySeller.payouts_enabled?'<span class="membadge acct" style="align-self:center">💳 Payouts active</span>':'<button class="gold sm" onclick="sellerOnboard()">Set up payouts</button>')+
+      '<button class="ghost sm" onclick="openSellerListings()">My listings</button>'+
+      '<button class="ghost sm" onclick="openSellerSales()">My sales</button></div>';
+    return; }
+  adm.innerHTML='';
+}
 function drawMarketControls(){
   const c=el('wMarketControls'); if(!c)return;
   const staff=staffSession(); const selling = staff && _mktPortal==='selling';
@@ -1114,6 +1133,11 @@ async function startSellerCheckout(cart){
 }
 async function checkStripeReturn(){
   try{ const p=new URLSearchParams(location.search);
+    if(p.get('stripe_onboard')){ history.replaceState({},'',location.pathname);
+      const {data}=await sb.functions.invoke('connect-onboard',{body:{action:'refresh'}});
+      await loadMySeller(); render();
+      toast((data&&data.payouts_enabled)?'Payouts active! ✅ You can list now.':'Stripe setup not finished yet — tap Set up payouts again.');
+      return; }
     if(p.get('stripe_cancel')){ history.replaceState({},'',location.pathname); toast('Checkout canceled.'); return; }
     const sid=p.get('stripe_done'); if(!sid)return; history.replaceState({},'',location.pathname);
     if(!cloudOn())return; toast('Confirming your order…');
