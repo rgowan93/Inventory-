@@ -361,7 +361,7 @@ function viewWall(){
   )+'</div>') : '';
   let active=ui.wallTab||'home'; if(active==='members'&&!staff) active='home';
   const TABS=[['home','🏠 Home'],['market','🛒 Marketplace'],['share','Share Us!!'],['social','Follow on Social'],['pay','Pay at Show'],['contact','Contact Us'],['reviews','Reviews'],['photos','Photos & Videos']];
-  if(staff) TABS.push(['orders','📦 Orders'],['members','Members']);
+  if(staff) TABS.push(['orders','📦 Orders'+(_newOrderCount?(' <span class="tabbadge">'+_newOrderCount+'</span>'):'')],['members','Members']);
   const tabbar='<div class="walltabs">'+TABS.map(t=>'<button class="walltab'+(t[0]===active?' on':'')+'" data-k="'+t[0]+'" onclick="setWallTab(\''+t[0]+'\')">'+t[1]+'</button>').join('')+'</div>';
   const panel=(k,inner)=>'<div class="wpanel" data-wtab="'+k+'"'+(k===active?'':' style="display:none"')+'>'+inner+'</div>';
 
@@ -377,6 +377,7 @@ function viewWall(){
     '<div class="wall-sec">Marketplace</div>'+
     '<div class="muted" style="text-align:center;margin:-6px 0 12px">Buy It Now — add to cart and check out. All sales final.</div>'+
     '<div id="wMarketAdmin"></div>'+
+    '<div id="wMarketControls"></div>'+
     '<div id="wMarket" class="mktgrid"><div class="muted" style="text-align:center">Loading…</div></div>';
   const sharePanel=
     '<div class="wall-sec">Share our page</div><div class="qrgrid">'+
@@ -414,6 +415,7 @@ function viewWall(){
   const ordersPanel=
     '<div class="wall-sec">Orders</div>'+
     '<div class="muted" style="text-align:center;margin:-6px 0 12px">New orders land here — name, address, items, and payment status.</div>'+
+    '<div id="wOrdersControls"></div>'+
     '<div id="wOrders"><div class="muted" style="text-align:center">Loading…</div></div>';
   const membersPanel=
     '<div class="wall-sec">Members</div>'+
@@ -503,8 +505,10 @@ async function wallLoadStats(){
   loadShows();
   loadMedia();
   loadMarket();
-  if(ui.wallTab==='members'&&staffSession()) loadMembers();
-  if(ui.wallTab==='orders'&&staffSession()) loadOrders();
+  if(staffSession()){
+    if(ui.wallTab==='members') loadMembers();
+    if(ui.wallTab==='orders') loadOrders(); else checkNewOrders();
+  }
 }
 /* ---- Follow Us On Our Journey: staff post shows (name/address/date/time); everyone sees them ---- */
 function showCardWall(s){
@@ -730,18 +734,18 @@ function openCustomerAccount(){
 }
 async function loadMyOrders(cont){
   if(!cont||!cloudOn())return;
-  try{ const { data, error } = await sb.from('orders').select('id,status,fulfillment,total_cents,created_at,tracking_number,pickup_slot,order_items(title,price_cents)').order('created_at',{ascending:false}).limit(50);
+  try{ const { data, error } = await sb.from('orders').select('id,status,fulfillment,total_cents,created_at,tracking_number,pickup_slot,order_items(listing_id,title,price_cents)').order('created_at',{ascending:false}).limit(50);
     if(error||!data||!data.length){ cont.innerHTML='<div class="muted">No orders yet.</div>'; return; }
-    cont.innerHTML=data.map(o=>{ const items=(o.order_items||[]).map(i=>esc(i.title)).join(', ');
+    cont.innerHTML=data.map(o=>{ const items=(o.order_items||[]).map(i=>'<button class="lnkitem" onclick="openPurchasedListing('+(i.listing_id||0)+')">'+esc(i.title)+'</button>').join('');
       const extra=o.tracking_number?(' · Tracking: '+esc(o.tracking_number)):(o.pickup_slot?(' · Pickup: '+esc(o.pickup_slot)):'');
       return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
         '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+' · '+esc(o.fulfillment)+extra+'</div>'+
-        (items?('<div style="font-size:13px;margin-top:4px">'+items+'</div>'):'')+'</div>'; }).join('');
+        (items?('<div class="lnkitems">'+items+'</div>'):'')+'</div>'; }).join('');
   }catch(e){ cont.innerHTML='<div class="muted">Could not load orders.</div>'; }
 }
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];
-let _mktItems=[];
+let _mktItems=[]; let _mktSub='active', _mktSort='new', _mktSearch='';
 function mUSD(c){ return '$'+(((+c||0)/100).toFixed(2)); }
 function listingPayload(it,ov){ return Object.assign({
   title:it.title||'', description:it.description||'', condition:it.condition||'',
@@ -756,7 +760,29 @@ async function loadMarket(){
   if(staffSession()&&_staffPw){ const r=await sbRpc('staff_listings',{p_user:staffSession().username,p_pass:_staffPw}); if(r&&r.ok)items=r.listings; }
   if(!items){ const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,status&status=neq.hidden&order=created_at.desc&limit=200'); items=Array.isArray(r)?r:[]; }
   _mktItems=items;
-  if(!items.length){ cont.innerHTML='<div class="muted" style="text-align:center">No items listed yet'+(staffSession()?' — tap “Add listing”.':' — check back soon!')+'</div>'; return; }
+  drawMarketControls();
+  renderMarketGrid();
+}
+function drawMarketControls(){
+  const c=el('wMarketControls'); if(!c)return;
+  const subs=[['active','Active'],['sold','Sold']]; if(staffSession())subs.push(['hidden','Hidden']);
+  c.innerHTML='<div class="mktbar"><input id="mktSearch" class="mktsearch" placeholder="Search cards…" value="'+esc(_mktSearch)+'"/>'+
+    '<select id="mktSort" class="mktsort">'+['new:Newest','plow:Price ↑','phigh:Price ↓','name:Name A–Z'].map(o=>{const p=o.split(':');return '<option value="'+p[0]+'"'+(_mktSort===p[0]?' selected':'')+'>'+p[1]+'</option>';}).join('')+'</select></div>'+
+    '<div class="mktsubs">'+subs.map(s=>'<button class="mktsub'+(_mktSub===s[0]?' on':'')+'" onclick="setMktSub(\''+s[0]+'\')">'+s[1]+'</button>').join('')+'</div>';
+  const si=el('mktSearch'); if(si)si.oninput=()=>{ _mktSearch=si.value; renderMarketGrid(); };
+  const so=el('mktSort'); if(so)so.onchange=()=>{ _mktSort=so.value; renderMarketGrid(); };
+}
+function setMktSub(s){ _mktSub=s; drawMarketControls(); renderMarketGrid(); }
+function renderMarketGrid(){
+  const cont=el('wMarket'); if(!cont)return;
+  let items=(_mktItems||[]).slice();
+  if(_mktSub==='sold') items=items.filter(x=>x.status==='sold');
+  else if(_mktSub==='hidden') items=items.filter(x=>x.status==='hidden');
+  else items=items.filter(x=>x.status!=='sold'&&x.status!=='hidden');
+  const q=_mktSearch.trim().toLowerCase();
+  if(q) items=items.filter(x=>(((x.title||'')+' '+(x.description||'')+' '+(x.condition||'')).toLowerCase().indexOf(q)>=0));
+  items.sort((a,b)=>{ if(_mktSort==='plow')return (a.price_cents||0)-(b.price_cents||0); if(_mktSort==='phigh')return (b.price_cents||0)-(a.price_cents||0); if(_mktSort==='name')return String(a.title||'').localeCompare(String(b.title||'')); return (b.id||0)-(a.id||0); });
+  if(!items.length){ cont.innerHTML='<div class="muted" style="text-align:center">No '+(_mktSub==='sold'?'sold items':(_mktSub==='hidden'?'hidden items':'items'))+(q?' match your search':(staffSession()&&_mktSub==='active'?' yet — tap “Add listing”.':'.'))+'</div>'; return; }
   cont.innerHTML=items.map(mktCard).join('');
 }
 function mktCard(it){
@@ -778,23 +804,30 @@ function mktCard(it){
     (tags.length?('<div class="mkttags">'+tags.map(t=>'<span class="mkttag">'+esc(t)+'</span>').join('')+'</div>'):'')+
     (buy?('<div style="margin-top:8px">'+buy+'</div>'):'')+staffCtl+'</div>';
 }
-function openListing(id){
-  const it=(_mktItems||[]).find(x=>x.id===id); if(!it)return;
+function openListing(id){ const it=(_mktItems||[]).find(x=>x.id===id); if(it)showListingDetail(it,{buyable:true}); }
+async function openPurchasedListing(id){
+  if(!id){ toast('Listing details are no longer available.'); return; }
+  const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,status&id=eq.'+id+'&limit=1');
+  if(Array.isArray(r)&&r.length) showListingDetail(r[0],{buyable:false});
+  else toast('This listing is no longer available.');
+}
+function showListingDetail(it,opts){
+  opts=opts||{};
   const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
   const sold=it.status==='sold'||(it.qty!=null&&it.qty<=0);
   const gallery=(it.photos&&it.photos.length)?it.photos.map(p=>'<img class="mktdetimg" loading="lazy" src="'+esc(p)+'"/>').join(''):'<div class="mktimg mktnoimg" style="max-width:none">No photo</div>';
   const ship=it.shipping_offered?('Ships'+(it.shipping_cents?(' for '+mUSD(it.shipping_cents)):'')+(it.local_pickup?' · or local pickup':'')):(it.local_pickup?'Local pickup only':'');
+  const action=(opts.buyable&&!sold)
+    ? '<button class="gold" id="md_add" style="flex:1">Add to cart</button>'
+    : '<button class="ghost" style="flex:1" disabled>'+(sold?'Sold':'Not for sale')+'</button>';
   w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto"><div class="mktdetgal">'+gallery+'</div>'+
     '<h3 style="color:var(--gold);margin:10px 0 2px">'+esc(it.title)+'</h3>'+
     '<div class="mktprice" style="font-size:22px">'+mUSD(it.price_cents)+'</div>'+
     (it.condition?('<div class="mktcond">Condition: '+esc(it.condition)+'</div>'):'')+
     (ship?('<div class="muted" style="margin:6px 0">'+esc(ship)+'</div>'):'')+
     (it.description?('<div style="margin:8px 0;white-space:pre-wrap">'+esc(it.description)+'</div>'):'')+
-    '<div class="row" style="margin-top:10px">'+(sold
-      ? '<button class="ghost" style="flex:1" disabled>Sold</button>'
-      : '<button class="gold" id="md_add" style="flex:1">Add to cart</button>')+
-      '<button class="ghost" id="md_x">Close</button></div></div>';
+    '<div class="row" style="margin-top:10px">'+action+'<button class="ghost" id="md_x">Close</button></div></div>';
   w.querySelector('#md_x').onclick=close;
   const add=w.querySelector('#md_add'); if(add)add.onclick=()=>{ addToCart(it.id); close(); };
 }
@@ -971,14 +1004,38 @@ function orderCard(o){
 async function orderShip(id){ const t=prompt('Tracking number (optional):'); if(t===null)return; const r=await staffDo('order_set_status',{p_id:id,p_status:'shipped',p_tracking:t,p_pickup:''}); if(r){ toast('Marked shipped.'); loadOrders(); } }
 async function orderReady(id){ const s=prompt('Pickup location & available time slots:'); if(s===null)return; const r=await staffDo('order_set_status',{p_id:id,p_status:'ready',p_tracking:'',p_pickup:s}); if(r){ toast('Marked ready for pickup.'); loadOrders(); } }
 async function orderComplete(id){ if(!confirm('Mark this order complete?'))return; const r=await staffDo('order_set_status',{p_id:id,p_status:'complete',p_tracking:'',p_pickup:''}); if(r){ toast('Order complete.'); loadOrders(); } }
+let _ordSub='active', _ordersCache=[], _newOrderCount=0;
 async function loadOrders(){
   const cont=el('wOrders'); if(!cont)return; const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
   if(!_staffPw){ const p=prompt('Confirm your staff password to view orders:'); if(!p){ cont.innerHTML='<div class="muted" style="text-align:center">Enter your password. <button class="sm ghost" onclick="loadOrders()">Try again</button></div>'; return; } _staffPw=hashPass(p); }
   cont.innerHTML='<div class="muted" style="text-align:center">Loading…</div>';
   const r=await sbRpc('staff_orders',{p_user:s.username,p_pass:_staffPw});
   if(!r||r.ok!==true){ _staffPw=null; cont.innerHTML='<div class="muted" style="text-align:center">Couldn’t verify your password. <button class="sm ghost" onclick="loadOrders()">Try again</button></div>'; return; }
-  const o=r.orders||[]; if(!o.length){ cont.innerHTML='<div class="muted" style="text-align:center">No orders yet.</div>'; return; }
-  cont.innerHTML='<div class="memcount">'+o.length+' order'+(o.length===1?'':'s')+'</div>'+o.map(orderCard).join('');
+  _ordersCache=r.orders||[];
+  const maxId=_ordersCache.reduce((m,o)=>Math.max(m,o.id||0),0);
+  try{ localStorage.setItem('hoc_lastOrderSeen',String(maxId)); }catch(e){}
+  _newOrderCount=0; const btn=document.querySelector('.walltab[data-k="orders"]'); if(btn)btn.innerHTML='📦 Orders';
+  renderOrders();
+}
+function setOrdSub(s){ _ordSub=s; renderOrders(); }
+function renderOrders(){
+  const cont=el('wOrders'); if(!cont)return;
+  const c=el('wOrdersControls'); if(c){ const subs=[['active','Active'],['complete','Complete']]; c.innerHTML='<div class="mktsubs">'+subs.map(x=>'<button class="mktsub'+(_ordSub===x[0]?' on':'')+'" onclick="setOrdSub(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div>'; }
+  let o=_ordersCache.slice();
+  if(_ordSub==='complete') o=o.filter(x=>x.status==='complete'||x.status==='canceled');
+  else o=o.filter(x=>x.status!=='complete'&&x.status!=='canceled');
+  if(!o.length){ cont.innerHTML='<div class="muted" style="text-align:center">No '+_ordSub+' orders.</div>'; return; }
+  cont.innerHTML='<div class="memcount">'+o.length+' '+_ordSub+' order'+(o.length===1?'':'s')+'</div>'+o.map(orderCard).join('');
+}
+async function checkNewOrders(){
+  if(!staffSession()||!_staffPw)return;
+  const r=await sbRpc('staff_orders',{p_user:staffSession().username,p_pass:_staffPw});
+  if(!r||r.ok!==true)return;
+  _ordersCache=r.orders||[];
+  let lastSeen=0; try{ lastSeen=+(localStorage.getItem('hoc_lastOrderSeen')||0); }catch(e){}
+  _newOrderCount=_ordersCache.filter(o=>(o.id||0)>lastSeen && o.status!=='canceled').length;
+  const btn=document.querySelector('.walltab[data-k="orders"]'); if(btn)btn.innerHTML='📦 Orders'+(_newOrderCount?(' <span class="tabbadge">'+_newOrderCount+'</span>'):'');
+  if(_newOrderCount>0 && ui.wallTab!=='orders') toast('🛎️ '+_newOrderCount+' new order'+(_newOrderCount===1?'':'s')+' — check the Orders tab!');
 }
 function isAdmin(){ return !!staffSession(); }  // add/delete/edit show only for a signed-in staff member (old phone-unlock retired)
 /* ---- Staff sign-in (username + password; claim on first use; secret-question reset) ---- */
