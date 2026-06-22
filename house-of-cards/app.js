@@ -1140,8 +1140,9 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
   w.querySelector('#sq_test').onclick=async()=>{ const out=w.querySelector('#sq_result'); out.textContent='Checking…';
     const r=await sbFn('square-health');
     if(!r){ out.textContent='Could not reach the server.'; return; }
-    if(r.ok){ const loc=(r.locations&&r.locations[0])?(r.locations[0].id+' ('+(r.locations[0].name||'')+')'):'no locations'; out.innerHTML='✅ Connected — env: <b>'+esc(r.env)+'</b>, location: <b>'+esc(loc)+'</b>'; }
-    else { out.innerHTML='❌ '+esc(r.error||'Not connected')+(r.status?(' (HTTP '+r.status+')'):''); } };
+    const push='<br>Push key: '+(r.vapid_private_set?'set ✅':'NOT set ❌ (add VAPID_PRIVATE secret)');
+    if(r.ok){ const loc=(r.locations&&r.locations[0])?(r.locations[0].id+' ('+(r.locations[0].name||'')+')'):'no locations'; out.innerHTML='✅ Connected — env: <b>'+esc(r.env)+'</b>, location: <b>'+esc(loc)+'</b>'+push; }
+    else { out.innerHTML='❌ '+esc(r.error||'Not connected')+(r.status?(' (HTTP '+r.status+')'):'')+push; } };
   w.querySelector('#a_save').onclick=async()=>{ const email=(w.querySelector('#a_e').value||'').trim(); const oldp=w.querySelector('#a_old').value||''; const newp=w.querySelector('#a_new').value||'';
     if(!oldp){ toast('Enter your current password to save changes.'); return; } if(newp&&newp.length<4){ toast('New password must be 4+ characters.'); return; }
     const ok=await sbRpc('staff_update',{p_user:s.username,p_old:hashPass(oldp),p_newpass:newp?hashPass(newp):'',p_email:email});
