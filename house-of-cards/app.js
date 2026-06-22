@@ -481,6 +481,7 @@ function sbBase(){ const c=window.HOC_CONFIG||{}; return {base:(c.SUPABASE_URL||
 async function sbGet(path){ const {base,key}=sbBase(); if(!base||!key)return null; try{ const r=await fetch(base+'/rest/v1/'+path,{headers:{apikey:key,Authorization:'Bearer '+key}}); if(!r.ok)return null; return await r.json(); }catch(e){ return null; } }
 async function sbRpc(fn,args){ const {base,key}=sbBase(); if(!base||!key)return null; try{ const r=await fetch(base+'/rest/v1/rpc/'+fn,{method:'POST',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(args||{})}); if(!r.ok)return null; return await r.json(); }catch(e){ return null; } }
 async function sbInsert(table,obj){ const {base,key}=sbBase(); if(!base||!key)return false; try{ const r=await fetch(base+'/rest/v1/'+table,{method:'POST',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify(obj)}); return r.ok; }catch(e){ return false; } }
+async function sbFn(name,body){ const {base,key}=sbBase(); if(!base||!key)return null; try{ const r=await fetch(base+'/functions/v1/'+name,{method:body?'POST':'GET',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}); return await r.json(); }catch(e){ return null; } }
 function starStr(n){ n=Math.max(0,Math.min(5,n|0)); return '★★★★★'.slice(0,n)+'☆☆☆☆☆'.slice(0,5-n); }
 let _visitBumped=false, _wallVisits=null;
 async function wallLoadStats(){
@@ -913,8 +914,16 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     '<label class="fld"><span>New staff username</span><input id="ns_u" autocapitalize="off"/></label>'+
     '<label class="fld"><span>Their phone (optional)</span><input id="ns_ph" inputmode="tel"/></label>'+
     '<label class="fld"><span>Your password (to authorize)</span><input id="ns_pw" type="password"/></label>'+
-    '<div class="row" style="margin-top:8px"><button class="gold" id="ns_go" style="flex:1">Create staff account</button></div></div>';
+    '<div class="row" style="margin-top:8px"><button class="gold" id="ns_go" style="flex:1">Create staff account</button></div>'+
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">Square payments (setup check)</div>'+
+    '<div class="row"><button class="ghost" id="sq_test" style="flex:1">Test Square connection</button></div>'+
+    '<div id="sq_result" class="muted" style="margin-top:6px"></div></div>';
   w.querySelector('#a_x').onclick=close;
+  w.querySelector('#sq_test').onclick=async()=>{ const out=w.querySelector('#sq_result'); out.textContent='Checking…';
+    const r=await sbFn('square-health');
+    if(!r){ out.textContent='Could not reach the server.'; return; }
+    if(r.ok){ const loc=(r.locations&&r.locations[0])?(r.locations[0].id+' ('+(r.locations[0].name||'')+')'):'no locations'; out.innerHTML='✅ Connected — env: <b>'+esc(r.env)+'</b>, location: <b>'+esc(loc)+'</b>'; }
+    else { out.innerHTML='❌ '+esc(r.error||'Not connected')+(r.status?(' (HTTP '+r.status+')'):''); } };
   w.querySelector('#a_save').onclick=async()=>{ const email=(w.querySelector('#a_e').value||'').trim(); const oldp=w.querySelector('#a_old').value||''; const newp=w.querySelector('#a_new').value||'';
     if(!oldp){ toast('Enter your current password to save changes.'); return; } if(newp&&newp.length<4){ toast('New password must be 4+ characters.'); return; }
     const ok=await sbRpc('staff_update',{p_user:s.username,p_old:hashPass(oldp),p_newpass:newp?hashPass(newp):'',p_email:email});

@@ -24,5 +24,5 @@ window.HOC_CONFIG = {
      - Use "sandbox" while testing, then switch to "production" with live values. */
   SQUARE_ENV: "sandbox",
   SQUARE_APP_ID: "sandbox-sq0idb-tXgXopZO7RcUCNTI__pvjg",
-  SQUARE_LOCATION_ID: ""   // fill once we grab it (see below) — needed by the card form + charge
+  SQUARE_LOCATION_ID: "L6KBN4VHSHK29"   // Sandbox Default Test Account (Main)
 };
