@@ -763,14 +763,19 @@ async function openSellerListings(){
   const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
   async function draw(){
-    const {data}=await sb.from('listings').select('id,title,price_cents,status,condition,description,shipping_cents,ship_days,photos,qty').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false});
+    const {data}=await sb.from('listings').select('id,title,price_cents,status,condition,description,shipping_cents,ship_days,photos,qty,promoted').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false});
     _sellerListings=data||[];
-    const rows=_sellerListings.length?_sellerListings.map(it=>'<div class="memrow"><div class="memmain"><div class="memname">'+esc(it.title)+' <span class="membadge">'+esc(it.status)+'</span></div><div class="mememail">'+mUSD(it.price_cents)+'</div></div><button class="sm ghost" onclick="sellerEditListing('+it.id+')">Edit</button><button class="memdel" onclick="sellerDeleteListing('+it.id+')">✕</button></div>').join(''):'<div class="muted" style="text-align:center;margin:8px 0">No listings yet — add your first card.</div>';
+    await loadSellerStats();
+    const rows=_sellerListings.length?_sellerListings.map(it=>{ const s=_sellerStats[it.id]||{}; const stat='👀 '+(s.watchers||0)+' · 💰 '+(s.offers||0)+(it.promoted?' · ⭐':'');
+      const promo=it.promoted?'':'<button class="sm gold" onclick="openPromote('+it.id+')">⭐ $5</button>';
+      return '<div class="memrow"><div class="memmain"><div class="memname">'+esc(it.title)+' <span class="membadge">'+esc(it.status)+'</span></div><div class="mememail">'+mUSD(it.price_cents)+' · '+stat+'</div></div>'+promo+'<button class="sm ghost" onclick="sellerEditListing('+it.id+')">Edit</button><button class="memdel" onclick="sellerDeleteListing('+it.id+')">✕</button></div>'; }).join(''):'<div class="muted" style="text-align:center;margin:8px 0">No listings yet — add your first card.</div>';
     w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="sl_x">✕</button><h3 style="color:var(--gold)">My listings</h3>'+rows+'<div class="row" style="margin-top:10px"><button class="gold" id="sl_add" style="flex:1">＋ Add listing</button></div></div>';
     w.querySelector('#sl_x').onclick=close; w.querySelector('#sl_add').onclick=()=>openSellerListingEdit(null);
   }
   _sellerDraw=draw; draw();
 }
+let _sellerStats={};
+async function loadSellerStats(){ _sellerStats={}; try{ const {data}=await sb.rpc('seller_listing_stats'); if(Array.isArray(data))data.forEach(s=>{ _sellerStats[s.listing_id]=s; }); }catch(e){} }
 function sellerEditListing(id){ const it=(_sellerListings||[]).find(x=>x.id===id); openSellerListingEdit(it||null); }
 async function sellerDeleteListing(id){ if(!confirm('Delete this listing?'))return; const {error}=await sb.from('listings').delete().eq('id',id); if(error){ toast('Could not delete.'); return; } toast('Deleted.'); if(_sellerDraw)_sellerDraw(); loadMarket(); }
 function openSellerListingEdit(it){
@@ -931,15 +936,20 @@ function openCustomerAccount(){
   w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="ca_x">✕</button><h3 style="color:var(--gold)">Your account</h3>'+
     '<div class="memrow"><div class="memmain"><div class="memname">'+esc(c.name||'(no name)')+(c.username?(' <span class="membadge">@'+esc(c.username)+'</span>'):'')+'</div>'+(c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+'</div></div>'+
     (c.phone?('<div class="muted" style="margin:8px 2px">📱 '+esc(c.phone)+'</div>'):'')+
+    '<div id="ca_buyerrating" class="muted" style="margin:2px 2px 8px"></div>'+
     '<div class="row" style="margin:8px 0"><button class="ghost" id="cu_notif" style="flex:1">🔔 Enable order notifications</button></div>'+
+    '<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px"><button class="ghost" id="ca_watch" style="flex:1">♥ Watchlist</button><button class="ghost" id="ca_offers" style="flex:1">💰 My offers</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Selling</div><div id="ca_seller"><div class="muted">…</div></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">My orders</div><div id="ca_orders"><div class="muted">Loading…</div></div>'+
     '<div class="row" style="margin-top:10px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button></div></div>';
   w.querySelector('#ca_x').onclick=close;
   w.querySelector('#cu_notif').onclick=()=>enableNotifications('customer');
+  w.querySelector('#ca_watch').onclick=openWatchlist;
+  w.querySelector('#ca_offers').onclick=openMyOffers;
   w.querySelector('#ca_out').onclick=()=>{ close(); customerSignOut(); };
   loadSellerStatus(w.querySelector('#ca_seller'));
   loadMyOrders(w.querySelector('#ca_orders'));
+  loadBuyerRatings().then(()=>{ const br=w.querySelector('#ca_buyerrating'); if(br){ const s=buyerRatingStr(c.id); br.textContent=s?('Your buyer rating: '+s):'Buyer rating: 100% · New buyer'; } });
 }
 async function loadMyOrders(cont){
   if(!cont||!cloudOn())return;
@@ -985,6 +995,7 @@ async function openSellerSales(){
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
   w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="ss_x">✕</button><h3 style="color:var(--gold)">My sales</h3><div id="ss_list"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#ss_x').onclick=close;
+  await loadBuyerRatings();
   const {data}=await sb.from('orders').select('id,status,total_cents,created_at,customer_id,customer_name,ship_name,ship_address1,ship_city,ship_state,ship_zip,ship_phone,tracking_number,ship_by,refunded_cents,order_items(title,price_cents)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(50);
   const list=w.querySelector('#ss_list'); const rows=data||[];
   if(!rows.length){ list.innerHTML='<div class="muted" style="text-align:center">No sales yet.</div>'; return; }
@@ -997,7 +1008,7 @@ async function openSellerSales(){
     const ship=(o.status!=='complete'&&o.status!=='canceled'&&o.status!=='refunded')?('<button class="sm ghost" onclick="sellerShip('+o.id+')">Add tracking / Shipped</button><button class="sm gold" onclick="sellerCompleteSale('+o.id+')">Mark complete</button>'):'';
     const ref=(o.status!=='refunded'&&(o.refunded_cents||0)<(o.total_cents||0))?('<button class="sm ghost" onclick="openRefund('+o.id+',\'seller\','+((o.total_cents||0)-(o.refunded_cents||0))+')">Refund buyer</button>'):'';
     return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
-      '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+'</div>'+
+      '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+(o.customer_id?(' · 🧑 '+esc(buyerRatingStr(o.customer_id))):'')+'</div>'+
       deadline+refunded+
       (addr?('<div class="muted" style="margin-top:4px">📦 '+esc(addr)+(o.ship_phone?(' · '+esc(o.ship_phone)):'')+'</div>'):'')+
       (items?('<div style="font-size:13px;margin-top:4px">'+items+'</div>'):'')+
@@ -1130,44 +1141,113 @@ async function toggleWatch(id){
   if(out.watching){ _watchIds.add(id); toast('Added to your watchlist ♥'); } else { _watchIds.delete(id); toast('Removed from watchlist'); }
   renderMarketGrid();
 }
+/* ---- Buyer ratings (so sellers see a trusted buyer) ---- */
+let _buyerRatings={};
+async function loadBuyerRatings(){ try{ const r=await sbRpc('buyer_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.buyer_id]=x; }); _buyerRatings=m; } }catch(e){} }
+function buyerRatingStr(bid){ const r=bid&&_buyerRatings[bid]; if(!r||!r.cnt)return '100% · New buyer'; return '★ '+r.avg+' ('+r.cnt+' · '+r.pos+'%)'; }
+/* ---- Watchlist ---- */
+async function openWatchlist(){
+  if(!wallCustomer){ openLogin(); return; }
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="wl_x">✕</button><h3 style="color:var(--gold)">♥ My watchlist</h3><div id="wl_list" class="mktgrid"><div class="muted">Loading…</div></div></div>';
+  w.querySelector('#wl_x').onclick=close;
+  const {data}=await sb.from('watchlist').select('listing_id, listings(id,title,description,condition,price_cents,qty,photos,shipping_offered,shipping_cents,ship_days,status,seller_id,promoted)').order('created_at',{ascending:false});
+  const items=(data||[]).map(r=>r.listings).filter(Boolean);
+  items.forEach(it=>{ if(!(_mktItems||[]).some(x=>x.id===it.id))_mktItems.push(it); _watchIds.add(it.id); });
+  const box=w.querySelector('#wl_list');
+  box.innerHTML=items.length?items.map(it=>mktCard(it,true)).join(''):'<div class="muted" style="text-align:center">No watched items yet. Tap ♡ Watch on any listing.</div>';
+}
+/* ---- Offers: make / counter / accept / decline (good for 48h) ---- */
 function openOffer(id,priceCents){
   if(!wallCustomer){ openLogin(); return; }
   const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
   w.innerHTML='<div class="card" style="max-width:380px;width:100%;position:relative"><button class="modalx" id="of_x">✕</button><h3 style="color:var(--gold)">Make an offer</h3>'+
-    '<div class="muted" style="margin-bottom:6px">Asking price: '+mUSD(priceCents)+'</div>'+
+    '<div class="muted" style="margin-bottom:6px">Asking price: '+mUSD(priceCents)+'. Offers are good for 48 hours.</div>'+
     '<label class="fld"><span>Your offer (USD)</span><input id="of_amt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"/></label>'+
     '<div class="row" style="margin-top:6px"><button class="gold" id="of_go" style="flex:1">Send offer</button></div></div>';
   w.querySelector('#of_x').onclick=close;
   w.querySelector('#of_go').onclick=async()=>{
     const cents=Math.round((parseFloat(w.querySelector('#of_amt').value)||0)*100); if(cents<=0){ toast('Enter an amount.'); return; }
-    const {data,error}=await sb.functions.invoke('offer-make',{body:{listing_id:id,amount_cents:cents}});
-    let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
-    if(!out||out.ok!==true){ toast((out&&out.error)||'Could not send offer.'); return; }
-    close(); toast('Offer sent! The seller will be notified. 💰');
+    const out=await offerAction({action:'make',listing_id:id,amount_cents:cents});
+    if(out){ close(); toast('Offer sent! The seller will be notified. 💰'); }
   };
 }
-async function openSellerOffers(){
-  if(!wallCustomer)return;
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="so_x">✕</button><h3 style="color:var(--gold)">Offers on your items</h3><div id="so_list"><div class="muted">Loading…</div></div></div>';
-  w.querySelector('#so_x').onclick=close;
-  async function draw(){
-    const {data}=await sb.from('offers').select('id,amount_cents,status,created_at,listing_id,listings(title)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(50);
-    const list=w.querySelector('#so_list'); const rows=data||[];
-    if(!rows.length){ list.innerHTML='<div class="muted" style="text-align:center">No offers yet.</div>'; return; }
-    list.innerHTML=rows.map(o=>{ const t=(o.listings&&o.listings.title)||('Listing #'+o.listing_id);
-      const act=o.status==='open'?('<div class="row" style="gap:6px;margin-top:6px"><button class="sm gold" onclick="respondOffer('+o.id+',\'accepted\')">Accept</button><button class="sm ghost" onclick="respondOffer('+o.id+',\'declined\')">Decline</button></div>'):'';
-      return '<div class="ordcard"><div class="ordhead"><b>'+mUSD(o.amount_cents)+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div><div class="muted">'+esc(t)+' · '+new Date(o.created_at).toLocaleDateString()+'</div>'+act+'</div>'; }).join('');
-  }
-  w._draw=draw; draw();
-}
-async function respondOffer(offerId,action){
-  const {data,error}=await sb.functions.invoke('offer-respond',{body:{offer_id:offerId,action:action}});
+async function offerAction(body){
+  const {data,error}=await sb.functions.invoke('offer-action',{body:body});
   let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
-  if(!out||out.ok!==true){ toast((out&&out.error)||'Could not respond.'); return; }
-  toast('Offer '+action+'.'); openSellerOffers();
+  if(!out||out.ok!==true){ toast((out&&out.error)||'Could not complete that.'); return null; }
+  return out;
+}
+function offerCounter(offerId,suggest){
+  const v=prompt('Your counter offer (USD):', suggest!=null?((suggest/100).toFixed(2)):''); if(v===null)return;
+  const cents=Math.round((parseFloat(v)||0)*100); if(cents<=0){ toast('Enter a valid amount.'); return; }
+  offerAction({action:'counter',offer_id:offerId,amount_cents:cents}).then(o=>{ if(o){ toast('Counter sent.'); document.querySelectorAll('.offersmodal').forEach(m=>m.remove()); (_offersView==='seller'?openSellerOffers:openMyOffers)(); } });
+}
+function offerRespond(offerId,action){
+  offerAction({action:action,offer_id:offerId}).then(o=>{ if(o){ toast('Offer '+action+'ed.'); document.querySelectorAll('.offersmodal').forEach(m=>m.remove()); (_offersView==='seller'?openSellerOffers:openMyOffers)(); } });
+}
+/* group offers into threads (latest per listing+buyer) */
+function _offerThreads(rows){
+  const map={};
+  (rows||[]).forEach(o=>{ const k=o.listing_id+'|'+o.buyer_id; if(!map[k]||new Date(o.created_at)>new Date(map[k].created_at))map[k]=o; });
+  return Object.values(map).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+}
+function _offerExpired(o){ return o.status==='open' && o.expires_at && new Date(o.expires_at).getTime()<Date.now(); }
+function _offerLeft(o){ if(!o.expires_at)return ''; const ms=new Date(o.expires_at).getTime()-Date.now(); if(ms<=0)return 'expired'; const h=Math.floor(ms/3600000); return h>=1?(h+'h left'):(Math.max(1,Math.floor(ms/60000))+'m left'); }
+function offerThreadCard(o,viewer){
+  const title=(o.listings&&o.listings.title)||('Listing #'+o.listing_id);
+  const exp=_offerExpired(o); const st=exp?'expired':o.status;
+  const mine = o.from_role===viewer; // the latest offer was sent by me
+  const who = o.from_role==='buyer' ? 'Buyer' : 'Seller';
+  let line, acts='';
+  if(st==='accepted'){ line='✅ Accepted at '+mUSD(o.amount_cents);
+    if(viewer==='buyer') acts='<button class="sm gold" onclick="event.stopPropagation();buyNowOffer('+o.listing_id+')">Buy now '+mUSD(o.amount_cents)+'</button>'; }
+  else if(st==='declined'){ line='Declined — '+mUSD(o.amount_cents);
+    acts='<button class="sm ghost" onclick="event.stopPropagation();offerCounter('+o.id+','+o.amount_cents+')">Send new offer</button>'; }
+  else if(st==='expired'){ line='⌛ Expired — '+mUSD(o.amount_cents); }
+  else if(st==='open'){
+    line=who+' offered '+mUSD(o.amount_cents)+' · '+_offerLeft(o);
+    if(mine){ acts='<span class="muted">Waiting for the other party…</span>'; }
+    else { acts='<button class="sm gold" onclick="event.stopPropagation();offerRespond('+o.id+',\'accept\')">Accept</button>'+
+      '<button class="sm ghost" onclick="event.stopPropagation();offerCounter('+o.id+','+o.amount_cents+')">Counter</button>'+
+      '<button class="sm ghost" onclick="event.stopPropagation();offerRespond('+o.id+',\'decline\')">Decline</button>'; }
+  } else { line=st+' — '+mUSD(o.amount_cents); }
+  const sub = viewer==='seller' ? ('Buyer: '+esc(buyerRatingStr(o.buyer_id))) : '';
+  return '<div class="ordcard"><div class="ordhead"><b>'+esc(title)+'</b><span class="ordstatus s_'+esc(st)+'">'+esc(st)+'</span></div>'+
+    '<div class="muted">'+esc(line)+'</div>'+(sub?('<div class="muted" style="font-size:12px">'+sub+'</div>'):'')+
+    (acts?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+acts+'</div>'):'')+'</div>';
+}
+let _offersView='seller';
+async function openSellerOffers(){
+  if(!wallCustomer)return; _offersView='seller';
+  document.querySelectorAll('.offersmodal').forEach(m=>m.remove());
+  const w=document.createElement('div'); w.className='scanmodal offersmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="so_x">✕</button><h3 style="color:var(--gold)">💰 Offers on your items</h3><div id="so_list"><div class="muted">Loading…</div></div></div>';
+  w.querySelector('#so_x').onclick=close;
+  await loadBuyerRatings();
+  const {data}=await sb.from('offers').select('id,amount_cents,status,from_role,expires_at,created_at,listing_id,buyer_id,listings(title)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(120);
+  const threads=_offerThreads(data); const list=w.querySelector('#so_list');
+  list.innerHTML=threads.length?threads.map(o=>offerThreadCard(o,'seller')).join(''):'<div class="muted" style="text-align:center">No offers yet.</div>';
+}
+async function openMyOffers(){
+  if(!wallCustomer)return; _offersView='buyer';
+  document.querySelectorAll('.offersmodal').forEach(m=>m.remove());
+  const w=document.createElement('div'); w.className='scanmodal offersmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="mo_x">✕</button><h3 style="color:var(--gold)">💰 My offers</h3><div id="mo_list"><div class="muted">Loading…</div></div></div>';
+  w.querySelector('#mo_x').onclick=close;
+  const {data}=await sb.from('offers').select('id,amount_cents,status,from_role,expires_at,created_at,listing_id,buyer_id,listings(title)').eq('buyer_id',wallCustomer.id).order('created_at',{ascending:false}).limit(120);
+  const threads=_offerThreads(data); const list=w.querySelector('#mo_list');
+  list.innerHTML=threads.length?threads.map(o=>offerThreadCard(o,'buyer')).join(''):'<div class="muted" style="text-align:center">You haven’t made any offers yet.</div>';
+}
+async function buyNowOffer(listingId){
+  const r=await sbGet('listings?select=id,title,price_cents,shipping_cents,shipping_offered,seller_id,status,photos&id=eq.'+listingId+'&limit=1');
+  const it=Array.isArray(r)&&r[0]; if(!it||it.status!=='active'){ toast('That item isn’t available.'); return; }
+  const cart=cartGet(); if(!cart.some(x=>x.id===it.id)) cart.push({id:it.id,title:it.title,price_cents:it.price_cents,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,seller_id:it.seller_id||null,photo:(it.photos&&it.photos[0])||''});
+  cartSet(cart); document.querySelectorAll('.offersmodal').forEach(m=>m.remove()); toast('Added at your accepted price 🛒'); openCheckout();
 }
 async function saveSearchAlert(){
   if(!wallCustomer){ openLogin(); return; }
@@ -1298,6 +1378,7 @@ async function loadMarket(){
   if(staffSession()&&_staffPw){ const r=await sbRpc('staff_listings',{p_user:staffSession().username,p_pass:_staffPw}); if(r&&r.ok)items=r.listings; }
   if(!items){ const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,ship_days,status,seller_id,promoted&status=neq.hidden&order=created_at.desc&limit=200'); items=Array.isArray(r)?r:[]; }
   _mktItems=items;
+  if(_mySeller&&_mySeller.status==='approved'){ try{ await loadSellerStats(); }catch(e){} }
   drawMarketControls();
   renderMarketGrid();
 }
@@ -1317,7 +1398,7 @@ function drawMarketControls(){
   const portalRow = staff ? ('<div class="mktsubs"><button class="mktsub'+(_mktPortal==='selling'?' on':'')+'" onclick="setMktPortal(\'selling\')">🏷️ Selling portal</button><button class="mktsub'+(_mktPortal==='customer'?' on':'')+'" onclick="setMktPortal(\'customer\')">🛍️ Customer portal</button></div>') : '';
   const subs=[['active','Active'],['sold','Sold']]; if(selling)subs.push(['hidden','Hidden']);
   c.innerHTML=portalRow+'<div class="mktbar"><input id="mktSearch" class="mktsearch" placeholder="Search cards…" value="'+esc(_mktSearch)+'"/>'+
-    '<select id="mktSort" class="mktsort">'+['featured:Featured ✨','new:Newest','plow:Price ↑','phigh:Price ↓','name:Name A–Z'].map(o=>{const p=o.split(':');return '<option value="'+p[0]+'"'+(_mktSort===p[0]?' selected':'')+'>'+p[1]+'</option>';}).join('')+'</select></div>'+
+    '<select id="mktSort" class="mktsort">'+['featured:Featured ✨','promoted:Promoted ⭐ only','new:Newest','plow:Price ↑','phigh:Price ↓','name:Name A–Z'].map(o=>{const p=o.split(':');return '<option value="'+p[0]+'"'+(_mktSort===p[0]?' selected':'')+'>'+p[1]+'</option>';}).join('')+'</select></div>'+
     '<div class="mktsubs">'+subs.map(s=>'<button class="mktsub'+(_mktSub===s[0]?' on':'')+'" onclick="setMktSub(\''+s[0]+'\')">'+s[1]+'</button>').join('')+'</div>';
   const si=el('mktSearch'); if(si)si.oninput=()=>{ _mktSearch=si.value; renderMarketGrid(); drawSearchAlert(); };
   const so=el('mktSort'); if(so)so.onchange=()=>{ _mktSort=so.value; renderMarketGrid(); };
@@ -1341,6 +1422,7 @@ function renderMarketGrid(){
   else items=items.filter(x=>x.status!=='sold'&&x.status!=='hidden');
   const q=_mktSearch.trim().toLowerCase();
   if(q) items=items.filter(x=>(((x.title||'')+' '+(x.description||'')+' '+(x.condition||'')).toLowerCase().indexOf(q)>=0));
+  if(_mktSort==='promoted') items=items.filter(x=>x.promoted);
   // priority tier: paid promotions first, then House of Cards, then verified sellers, then everyone else
   const tier=x=> (x.promoted?-1:(!x.seller_id?0:(sellerVerified(x.seller_id)?1:2)));
   items.sort((a,b)=>{
@@ -1369,7 +1451,8 @@ function mktCard(it,asBuyer){
   const buyerCtl=(buy||watch||offer)?('<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+buy+watch+offer+'</div>'):'';
   // seller editing their own listing straight from the grid
   const promoBtn=(ownSeller&&!staffSession()&&!sold&&!hidden)?(it.promoted?'<span class="membadge acct">⭐ Promoted</span>':'<button class="sm gold" onclick="event.stopPropagation();openPromote('+it.id+')">⭐ Promote $5</button>'):'';
-  const sellerCtl=(ownSeller&&!staffSession())?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="sm ghost" onclick="event.stopPropagation();sellerEditListing('+it.id+')">✏️ Edit price / details</button>'+promoBtn+'</div>'):'';
+  const st=ownSeller&&_sellerStats[it.id]; const statLine=st?('<div class="mktcond">👀 '+(st.watchers||0)+' watching · 💰 '+(st.offers||0)+' offer'+((st.offers||0)===1?'':'s')+'</div>'):'';
+  const sellerCtl=(ownSeller&&!staffSession())?(statLine+'<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="sm ghost" onclick="event.stopPropagation();sellerEditListing('+it.id+')">✏️ Edit price / details</button>'+promoBtn+'</div>'):'';
   const staffCtl=(staffSession()&&!asBuyer)?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+
     '<button class="sm ghost" onclick="event.stopPropagation();openListingEdit('+it.id+')">Edit</button>'+
     '<button class="sm ghost" onclick="event.stopPropagation();toggleListingHidden('+it.id+')">'+(hidden?'Unhide':'Hide')+'</button>'+
