@@ -1416,6 +1416,21 @@ function hocRoute(raw){
   try{ if('serviceWorker' in navigator){ navigator.serviceWorker.addEventListener('message',e=>{ if(e&&e.data&&e.data.type==='hoc-navigate')setTimeout(()=>hocRoute(e.data.url),60); }); } }catch(e){}
   try{ window.addEventListener('hashchange',()=>hocRoute()); }catch(e){}
   try{ window.addEventListener('load',()=>{ if(location.hash)setTimeout(()=>hocRoute(),1000); }); }catch(e){}
+  /* Phone/Android back button closes the open page (modal) instead of leaving the app. */
+  try{
+    let trapped=false;
+    const modals=()=>document.querySelectorAll('.scanmodal');
+    const top=()=>{ const a=modals(); return a.length?a[a.length-1]:null; };
+    const ensureTrap=()=>{ if(!trapped&&modals().length){ try{ history.pushState({hocModal:1},''); trapped=true; }catch(e){} } };
+    const mo=new MutationObserver(()=>{ if(modals().length){ ensureTrap(); } else if(trapped){ trapped=false; try{ if(history.state&&history.state.hocModal)history.back(); }catch(e){} } });
+    mo.observe(document.body,{childList:true});
+    window.addEventListener('popstate',()=>{
+      const t=top(); if(!t)return;
+      if(t.dataset&&t.dataset.busy){ try{ history.pushState({hocModal:1},''); }catch(e){} return; }  // don't close mid-payment
+      trapped=false; t.remove();
+      if(modals().length){ try{ history.pushState({hocModal:1},''); trapped=true; }catch(e){} }
+    });
+  }catch(e){}
 })();
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];
