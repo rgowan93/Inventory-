@@ -40,6 +40,7 @@ async function uploadCloudLogo(file){
 let state = null;
 let ui = { route:'dashboard', cart:[], cartPayments:[], focusId:null, sellPanel:null, showPanel:null,
            tradeDraft:null, inForm:{}, zellePick:null, authed:false, loginUser:null, loginMode:'login', authView:'wall', menuOpen:false };
+try{ const _t=localStorage.getItem('hoc_tab'); if(_t)ui.wallTab=_t; }catch(e){}   // remember the open tab across refresh
 
 /* audit trail — everyone on a company shares access, but every change is signed by who made it */
 function logChange(area,detail){ if(!state)return; state.audit=state.audit||[]; state.audit.push({id:uid('log'),at:Date.now(),userId:state.currentUserId,area,detail}); if(state.audit.length>3000)state.audit=state.audit.slice(-3000); }
@@ -362,7 +363,7 @@ function viewWall(){
     ? '<span class="custhi">'+whoLabel+'</span>'+bellBtn+cartBtn+'<button class="custbtn" onclick="openAccount()">Account</button><button class="custbtn" onclick="signOutAll()">Sign out</button>'
     : '<span class="custhi muted">House of Cards</span>'+cartBtn+'<button class="custbtn gold" onclick="openLogin()">Log in</button><button class="custbtn" onclick="openCustomerSignup()">Create account</button>'
   )+'</div>') : '';
-  let active=ui.wallTab||'home'; if(active==='members'&&!staff) active='home';
+  let active=ui.wallTab||'home'; if(['members','sellers','orders'].indexOf(active)>=0&&!staff) active='home';
   const TABS=[['home','🏠 Home'],['market','🛒 Marketplace'],['share','Share Us!!'],['social','Follow on Social'],['pay','Pay at Show'],['contact','Contact Us'],['reviews','Reviews'],['photos','Photos & Videos']];
   if(staff) TABS.push(['orders','📦 Orders'+(_newOrderCount?(' <span class="tabbadge">'+_newOrderCount+'</span>'):'')],['sellers','Sellers'],['members','Members']);
   const tabbar='<div class="walltabs">'+TABS.map(t=>'<button class="walltab'+(t[0]===active?' on':'')+'" data-k="'+t[0]+'" onclick="setWallTab(\''+t[0]+'\')">'+t[1]+'</button>').join('')+'</div>';
@@ -463,9 +464,9 @@ function openAccount(){ if(staffSession())openStaffAccount(); else if(wallCustom
 function signOutAll(){ if(staffSession())staffLogout(); else if(wallCustomer)customerSignOut(); }
 function openLogin(){
   if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:400px;width:100%;position:relative"><button class="modalx" id="lg_x2">✕</button><h3 style="color:var(--gold)">Log in</h3>'+
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('Log in','lg_x2')+
     '<label class="fld"><span>Email (customers) or username (staff)</span><input id="lg_key" autocapitalize="off"/></label>'+
     '<label class="fld"><span>Password</span><input id="lg_pw" type="password"/></label>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="lg_go" style="flex:1">Log in</button></div>'+
@@ -482,7 +483,7 @@ function openLogin(){
   };
   setTimeout(()=>{ const k=w.querySelector('#lg_key'); if(k)k.focus(); },60);
 }
-function setWallTab(key){ ui.wallTab=key;
+function setWallTab(key){ ui.wallTab=key; try{ localStorage.setItem('hoc_tab',key); }catch(e){}
   document.querySelectorAll('.walltab').forEach(b=>b.classList.toggle('on', b.dataset.k===key));
   document.querySelectorAll('.wpanel').forEach(p=>{ p.style.display=(p.dataset.wtab===key)?'':'none'; });
   if(key==='members') loadMembers();
@@ -893,9 +894,9 @@ async function customerSignIn(email,pass){
 async function customerSignOut(){ try{ await sb.auth.signOut(); }catch(e){} wallCustomer=null; toast('Signed out.'); render(); }
 function openCustomerSignup(){
   if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:92vh;overflow:auto;position:relative"><button class="modalx" id="cu_x">✕</button><h3 style="color:var(--gold)">Create your account</h3>'+
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('Create your account','cu_x')+
     '<div class="muted" style="margin-bottom:8px">One account per phone number.</div>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>First name</span><input id="cu_first" autocomplete="given-name"/></label>'+
     '<label class="fld" style="margin:0"><span>Last name</span><input id="cu_last" autocomplete="family-name"/></label></div>'+
@@ -991,9 +992,9 @@ async function loadMyOrders(cont){
 function openFeedback(orderId,role,rateeId){
   if(!wallCustomer){ openLogin(); return; }
   let chosen=5;
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:400px;width:100%;position:relative"><button class="modalx" id="fb_x">✕</button><h3 style="color:var(--gold)">'+(role==='seller_to_buyer'?'Rate the buyer':'Rate your '+(rateeId?'seller':'experience'))+'</h3>'+
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead((role==='seller_to_buyer'?'Rate the buyer':'Rate your '+(rateeId?'seller':'experience')),'fb_x')+
     '<div id="fbStars" class="rvstars">'+[1,2,3,4,5].map(i=>'<span data-v="'+i+'">★</span>').join('')+'</div>'+
     '<label class="fld"><span>Comment (optional)</span><textarea id="fb_c" rows="3"></textarea></label>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="fb_go" style="flex:1">Submit</button></div></div>';
@@ -1081,9 +1082,9 @@ async function openThread(orderId,viewer){
 }
 function openCase(orderId,sellerId){
   if(!wallCustomer){ openLogin(); return; }
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:420px;width:100%;position:relative"><button class="modalx" id="cs_x">✕</button><h3 style="color:var(--gold)">Open a case · Order #'+orderId+'</h3>'+
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('Open a case · Order #'+orderId,'cs_x')+
     '<label class="fld"><span>What’s the problem?</span><select id="cs_kind">'+
       '<option value="not_received">Item didn’t arrive</option><option value="item_issue">Problem with the item</option><option value="refund_request">Request a refund</option><option value="other">Something else</option></select></label>'+
     '<label class="fld"><span>Who should handle it?</span><select id="cs_against"><option value="seller">Work it out with the seller</option><option value="hoc">Escalate to House of Cards staff</option></select></label>'+
@@ -1100,9 +1101,9 @@ function openCase(orderId,sellerId){
   };
 }
 function openRefund(orderId,viewer,maxCents){
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:400px;width:100%;position:relative"><button class="modalx" id="rf_x">✕</button><h3 style="color:var(--gold)">Issue refund · Order #'+orderId+'</h3>'+
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('Issue refund · Order #'+orderId,'rf_x')+
     '<label class="fld"><span>Refund amount (USD)</span><input id="rf_amt" type="number" step="0.01" inputmode="decimal" value="'+((maxCents||0)/100).toFixed(2)+'"/></label>'+
     '<label class="fld"><span>Reason / note</span><textarea id="rf_note" rows="3"></textarea></label>'+
     '<div class="muted" style="font-size:12px;margin-bottom:6px">Refunds go back to the buyer’s card. For seller items the amount is pulled back from the seller’s payout.</div>'+
@@ -1185,9 +1186,9 @@ async function openWatchlist(){
 /* ---- Offers: make / counter / accept / decline (good for 48h) ---- */
 function openOffer(id,priceCents){
   if(!wallCustomer){ openLogin(); return; }
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:380px;width:100%;position:relative"><button class="modalx" id="of_x">✕</button><h3 style="color:var(--gold)">Make an offer</h3>'+
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('Make an offer','of_x')+
     '<div class="muted" style="margin-bottom:6px">Asking price: '+mUSD(priceCents)+'. Offers are good for 48 hours.</div>'+
     '<label class="fld"><span>Your offer (USD)</span><input id="of_amt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"/></label>'+
     '<div class="row" style="margin-top:6px"><button class="gold" id="of_go" style="flex:1">Send offer</button></div></div>';
@@ -1317,11 +1318,10 @@ function openPromote(listingId){
   if(!wallCustomer){ openLogin(); return; }
   if(!cfg.SQUARE_APP_ID||!cfg.SQUARE_LOCATION_ID){ toast('Payments aren’t configured yet.'); return; }
   const it=(_mktItems||[]).find(x=>x.id===listingId);
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>{ if(!w.dataset.busy)w.remove(); }; w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>{ if(!w.dataset.busy)w.remove(); };
   let card=null;
-  w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:92vh;overflow:auto;position:relative"><button class="modalx" id="pr_x">✕</button>'+
-    '<h3 style="color:var(--gold)">⭐ Promote your listing</h3>'+
+  w.innerHTML='<div class="card pagecard">'+pageHead('⭐ Promote your listing','pr_x')+
     '<div class="muted" style="margin-bottom:8px">'+(it?('“'+esc(it.title)+'” '):'')+'will appear at the very top of the marketplace — above House of Cards and verified sellers.</div>'+
     '<div class="cktot"><div class="ckrow cktotal"><span>Promotion fee</span><span>$5.00</span></div></div>'+
     '<div class="muted" style="font-size:12px;margin:6px 0">One-time, <b>non-refundable</b>. Charged securely by Square.</div>'+
@@ -1431,6 +1431,18 @@ function hocRoute(raw){
       if(modals().length){ try{ history.pushState({hocModal:1},''); trapped=true; }catch(e){} }
     });
   }catch(e){}
+})();
+/* Pull-to-refresh: drag down at the top to refresh data; lands back on the same tab. */
+(function(){
+  let startY=0, pulling=false, ind=null, busy=false;
+  function getInd(){ if(!ind){ ind=document.createElement('div'); ind.className='ptr'; ind.innerHTML='<span class="ptrspin">↻</span>'; document.body.appendChild(ind); } return ind; }
+  function scroller(){ const m=document.querySelector('.scanmodal .pagecard'); return m||document.scrollingElement||document.documentElement; }
+  function atTop(){ const m=document.querySelector('.scanmodal .pagecard'); return m?(m.scrollTop<=0):((window.scrollY||document.documentElement.scrollTop||0)<=0); }
+  window.addEventListener('touchstart',e=>{ if(busy||e.touches.length!==1){ pulling=false; return; } if(atTop()){ startY=e.touches[0].clientY; pulling=true; } else pulling=false; },{passive:true});
+  window.addEventListener('touchmove',e=>{ if(!pulling)return; const dy=e.touches[0].clientY-startY; if(dy>4){ const i=getInd(); const d=Math.min(80,dy*0.5); i.style.transform='translate(-50%,'+(d-46)+'px)'; i.style.opacity=String(Math.min(1,dy/100)); i.classList.toggle('ready',dy>100); } },{passive:true});
+  window.addEventListener('touchend',e=>{ if(!pulling)return; pulling=false; const dy=(e.changedTouches&&e.changedTouches[0]?e.changedTouches[0].clientY:0)-startY; const i=ind;
+    if(i&&dy>100){ busy=true; i.classList.add('spin'); i.style.transform='translate(-50%,20px)'; i.style.opacity='1'; setTimeout(()=>{ try{ location.reload(); }catch(_){ location.href=location.href; } },200); }
+    else if(i){ i.style.transform='translate(-50%,-46px)'; i.style.opacity='0'; i.classList.remove('ready'); } },{passive:true});
 })();
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];

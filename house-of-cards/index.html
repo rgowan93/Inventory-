@@ -30,7 +30,11 @@
   --line:#000; --muted:#9aa0b5; --ok:#34c759; --shadow:0 6px 18px rgba(0,0,0,.45);
 }
 *{box-sizing:border-box}
-html,body{margin:0;height:100%}
+html,body{margin:0;height:100%;overscroll-behavior-y:contain}
+.ptr{position:fixed;top:0;left:50%;transform:translate(-50%,-46px);z-index:99999;background:var(--gold);color:#1a1300;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;box-shadow:0 4px 14px rgba(0,0,0,.45);opacity:0;transition:opacity .15s,transform .15s}
+.ptr.ready{background:#fff}
+.ptr.spin .ptrspin{display:inline-block;animation:ptrspin .6s linear infinite}
+@keyframes ptrspin{to{transform:rotate(360deg)}}
 body{
   background:var(--bg); color:var(--cream); font-weight:600;
   font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;
@@ -370,9 +374,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260622z"></script>
-<script src="social.js?v=20260622z"></script>
-<script src="app.js?v=20260622z"></script>
+<script src="config.js?v=20260623a"></script>
+<script src="social.js?v=20260623a"></script>
+<script src="app.js?v=20260623a"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
