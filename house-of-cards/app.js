@@ -787,10 +787,10 @@ function openSellerListingEdit(it){
     '<div class="grid2"><label class="fld" style="margin:0"><span>Shipping cost (USD)</span><input id="sp_ship" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.shipping_cents||0)/100):'')+'"/></label>'+
     '<label class="fld" style="margin:0"><span>Ship within (days)</span><input id="sp_days" type="number" inputmode="numeric" value="'+(it&&it.ship_days!=null?it.ship_days:3)+'"/></label></div>'+
     '<div class="muted" style="margin:2px 0 6px">Items ship to the buyer by your promised deadline. A flat 10% platform fee applies when an item sells (you keep 90% of the item price + the full shipping fee).</div>'+
-    '<div class="fld"><span>Photos</span><div id="sp_thumbs" class="lpthumbs"></div><button class="ghost" id="sp_addphoto" style="margin-top:6px">📷 Add photo</button></div>'+
+    '<div class="fld"><span>Photos</span><div id="sp_thumbs" class="lpthumbs"></div><button class="ghost" id="sp_addphoto" style="margin-top:6px">📷 Add photos</button></div>'+
     '<div class="row" style="margin-top:10px"><button class="gold" id="sp_save" style="flex:1">Save listing</button></div></div>';
   w.querySelector('#sp_x').onclick=close; drawPhotos();
-  w.querySelector('#sp_addphoto').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading…'); const up=await uploadMedia(f); if(!up)return; photos.push(up.url); drawPhotos(); }; inp.click(); };
+  w.querySelector('#sp_addphoto').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.multiple=true; inp.onchange=async()=>{ const files=Array.from(inp.files||[]); if(!files.length)return; let n=0; for(const f of files){ toast('Uploading '+(++n)+' of '+files.length+'…'); const up=await uploadMedia(f); if(up){ photos.push(up.url); drawPhotos(); } } toast('Photos added.'); }; inp.click(); };
   w.querySelector('#sp_save').onclick=async()=>{
     const title=(w.querySelector('#sp_title').value||'').trim(); if(!title){ toast('Enter a title.'); return; }
     const data={ seller_id:wallCustomer.id, created_by:(wallCustomer.username||wallCustomer.name||''), title:title,
@@ -832,15 +832,15 @@ async function loadMySeller(){ _mySeller=null; if(!wallCustomer)return; try{ con
 function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); await loadWatchlist(); render(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
 let _sellerRatings={};
 async function loadSellerRatings(){ try{ const r=await sbRpc('seller_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.seller_id]=x; }); _sellerRatings=m; if(el('wMarket'))renderMarketGrid(); } }catch(e){} }
-function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; if(!r.cnt)return 'New seller'; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
+function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; if(!r.cnt)return '100% · New seller'; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
 function sellerName(sid){ const r=sid&&_sellerRatings[sid]; return (r&&r.name)||'Seller'; }
 function sellerVerified(sid){ const r=sid&&_sellerRatings[sid]; return !!(r&&r.verified); }
-/* one-line seller label for a listing: House of Cards (promoted) or the seller's name + verified + rating */
+/* one-line seller label for a listing: House of Cards (promoted) or the seller's name (tap to open store) + verified + rating */
 function sellerLabel(sid){
   if(!sid) return '<div class="mktcond promoted">⭐ House of Cards · Promoted</div>';
   const v=sellerVerified(sid)?' <span class="vbadge">✔ Verified</span>':'';
   const rt=ratingStr(sid);
-  return '<div class="mktcond">🧑 '+esc(sellerName(sid))+v+(rt?(' · '+rt):'')+'</div>';
+  return '<div class="mktcond">🧑 <span class="sellerlink" onclick="event.stopPropagation();openSellerStore(\''+sid+'\')">'+esc(sellerName(sid))+'</span>'+v+(rt?(' · '+rt):'')+'</div>';
 }
 async function customerSignUp(p){
   if(!cloudOn()) return {error:'Accounts are offline right now.'};
@@ -1175,6 +1175,29 @@ async function saveSearchAlert(){
   if(error&&!/duplicate|unique/i.test(error.message||'')){ toast('Could not save alert.'); return; }
   toast('🔔 We’ll alert you when “'+term+'” is listed.');
 }
+/* ===== Seller storefront: tap a seller's name to see their listings + rating history ===== */
+async function openSellerStore(sid){
+  if(!sid)return;
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const r=_sellerRatings[sid]||{}; const name=(r.name)||'Seller'; const verified=!!r.verified;
+  const ratingLine = r.cnt ? ('★ '+r.avg+' · '+r.cnt+' rating'+(r.cnt===1?'':'s')+(r.pos!=null?(' · '+r.pos+'% positive'):'')) : '100% positive · New seller';
+  w.innerHTML='<div class="card" style="max-width:480px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="st_x">✕</button>'+
+    '<h3 style="color:var(--gold);margin-bottom:2px">'+esc(name)+(verified?' <span class="vbadge">✔ Verified</span>':'')+'</h3>'+
+    '<div class="muted" style="margin-bottom:10px">'+esc(ratingLine)+'</div>'+
+    '<div class="wall-sec" style="margin:6px 0 10px">Listings</div><div id="st_listings" class="mktgrid"><div class="muted">Loading…</div></div>'+
+    '<div class="wall-sec" style="margin:16px 0 10px">Feedback</div><div id="st_fb"><div class="muted">Loading…</div></div></div>';
+  w.querySelector('#st_x').onclick=close;
+  // listings (public read; review/banned sellers are hidden by RLS)
+  const lr=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,shipping_offered,shipping_cents,ship_days,status,seller_id&seller_id=eq.'+sid+'&status=eq.active&order=created_at.desc&limit=60');
+  const lbox=w.querySelector('#st_listings'); const items=Array.isArray(lr)?lr:[];
+  // make sure these render through the shared grid so Watch/Offer work
+  items.forEach(it=>{ if(!(_mktItems||[]).some(x=>x.id===it.id))_mktItems.push(it); });
+  lbox.innerHTML=items.length?items.map(it=>mktCard(it,true)).join(''):'<div class="muted" style="text-align:center">No active listings.</div>';
+  // feedback history
+  const fr=await sbRpc('seller_feedback',{p_seller:sid}); const fbox=w.querySelector('#st_fb'); const fb=Array.isArray(fr)?fr:[];
+  fbox.innerHTML=fb.length?fb.map(f=>'<div class="ordcard" style="padding:8px 10px"><div>'+('★'.repeat(f.stars))+'<span style="color:#3a3550">'+('★'.repeat(5-f.stars))+'</span> <span class="muted" style="font-size:11px">'+new Date(f.created_at).toLocaleDateString()+'</span></div>'+(f.comment?('<div style="font-size:13px;margin-top:2px">'+esc(f.comment)+'</div>'):'')+'</div>').join(''):'<div class="muted" style="text-align:center">No feedback yet.</div>';
+}
 /* deep-link router: notifications & ?#hash open the relevant area */
 function hocRoute(raw){
   let h=''; try{ h=(raw?new URL(raw,location.href).hash:location.hash)||''; }catch(e){ h=location.hash||''; }
@@ -1345,11 +1368,13 @@ async function openListingEdit(id){
     '<label class="fld" style="margin:0"><span>Shipping cost (USD)</span><input id="lp_ship" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.shipping_cents||0)/100):'')+'"/></label></div>'+
     '<label class="fld"><span>Ship within (days after payment)</span><input id="lp_days" type="number" inputmode="numeric" value="'+(it&&it.ship_days!=null?it.ship_days:3)+'"/></label>'+
     '<div class="muted" style="margin:2px 0 6px">All items ship to the buyer. Set the shipping cost and how soon you’ll ship.</div>'+
-    '<div class="fld"><span>Photos</span><div id="lp_thumbs" class="lpthumbs"></div><button class="ghost" id="lp_addphoto" style="margin-top:6px">📷 Add photo</button></div>'+
+    '<div class="fld"><span>Photos</span><div id="lp_thumbs" class="lpthumbs"></div><button class="ghost" id="lp_addphoto" style="margin-top:6px">📷 Add photos</button></div>'+
     '<div class="row" style="margin-top:10px"><button class="gold" id="lp_save" style="flex:1">Save listing</button><button class="ghost" id="lp_x">Cancel</button></div></div>';
   w.querySelector('#lp_x').onclick=close; drawPhotos();
-  w.querySelector('#lp_addphoto').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
-    inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading…'); const up=await uploadMedia(f); if(!up)return; photos.push(up.url); drawPhotos(); };
+  w.querySelector('#lp_addphoto').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.multiple=true;
+    inp.onchange=async()=>{ const files=Array.from(inp.files||[]); if(!files.length)return; let n=0;
+      for(const f of files){ toast('Uploading '+(++n)+' of '+files.length+'…'); const up=await uploadMedia(f); if(up){ photos.push(up.url); drawPhotos(); } }
+      toast('Photos added.'); };
     inp.click(); };
   w.querySelector('#lp_save').onclick=async()=>{
     const title=(w.querySelector('#lp_title').value||'').trim(); if(!title){ toast('Enter a title.'); return; }
