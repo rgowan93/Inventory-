@@ -743,7 +743,7 @@ async function openSellerListings(){
   const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
   async function draw(){
-    const {data}=await sb.from('listings').select('id,title,price_cents,status,condition,description,shipping_cents,photos,qty').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false});
+    const {data}=await sb.from('listings').select('id,title,price_cents,status,condition,description,shipping_cents,ship_days,photos,qty').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false});
     _sellerListings=data||[];
     const rows=_sellerListings.length?_sellerListings.map(it=>'<div class="memrow"><div class="memmain"><div class="memname">'+esc(it.title)+' <span class="membadge">'+esc(it.status)+'</span></div><div class="mememail">'+mUSD(it.price_cents)+'</div></div><button class="sm ghost" onclick="sellerEditListing('+it.id+')">Edit</button><button class="memdel" onclick="sellerDeleteListing('+it.id+')">✕</button></div>').join(''):'<div class="muted" style="text-align:center;margin:8px 0">No listings yet — add your first card.</div>';
     w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="sl_x">✕</button><h3 style="color:var(--gold)">My listings</h3>'+rows+'<div class="row" style="margin-top:10px"><button class="gold" id="sl_add" style="flex:1">＋ Add listing</button></div></div>';
@@ -765,8 +765,9 @@ function openSellerListingEdit(it){
     '<label class="fld"><span>Description</span><textarea id="sp_desc" rows="3">'+esc(it?(it.description||''):'')+'</textarea></label>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>Price (USD)</span><input id="sp_price" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.price_cents||0)/100):'')+'"/></label>'+
     '<label class="fld" style="margin:0"><span>Condition</span><select id="sp_cond">'+condOpts+'</select></label></div>'+
-    '<label class="fld"><span>Shipping cost (USD)</span><input id="sp_ship" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.shipping_cents||0)/100):'')+'"/></label>'+
-    '<div class="muted" style="margin:2px 0 6px">Items ship to the buyer. A flat 5% platform fee applies when an item sells.</div>'+
+    '<div class="grid2"><label class="fld" style="margin:0"><span>Shipping cost (USD)</span><input id="sp_ship" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.shipping_cents||0)/100):'')+'"/></label>'+
+    '<label class="fld" style="margin:0"><span>Ship within (days)</span><input id="sp_days" type="number" inputmode="numeric" value="'+(it&&it.ship_days!=null?it.ship_days:3)+'"/></label></div>'+
+    '<div class="muted" style="margin:2px 0 6px">Items ship to the buyer by your promised deadline. A flat 10% platform fee applies when an item sells (you keep 90% of the item price + the full shipping fee).</div>'+
     '<div class="fld"><span>Photos</span><div id="sp_thumbs" class="lpthumbs"></div><button class="ghost" id="sp_addphoto" style="margin-top:6px">📷 Add photo</button></div>'+
     '<div class="row" style="margin-top:10px"><button class="gold" id="sp_save" style="flex:1">Save listing</button></div></div>';
   w.querySelector('#sp_x').onclick=close; drawPhotos();
@@ -777,7 +778,8 @@ function openSellerListingEdit(it){
       description:(w.querySelector('#sp_desc').value||'').trim()||null, condition:w.querySelector('#sp_cond').value,
       price_cents:Math.round((parseFloat(w.querySelector('#sp_price').value)||0)*100),
       qty:(it&&it.qty!=null?it.qty:1), photos:photos, local_pickup:false, shipping_offered:true,
-      shipping_cents:Math.round((parseFloat(w.querySelector('#sp_ship').value)||0)*100), status:(it?it.status:'active') };
+      shipping_cents:Math.round((parseFloat(w.querySelector('#sp_ship').value)||0)*100),
+      ship_days:Math.max(1,parseInt(w.querySelector('#sp_days').value,10)||3), status:(it?it.status:'active') };
     let error;
     if(it){ ({error}=await sb.from('listings').update(data).eq('id',it.id)); }
     else { ({error}=await sb.from('listings').insert(data)); }
@@ -975,12 +977,12 @@ function listingPayload(it,ov){ return Object.assign({
   title:it.title||'', description:it.description||'', condition:it.condition||'',
   price_cents:it.price_cents||0, qty:(it.qty!=null?it.qty:1), photos:it.photos||[],
   local_pickup:!!it.local_pickup, shipping_offered:!!it.shipping_offered,
-  shipping_cents:it.shipping_cents||0, status:it.status||'active' }, ov||{}); }
+  shipping_cents:it.shipping_cents||0, ship_days:(it.ship_days!=null?it.ship_days:3), status:it.status||'active' }, ov||{}); }
 async function loadMarket(){
   const cont=el('wMarket'); if(!cont)return;
   let items=null;
   if(staffSession()&&_staffPw){ const r=await sbRpc('staff_listings',{p_user:staffSession().username,p_pass:_staffPw}); if(r&&r.ok)items=r.listings; }
-  if(!items){ const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,status,seller_id&status=neq.hidden&order=created_at.desc&limit=200'); items=Array.isArray(r)?r:[]; }
+  if(!items){ const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,ship_days,status,seller_id&status=neq.hidden&order=created_at.desc&limit=200'); items=Array.isArray(r)?r:[]; }
   _mktItems=items;
   drawMarketControls();
   renderMarketGrid();
@@ -1027,6 +1029,7 @@ function mktCard(it,asBuyer){
   const sold=it.status==='sold'||(it.qty!=null&&it.qty<=0); const hidden=it.status==='hidden';
   const img=ph?('<img class="mktimg" loading="lazy" src="'+esc(ph)+'"/>'):'<div class="mktimg mktnoimg">No photo</div>';
   const tags=[]; if(it.shipping_offered)tags.push('Ships'+(it.shipping_cents?(' '+mUSD(it.shipping_cents)):''));
+  if(it.shipping_offered&&it.ship_days!=null)tags.push('Ships in '+it.ship_days+'d');
   const badge=sold?'<div class="mktflag sold">SOLD</div>':(hidden?'<div class="mktflag hid">HIDDEN</div>':'');
   const buy=(!sold&&!hidden)?('<button class="sm gold" onclick="event.stopPropagation();addToCart('+it.id+')">Add to cart</button>'):'';
   const staffCtl=(staffSession()&&!asBuyer)?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+
@@ -1045,7 +1048,7 @@ function mktCard(it,asBuyer){
 function openListing(id){ const it=(_mktItems||[]).find(x=>x.id===id); if(it)showListingDetail(it,{buyable:true}); }
 async function openPurchasedListing(id){
   if(!id){ toast('Listing details are no longer available.'); return; }
-  const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,status&id=eq.'+id+'&limit=1');
+  const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,ship_days,status&id=eq.'+id+'&limit=1');
   if(Array.isArray(r)&&r.length) showListingDetail(r[0],{buyable:false});
   else toast('This listing is no longer available.');
 }
@@ -1055,7 +1058,7 @@ function showListingDetail(it,opts){
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
   const sold=it.status==='sold'||(it.qty!=null&&it.qty<=0);
   const gallery=(it.photos&&it.photos.length)?it.photos.map(p=>'<img class="mktdetimg" loading="lazy" src="'+esc(p)+'"/>').join(''):'<div class="mktimg mktnoimg" style="max-width:none">No photo</div>';
-  const ship=it.shipping_offered?('Ships'+(it.shipping_cents?(' for '+mUSD(it.shipping_cents)):'')+(it.local_pickup?' · or local pickup':'')):(it.local_pickup?'Local pickup only':'');
+  const ship=it.shipping_offered?('Ships'+(it.shipping_cents?(' for '+mUSD(it.shipping_cents)):'')+(it.ship_days!=null?(' · within '+it.ship_days+' day'+(it.ship_days==1?'':'s')+' of payment'):'')):(it.local_pickup?'Local pickup only':'');
   const action=(opts.buyable&&!sold)
     ? '<button class="gold" id="md_add" style="flex:1">Add to cart</button>'
     : '<button class="ghost" style="flex:1" disabled>'+(sold?'Sold':'Not for sale')+'</button>';
@@ -1085,7 +1088,8 @@ async function openListingEdit(id){
     '<label class="fld" style="margin:0"><span>Condition</span><select id="lp_cond">'+condOpts+'</select></label></div>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>Quantity</span><input id="lp_qty" type="number" inputmode="numeric" value="'+(it&&it.qty!=null?it.qty:1)+'"/></label>'+
     '<label class="fld" style="margin:0"><span>Shipping cost (USD)</span><input id="lp_ship" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.shipping_cents||0)/100):'')+'"/></label></div>'+
-    '<div class="muted" style="margin:2px 0 6px">All items ship to the buyer. Set the shipping cost above.</div>'+
+    '<label class="fld"><span>Ship within (days after payment)</span><input id="lp_days" type="number" inputmode="numeric" value="'+(it&&it.ship_days!=null?it.ship_days:3)+'"/></label>'+
+    '<div class="muted" style="margin:2px 0 6px">All items ship to the buyer. Set the shipping cost and how soon you’ll ship.</div>'+
     '<div class="fld"><span>Photos</span><div id="lp_thumbs" class="lpthumbs"></div><button class="ghost" id="lp_addphoto" style="margin-top:6px">📷 Add photo</button></div>'+
     '<div class="row" style="margin-top:10px"><button class="gold" id="lp_save" style="flex:1">Save listing</button><button class="ghost" id="lp_x">Cancel</button></div></div>';
   w.querySelector('#lp_x').onclick=close; drawPhotos();
@@ -1100,7 +1104,8 @@ async function openListingEdit(id){
     const data={title:title, description:(w.querySelector('#lp_desc').value||'').trim(), condition:w.querySelector('#lp_cond').value,
       price_cents:price_cents, qty:qty, photos:photos,
       local_pickup:false, shipping_offered:true,
-      shipping_cents:ship_cents, status:(it?it.status:'active')};
+      shipping_cents:ship_cents, ship_days:Math.max(1,parseInt(w.querySelector('#lp_days').value,10)||3),
+      status:(it?it.status:'active')};
     const r=await staffDo('listing_save',{p_id:(id!=null?id:null),p_data:data},'Listing saved.');
     if(r){ close(); loadMarket(); }
   };
