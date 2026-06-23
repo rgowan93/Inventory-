@@ -18,7 +18,10 @@ self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (_) { d = { title: 'House of Cards', body: (e.data && e.data.text()) || '' }; }
   e.waitUntil(self.registration.showNotification(d.title || 'House of Cards', {
-    body: d.body || '', icon: 'logo.png', badge: 'logo.png', data: { url: d.url || './' }
+    body: d.body || '', icon: 'logo.png', badge: 'logo.png',
+    // stays on screen until the user taps/dismisses it — even if the app is open & focused
+    requireInteraction: true, renotify: true, tag: 'hoc-' + Date.now(),
+    data: { url: d.url || './' }
   }));
 });
 self.addEventListener('notificationclick', (e) => {
@@ -26,7 +29,13 @@ self.addEventListener('notificationclick', (e) => {
   const url = (e.notification.data && e.notification.data.url) || './';
   e.waitUntil((async () => {
     const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const c of all) { if ('focus' in c) { try { await c.focus(); } catch (_) {} return; } }
+    for (const c of all) {
+      if ('focus' in c) {
+        try { await c.focus(); } catch (_) {}
+        try { c.postMessage({ type: 'hoc-navigate', url: url }); } catch (_) {}
+        return;
+      }
+    }
     if (clients.openWindow) return clients.openWindow(url);
   })());
 });

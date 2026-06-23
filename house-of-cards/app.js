@@ -701,12 +701,15 @@ async function loadSellerStatus(cont){
         ? '<div style="margin:4px 0">💳 Payouts active ✅</div>'
         : '<div class="muted" style="margin:4px 0">Set up payouts to start selling.</div><div class="row" style="gap:6px"><button class="gold" id="sl_onboard" style="flex:1">Set up payouts (Stripe)</button><button class="ghost" id="sl_refresh">Refresh</button></div>';
       cont.innerHTML='<div>✅ Approved seller'+(data.verified?' · ✔ verified':'')+'</div>'+payout+
-        '<div class="muted" style="margin:6px 0 8px">A flat 5% fee applies when an item sells.</div>'+
-        '<div class="row" style="gap:6px"><button class="'+(data.payouts_enabled?'gold':'ghost')+'" id="my_listings" style="flex:1">My listings</button><button class="ghost" id="my_sales" style="flex:1">My sales</button></div>';
+        '<div class="muted" style="margin:6px 0 8px">A flat 10% fee applies when an item sells (you keep 90% of the item price + the full shipping fee).</div>'+
+        (data.payouts_enabled?'<div id="sl_balance" class="muted" style="margin:6px 0 8px">Loading balance…</div>':'')+
+        '<div class="row" style="gap:6px;flex-wrap:wrap"><button class="'+(data.payouts_enabled?'gold':'ghost')+'" id="my_listings" style="flex:1">My listings</button><button class="ghost" id="my_sales" style="flex:1">My sales</button><button class="ghost" id="my_offers" style="flex:1">Offers</button></div>';
       const mb=cont.querySelector('#my_listings'); if(mb)mb.onclick=openSellerListings;
       const sb2=cont.querySelector('#my_sales'); if(sb2)sb2.onclick=openSellerSales;
+      const ofb=cont.querySelector('#my_offers'); if(ofb)ofb.onclick=openSellerOffers;
       const ob=cont.querySelector('#sl_onboard'); if(ob)ob.onclick=sellerOnboard;
       const rb=cont.querySelector('#sl_refresh'); if(rb)rb.onclick=()=>sellerRefreshPayouts(cont);
+      if(data.payouts_enabled)loadSellerBalance(cont.querySelector('#sl_balance'));
     }
     else if(data.status==='banned') cont.innerHTML='<div class="muted">Selling is disabled for this account.</div>';
     else cont.innerHTML='';
@@ -729,6 +732,19 @@ async function sellerOnboard(){
   let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
   if(out&&out.ok&&out.url){ location.href=out.url; }   // same-tab redirect (popups get blocked on mobile)
   else toast((out&&out.error)||'Could not start Stripe setup.');
+}
+async function loadSellerBalance(box){
+  if(!box)return;
+  const {data,error}=await sb.functions.invoke('seller-balance',{body:{}});
+  let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+  if(!out||out.ok!==true||!out.connected){ box.innerHTML=''; return; }
+  const tx=(out.recent||[]).slice(0,6).map(t=>{ const amt=(t.net!=null?t.net:t.amount)||0; const sign=amt<0?'-':'+';
+      return '<div class="ckrow"><span>'+esc((t.description||t.type||'transaction'))+' · '+new Date((t.created||0)*1000).toLocaleDateString()+'</span><span>'+sign+mUSD(Math.abs(amt))+'</span></div>'; }).join('');
+  box.innerHTML='<div style="background:#0e0f17;border:1px solid #2c2f42;border-radius:10px;padding:10px;margin-top:4px">'+
+    '<div class="ckrow"><span><b>💳 Available</b></span><span><b>'+mUSD(out.available_cents||0)+'</b></span></div>'+
+    '<div class="ckrow"><span>Pending</span><span>'+mUSD(out.pending_cents||0)+'</span></div>'+
+    (tx?('<div class="muted" style="margin:6px 0 2px;font-size:11px">Recent transactions</div>'+tx):'')+
+    '</div>';
 }
 async function sellerRefreshPayouts(cont){
   const {data,error}=await sb.functions.invoke('connect-onboard',{body:{action:'refresh'}});
@@ -780,10 +796,11 @@ function openSellerListingEdit(it){
       qty:(it&&it.qty!=null?it.qty:1), photos:photos, local_pickup:false, shipping_offered:true,
       shipping_cents:Math.round((parseFloat(w.querySelector('#sp_ship').value)||0)*100),
       ship_days:Math.max(1,parseInt(w.querySelector('#sp_days').value,10)||3), status:(it?it.status:'active') };
-    let error;
+    let error, newId=null;
     if(it){ ({error}=await sb.from('listings').update(data).eq('id',it.id)); }
-    else { ({error}=await sb.from('listings').insert(data)); }
+    else { const ins=await sb.from('listings').insert(data).select('id').maybeSingle(); error=ins.error; newId=ins.data&&ins.data.id; }
     if(error){ toast('Could not save: '+(error.message||'error')); return; }
+    if(newId){ try{ sbFn('listing-notify',{listing_id:newId}); }catch(e){} }
     toast('Listing saved.'); close(); if(_sellerDraw)_sellerDraw(); loadMarket();
   };
   setTimeout(()=>{ const t=w.querySelector('#sp_title'); if(t)t.focus(); },60);
@@ -809,7 +826,7 @@ async function loadWallCustomer(){
 }
 let _mySeller=null;
 async function loadMySeller(){ _mySeller=null; if(!wallCustomer)return; try{ const {data}=await sb.from('sellers').select('status,verified,payouts_enabled').eq('id',wallCustomer.id).maybeSingle(); _mySeller=data||null; }catch(e){} }
-function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); render(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
+function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); await loadWatchlist(); render(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
 let _sellerRatings={};
 async function loadSellerRatings(){ try{ const r=await sbRpc('seller_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.seller_id]=x; }); _sellerRatings=m; if(el('wMarket'))renderMarketGrid(); } }catch(e){} }
 function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
@@ -827,6 +844,7 @@ async function customerSignUp(p){
   const ins=await sb.from('customers').insert({id:data.user.id,name:name,email:p.email,phone:p.phone,username:p.username,first_name:p.first,last_name:p.last});
   if(ins.error) return {error:/duplicate|unique/i.test(ins.error.message)?'That username or phone is already in use.':ins.error.message};
   wallCustomer={id:data.user.id,name:name,email:p.email,phone:p.phone,username:p.username};
+  try{ sb.functions.invoke('staff-ping',{body:{event:'signup'}}); }catch(e){}   // let staff know a new member joined
   return {ok:true};
 }
 async function customerSignIn(email,pass){
@@ -1086,6 +1104,82 @@ async function staffCaseStatus(orderId,status){
   const r=await sbFn('staff-msg',{p_user:cr.p_user,p_pass:cr.p_pass,order_id:orderId,status:status});
   if(r&&r.ok){ toast('Case '+status+'.'); openStaffCases(); } else toast((r&&r.error)||'Could not update.');
 }
+/* ===== Watchlist, offers, saved searches & notification deep-links ===== */
+let _watchIds=new Set();
+async function loadWatchlist(){ _watchIds=new Set(); if(!wallCustomer)return; try{ const {data}=await sb.from('watchlist').select('listing_id'); (data||[]).forEach(r=>_watchIds.add(r.listing_id)); }catch(e){} }
+function isWatching(id){ return _watchIds.has(id); }
+async function toggleWatch(id){
+  if(!wallCustomer){ openLogin(); return; }
+  const {data,error}=await sb.functions.invoke('watch-toggle',{body:{listing_id:id}});
+  let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+  if(!out||out.ok!==true){ toast((out&&out.error)||'Could not update watchlist.'); return; }
+  if(out.watching){ _watchIds.add(id); toast('Added to your watchlist ♥'); } else { _watchIds.delete(id); toast('Removed from watchlist'); }
+  renderMarketGrid();
+}
+function openOffer(id,priceCents){
+  if(!wallCustomer){ openLogin(); return; }
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:380px;width:100%;position:relative"><button class="modalx" id="of_x">✕</button><h3 style="color:var(--gold)">Make an offer</h3>'+
+    '<div class="muted" style="margin-bottom:6px">Asking price: '+mUSD(priceCents)+'</div>'+
+    '<label class="fld"><span>Your offer (USD)</span><input id="of_amt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"/></label>'+
+    '<div class="row" style="margin-top:6px"><button class="gold" id="of_go" style="flex:1">Send offer</button></div></div>';
+  w.querySelector('#of_x').onclick=close;
+  w.querySelector('#of_go').onclick=async()=>{
+    const cents=Math.round((parseFloat(w.querySelector('#of_amt').value)||0)*100); if(cents<=0){ toast('Enter an amount.'); return; }
+    const {data,error}=await sb.functions.invoke('offer-make',{body:{listing_id:id,amount_cents:cents}});
+    let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+    if(!out||out.ok!==true){ toast((out&&out.error)||'Could not send offer.'); return; }
+    close(); toast('Offer sent! The seller will be notified. 💰');
+  };
+}
+async function openSellerOffers(){
+  if(!wallCustomer)return;
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="so_x">✕</button><h3 style="color:var(--gold)">Offers on your items</h3><div id="so_list"><div class="muted">Loading…</div></div></div>';
+  w.querySelector('#so_x').onclick=close;
+  async function draw(){
+    const {data}=await sb.from('offers').select('id,amount_cents,status,created_at,listing_id,listings(title)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(50);
+    const list=w.querySelector('#so_list'); const rows=data||[];
+    if(!rows.length){ list.innerHTML='<div class="muted" style="text-align:center">No offers yet.</div>'; return; }
+    list.innerHTML=rows.map(o=>{ const t=(o.listings&&o.listings.title)||('Listing #'+o.listing_id);
+      const act=o.status==='open'?('<div class="row" style="gap:6px;margin-top:6px"><button class="sm gold" onclick="respondOffer('+o.id+',\'accepted\')">Accept</button><button class="sm ghost" onclick="respondOffer('+o.id+',\'declined\')">Decline</button></div>'):'';
+      return '<div class="ordcard"><div class="ordhead"><b>'+mUSD(o.amount_cents)+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div><div class="muted">'+esc(t)+' · '+new Date(o.created_at).toLocaleDateString()+'</div>'+act+'</div>'; }).join('');
+  }
+  w._draw=draw; draw();
+}
+async function respondOffer(offerId,action){
+  const {data,error}=await sb.functions.invoke('offer-respond',{body:{offer_id:offerId,action:action}});
+  let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+  if(!out||out.ok!==true){ toast((out&&out.error)||'Could not respond.'); return; }
+  toast('Offer '+action+'.'); openSellerOffers();
+}
+async function saveSearchAlert(){
+  if(!wallCustomer){ openLogin(); return; }
+  const term=(_mktSearch||'').trim(); if(!term){ toast('Type a search first.'); return; }
+  const {error}=await sb.from('saved_searches').insert({customer_id:wallCustomer.id,term:term});
+  if(error&&!/duplicate|unique/i.test(error.message||'')){ toast('Could not save alert.'); return; }
+  toast('🔔 We’ll alert you when “'+term+'” is listed.');
+}
+/* deep-link router: notifications & ?#hash open the relevant area */
+function hocRoute(raw){
+  let h=''; try{ h=(raw?new URL(raw,location.href).hash:location.hash)||''; }catch(e){ h=location.hash||''; }
+  h=h.replace(/^#/,''); if(!h)return;
+  const staff=staffSession();
+  if(h==='orders'){ if(staff)setWallTab('orders'); else if(wallCustomer)openAccount(); }
+  else if(h==='sales'){ if(wallCustomer)openSellerSales(); }
+  else if(h==='cases'){ if(staff)openStaffCases(); }
+  else if(h==='members'){ if(staff)setWallTab('members'); }
+  else if(h==='market'){ setWallTab('market'); }
+  else if(h==='shows'||h==='home'){ setWallTab('home'); }
+  try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+}
+(function(){
+  try{ if('serviceWorker' in navigator){ navigator.serviceWorker.addEventListener('message',e=>{ if(e&&e.data&&e.data.type==='hoc-navigate')setTimeout(()=>hocRoute(e.data.url),60); }); } }catch(e){}
+  try{ window.addEventListener('hashchange',()=>hocRoute()); }catch(e){}
+  try{ window.addEventListener('load',()=>{ if(location.hash)setTimeout(()=>hocRoute(),1000); }); }catch(e){}
+})();
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];
 let _mktItems=[]; let _mktSub='active', _mktSort='new', _mktSearch='', _mktPortal='selling';
@@ -1122,9 +1216,16 @@ function drawMarketControls(){
   c.innerHTML=portalRow+'<div class="mktbar"><input id="mktSearch" class="mktsearch" placeholder="Search cards…" value="'+esc(_mktSearch)+'"/>'+
     '<select id="mktSort" class="mktsort">'+['new:Newest','plow:Price ↑','phigh:Price ↓','name:Name A–Z'].map(o=>{const p=o.split(':');return '<option value="'+p[0]+'"'+(_mktSort===p[0]?' selected':'')+'>'+p[1]+'</option>';}).join('')+'</select></div>'+
     '<div class="mktsubs">'+subs.map(s=>'<button class="mktsub'+(_mktSub===s[0]?' on':'')+'" onclick="setMktSub(\''+s[0]+'\')">'+s[1]+'</button>').join('')+'</div>';
-  const si=el('mktSearch'); if(si)si.oninput=()=>{ _mktSearch=si.value; renderMarketGrid(); };
+  const si=el('mktSearch'); if(si)si.oninput=()=>{ _mktSearch=si.value; renderMarketGrid(); drawSearchAlert(); };
   const so=el('mktSort'); if(so)so.onchange=()=>{ _mktSort=so.value; renderMarketGrid(); };
+  drawSearchAlert();
   marketAddBtn();
+}
+function drawSearchAlert(){
+  let a=el('mktAlert');
+  if(!a){ const c=el('wMarketControls'); if(!c)return; a=document.createElement('div'); a.id='mktAlert'; a.style.margin='4px 0 8px'; c.appendChild(a); }
+  const term=(_mktSearch||'').trim();
+  a.innerHTML=(wallCustomer&&term)?('<button class="sm ghost" onclick="saveSearchAlert()">🔔 Alert me when “'+esc(term)+'” is listed</button>'):'';
 }
 function setMktSub(s){ _mktSub=s; drawMarketControls(); renderMarketGrid(); }
 function setMktPortal(p){ _mktPortal=p; if(p==='customer'&&_mktSub==='hidden')_mktSub='active'; drawMarketControls(); renderMarketGrid(); }
@@ -1149,6 +1250,13 @@ function mktCard(it,asBuyer){
   if(it.shipping_offered&&it.ship_days!=null)tags.push('Ships in '+it.ship_days+'d');
   const badge=sold?'<div class="mktflag sold">SOLD</div>':(hidden?'<div class="mktflag hid">HIDDEN</div>':'');
   const buy=(!sold&&!hidden)?('<button class="sm gold" onclick="event.stopPropagation();addToCart('+it.id+')">Add to cart</button>'):'';
+  // buyer-only extras: watch (♥) + make offer on third-party seller items
+  const ownSeller = wallCustomer && it.seller_id===wallCustomer.id;
+  const watch=(asBuyer&&!ownSeller&&!sold&&!hidden)?('<button class="sm ghost" onclick="event.stopPropagation();toggleWatch('+it.id+')">'+(isWatching(it.id)?'♥ Watching':'♡ Watch')+'</button>'):'';
+  const offer=(asBuyer&&it.seller_id&&!ownSeller&&!sold&&!hidden)?('<button class="sm ghost" onclick="event.stopPropagation();openOffer('+it.id+','+(it.price_cents||0)+')">💰 Offer</button>'):'';
+  const buyerCtl=(buy||watch||offer)?('<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+buy+watch+offer+'</div>'):'';
+  // seller editing their own listing straight from the grid
+  const sellerCtl=(ownSeller&&!staffSession())?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="sm ghost" onclick="event.stopPropagation();sellerEditListing('+it.id+')">✏️ Edit price / details</button></div>'):'';
   const staffCtl=(staffSession()&&!asBuyer)?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+
     '<button class="sm ghost" onclick="event.stopPropagation();openListingEdit('+it.id+')">Edit</button>'+
     '<button class="sm ghost" onclick="event.stopPropagation();toggleListingHidden('+it.id+')">'+(hidden?'Unhide':'Hide')+'</button>'+
@@ -1160,7 +1268,7 @@ function mktCard(it,asBuyer){
     (it.condition?('<div class="mktcond">'+esc(it.condition)+'</div>'):'')+
     (it.seller_id?('<div class="mktcond">🧑 Seller'+(ratingStr(it.seller_id)?(' · '+ratingStr(it.seller_id)):'')+'</div>'):'')+
     (tags.length?('<div class="mkttags">'+tags.map(t=>'<span class="mkttag">'+esc(t)+'</span>').join('')+'</div>'):'')+
-    (buy?('<div style="margin-top:8px">'+buy+'</div>'):'')+staffCtl+'</div>';
+    buyerCtl+sellerCtl+staffCtl+'</div>';
 }
 function openListing(id){ const it=(_mktItems||[]).find(x=>x.id===id); if(it)showListingDetail(it,{buyable:true}); }
 async function openPurchasedListing(id){
@@ -1179,15 +1287,22 @@ function showListingDetail(it,opts){
   const action=(opts.buyable&&!sold)
     ? '<button class="gold" id="md_add" style="flex:1">Add to cart</button>'
     : '<button class="ghost" style="flex:1" disabled>'+(sold?'Sold':'Not for sale')+'</button>';
+  const ownSeller = wallCustomer && it.seller_id===wallCustomer.id;
+  const extra=(opts.buyable&&!sold&&!ownSeller)?('<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+
+    '<button class="ghost sm" id="md_watch" style="flex:1">'+(isWatching(it.id)?'♥ Watching':'♡ Watch')+'</button>'+
+    (it.seller_id?'<button class="ghost sm" id="md_offer" style="flex:1">💰 Make offer</button>':'')+'</div>'):'';
   w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto"><div class="mktdetgal">'+gallery+'</div>'+
     '<h3 style="color:var(--gold);margin:10px 0 2px">'+esc(it.title)+'</h3>'+
     '<div class="mktprice" style="font-size:22px">'+mUSD(it.price_cents)+'</div>'+
     (it.condition?('<div class="mktcond">Condition: '+esc(it.condition)+'</div>'):'')+
     (ship?('<div class="muted" style="margin:6px 0">'+esc(ship)+'</div>'):'')+
     (it.description?('<div style="margin:8px 0;white-space:pre-wrap">'+esc(it.description)+'</div>'):'')+
+    extra+
     '<div class="row" style="margin-top:10px">'+action+'<button class="ghost" id="md_x">Close</button></div></div>';
   w.querySelector('#md_x').onclick=close;
   const add=w.querySelector('#md_add'); if(add)add.onclick=()=>{ addToCart(it.id); close(); };
+  const wb=w.querySelector('#md_watch'); if(wb)wb.onclick=async()=>{ await toggleWatch(it.id); wb.textContent=isWatching(it.id)?'♥ Watching':'♡ Watch'; };
+  const ob=w.querySelector('#md_offer'); if(ob)ob.onclick=()=>{ openOffer(it.id,it.price_cents||0); };
 }
 async function openListingEdit(id){
   if(!staffSession()){ openStaffLogin(); return; }
@@ -1224,7 +1339,7 @@ async function openListingEdit(id){
       shipping_cents:ship_cents, ship_days:Math.max(1,parseInt(w.querySelector('#lp_days').value,10)||3),
       status:(it?it.status:'active')};
     const r=await staffDo('listing_save',{p_id:(id!=null?id:null),p_data:data},'Listing saved.');
-    if(r){ close(); loadMarket(); }
+    if(r){ if(id==null&&typeof r==='number'){ try{ sbFn('listing-notify',{listing_id:r}); }catch(e){} } close(); loadMarket(); }
   };
   setTimeout(()=>{ const t=w.querySelector('#lp_title'); if(t)t.focus(); },60);
 }
