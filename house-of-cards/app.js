@@ -750,6 +750,20 @@ async function loadSellerBalance(box){
     (tx?('<div class="muted" style="margin:6px 0 2px;font-size:11px">Recent transactions</div>'+tx):'')+
     '</div>';
 }
+async function loadStaffBalance(box){
+  if(!box)return; const s=staffSession(); if(!s){ box.textContent='Staff only.'; return; }
+  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p){ box.textContent='Enter your password to view.'; return; } _staffPw=hashPass(p); }
+  box.textContent='Loading…';
+  const out=await sbFn('staff-balance',{p_user:s.username,p_pass:_staffPw});
+  if(!out||out.ok!==true){ _staffPw=out?_staffPw:null; box.textContent=(out&&out.error)||'Could not load balance.'; return; }
+  const tx=(out.recent||[]).map(t=>'<div class="ckrow"><span>'+(t.created?new Date(t.created).toLocaleDateString():'')+(t.note?(' · '+esc(t.note)):'')+(t.status&&t.status!=='COMPLETED'?(' · '+esc(t.status)):'')+'</span><span>'+mUSD(t.amount)+(t.refunded?(' (−'+mUSD(t.refunded)+')'):'')+'</span></div>').join('');
+  box.innerHTML='<div style="background:#0e0f17;border:1px solid #2c2f42;border-radius:10px;padding:10px">'+
+    '<div class="ckrow"><span><b>Collected (recent)</b></span><span><b>'+mUSD(out.gross_cents||0)+'</b></span></div>'+
+    '<div class="ckrow"><span>Refunded</span><span>−'+mUSD(out.refunded_cents||0)+'</span></div>'+
+    '<div class="ckrow cktotal"><span>Net</span><span>'+mUSD(out.net_cents||0)+'</span></div>'+
+    (tx?('<div class="muted" style="margin:6px 0 2px;font-size:11px">Recent Square transactions ('+esc(out.env||'')+')</div>'+tx):'')+
+    '<div class="muted" style="font-size:11px;margin-top:6px">Square sales (House of Cards). Seller payouts go to each seller’s own Stripe account.</div></div>';
+}
 async function sellerRefreshPayouts(cont){
   const {data,error}=await sb.functions.invoke('connect-onboard',{body:{action:'refresh'}});
   let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
@@ -764,7 +778,7 @@ async function openSellerListings(){
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
   async function draw(){
     const {data}=await sb.from('listings').select('id,title,price_cents,status,condition,description,shipping_cents,ship_days,photos,qty,promoted').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false});
-    _sellerListings=data||[];
+    _sellerListings=(data||[]).filter(x=>x.status!=='sold');   // sold items move to “My sales”
     await loadSellerStats();
     const rows=_sellerListings.length?_sellerListings.map(it=>{ const s=_sellerStats[it.id]||{}; const stat='👀 '+(s.watchers||0)+' · 💰 '+(s.offers||0)+(it.promoted?' · ⭐':'');
       const promo=it.promoted?'':'<button class="sm gold" onclick="openPromote('+it.id+')">⭐ $5</button>';
@@ -789,9 +803,10 @@ function openSellerListingEdit(it){
     '<label class="fld"><span>Title</span><input id="sp_title" value="'+esc(it?it.title:'')+'"/></label>'+
     '<label class="fld"><span>Description</span><textarea id="sp_desc" rows="3">'+esc(it?(it.description||''):'')+'</textarea></label>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>Price (USD)</span><input id="sp_price" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.price_cents||0)/100):'')+'"/></label>'+
-    '<label class="fld" style="margin:0"><span>Condition</span><select id="sp_cond">'+condOpts+'</select></label></div>'+
-    '<div class="grid2"><label class="fld" style="margin:0"><span>Shipping cost (USD)</span><input id="sp_ship" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.shipping_cents||0)/100):'')+'"/></label>'+
+    '<label class="fld" style="margin:0"><span>Quantity for sale</span><input id="sp_qty" type="number" inputmode="numeric" value="'+(it&&it.qty!=null?it.qty:1)+'"/></label></div>'+
+    '<div class="grid2"><label class="fld" style="margin:0"><span>Condition</span><select id="sp_cond">'+condOpts+'</select></label>'+
     '<label class="fld" style="margin:0"><span>Ship within (days)</span><input id="sp_days" type="number" inputmode="numeric" value="'+(it&&it.ship_days!=null?it.ship_days:3)+'"/></label></div>'+
+    '<label class="fld"><span>Shipping cost (USD)</span><input id="sp_ship" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.shipping_cents||0)/100):'')+'"/></label>'+
     '<div class="muted" style="margin:2px 0 6px">Items ship to the buyer by your promised deadline. A flat 10% platform fee applies when an item sells (you keep 90% of the item price + the full shipping fee).</div>'+
     '<div class="fld"><span>Photos</span><div id="sp_thumbs" class="lpthumbs"></div><button class="ghost" id="sp_addphoto" style="margin-top:6px">📷 Add photos</button></div>'+
     '<div class="row" style="margin-top:10px"><button class="gold" id="sp_save" style="flex:1">Save listing</button></div></div>';
@@ -802,7 +817,7 @@ function openSellerListingEdit(it){
     const data={ seller_id:wallCustomer.id, created_by:(wallCustomer.username||wallCustomer.name||''), title:title,
       description:(w.querySelector('#sp_desc').value||'').trim()||null, condition:w.querySelector('#sp_cond').value,
       price_cents:Math.round((parseFloat(w.querySelector('#sp_price').value)||0)*100),
-      qty:(it&&it.qty!=null?it.qty:1), photos:photos, local_pickup:false, shipping_offered:true,
+      qty:Math.max(0,parseInt(w.querySelector('#sp_qty').value,10)||1), photos:photos, local_pickup:false, shipping_offered:true,
       shipping_cents:Math.round((parseFloat(w.querySelector('#sp_ship').value)||0)*100),
       ship_days:Math.max(1,parseInt(w.querySelector('#sp_days').value,10)||3), status:(it?it.status:'active') };
     let error, newId=null;
@@ -835,7 +850,7 @@ async function loadWallCustomer(){
 }
 let _mySeller=null;
 async function loadMySeller(){ _mySeller=null; if(!wallCustomer)return; try{ const {data}=await sb.from('sellers').select('status,verified,payouts_enabled').eq('id',wallCustomer.id).maybeSingle(); _mySeller=data||null; }catch(e){} }
-function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); await loadWatchlist(); render(); loadNotifBadge(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
+function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); await loadWatchlist(); render(); loadNotifBadge(); syncAcceptedOffers(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
 let _sellerRatings={};
 async function loadSellerRatings(){ try{ const r=await sbRpc('seller_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.seller_id]=x; }); _sellerRatings=m; if(el('wMarket'))renderMarketGrid(); } }catch(e){} }
 function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; if(!r.cnt)return '100% · New seller'; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
@@ -931,25 +946,28 @@ function openCustomerLogin(){
 }
 function openCustomerAccount(){
   const c=wallCustomer; if(!c){ openCustomerLogin(); return; }
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="ca_x">✕</button><h3 style="color:var(--gold)">Your account</h3>'+
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+
+    '<div class="pagehead"><h3 style="color:var(--gold);margin:0">Your account</h3><button class="pageclose" id="ca_x">✕ Close</button></div>'+
     '<div class="memrow"><div class="memmain"><div class="memname">'+esc(c.name||'(no name)')+(c.username?(' <span class="membadge">@'+esc(c.username)+'</span>'):'')+'</div>'+(c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+'</div></div>'+
     (c.phone?('<div class="muted" style="margin:8px 2px">📱 '+esc(c.phone)+'</div>'):'')+
     '<div id="ca_buyerrating" class="muted" style="margin:2px 2px 8px"></div>'+
-    '<div class="row" style="margin:8px 0"><button class="ghost" id="cu_notif" style="flex:1">🔔 Enable order notifications</button></div>'+
+    '<div class="row" style="gap:6px;margin:8px 0"><button class="ghost" id="cu_notif" style="flex:1">🔔 Enable notifications</button><button class="ghost" id="cu_test">Test</button></div>'+
     '<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px"><button class="ghost" id="ca_watch" style="flex:1">♥ Watchlist</button><button class="ghost" id="ca_offers" style="flex:1">💰 My offers</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Selling</div><div id="ca_seller"><div class="muted">…</div></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">My orders</div><div id="ca_orders"><div class="muted">Loading…</div></div>'+
     '<div class="row" style="margin-top:10px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button></div></div>';
   w.querySelector('#ca_x').onclick=close;
   w.querySelector('#cu_notif').onclick=()=>enableNotifications('customer');
+  w.querySelector('#cu_test').onclick=()=>pushTest();
   w.querySelector('#ca_watch').onclick=openWatchlist;
   w.querySelector('#ca_offers').onclick=openMyOffers;
   w.querySelector('#ca_out').onclick=()=>{ close(); customerSignOut(); };
   loadSellerStatus(w.querySelector('#ca_seller'));
   loadMyOrders(w.querySelector('#ca_orders'));
   loadBuyerRatings().then(()=>{ const br=w.querySelector('#ca_buyerrating'); if(br){ const s=buyerRatingStr(c.id); br.textContent=s?('Your buyer rating: '+s):'Buyer rating: 100% · New buyer'; } });
+  countPendingOffers().then(cnt=>{ const ob=w.querySelector('#ca_offers'); if(ob&&cnt.buyer)ob.textContent='💰 My offers ('+cnt.buyer+')'; const sb2=w.querySelector('#my_offers'); if(sb2&&cnt.seller)sb2.textContent='Offers ('+cnt.seller+')'; });
 }
 async function loadMyOrders(cont){
   if(!cont||!cloudOn())return;
@@ -996,25 +1014,29 @@ async function openSellerSales(){
   w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="ss_x">✕</button><h3 style="color:var(--gold)">My sales</h3><div id="ss_list"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#ss_x').onclick=close;
   await loadBuyerRatings();
-  const {data}=await sb.from('orders').select('id,status,total_cents,created_at,customer_id,customer_name,ship_name,ship_address1,ship_city,ship_state,ship_zip,ship_phone,tracking_number,ship_by,refunded_cents,order_items(title,price_cents)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(50);
+  const {data}=await sb.from('orders').select('id,status,total_cents,created_at,customer_id,customer_name,ship_name,ship_address1,ship_city,ship_state,ship_zip,ship_phone,tracking_number,ship_by,refunded_cents,order_items(title,price_cents,qty,listing_id)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(50);
   const list=w.querySelector('#ss_list'); const rows=data||[];
   if(!rows.length){ list.innerHTML='<div class="muted" style="text-align:center">No sales yet.</div>'; return; }
-  list.innerHTML=rows.map(o=>{ const items=(o.order_items||[]).map(i=>esc(i.title)).join(', ');
+  list.innerHTML=rows.map(o=>{ const items=(o.order_items||[]).map(i=>esc(i.title)+((i.qty&&i.qty>1)?(' ×'+i.qty):'')).join(', ');
+    const lid=(o.order_items&&o.order_items[0]&&o.order_items[0].listing_id)||0;
     const addr=[o.ship_name,o.ship_address1,o.ship_city,o.ship_state,o.ship_zip].filter(Boolean).join(', ');
     const deadline=(o.ship_by&&o.status==='paid')?('<div class="muted" style="margin-top:4px">⏱️ Ship by '+new Date(o.ship_by).toLocaleDateString()+'</div>'):'';
     const refunded=(o.refunded_cents>0)?('<div class="muted" style="margin-top:4px">↩️ Refunded '+mUSD(o.refunded_cents)+'</div>'):'';
     const fb=(o.status==='complete')?('<button class="sm gold" onclick="openFeedback('+o.id+',\'seller_to_buyer\','+(o.customer_id?('\''+o.customer_id+'\''):'null')+')">★ Rate buyer</button>'):'';
     const msg='<button class="sm ghost" onclick="openThread('+o.id+',\'seller\')">💬 Message buyer</button>';
-    const ship=(o.status!=='complete'&&o.status!=='canceled'&&o.status!=='refunded')?('<button class="sm ghost" onclick="sellerShip('+o.id+')">Add tracking / Shipped</button><button class="sm gold" onclick="sellerCompleteSale('+o.id+')">Mark complete</button>'):'';
+    const active=(o.status!=='complete'&&o.status!=='canceled'&&o.status!=='refunded');
+    const ship=active?('<button class="sm ghost" onclick="sellerShip('+o.id+')">'+(o.tracking_number?'Update tracking':'Add tracking / Shipped')+'</button>'+(o.tracking_number?('<button class="sm gold" onclick="sellerCompleteSale('+o.id+')">Mark complete</button>'):'')):'';
+    const note=active&&!o.tracking_number?'<div class="muted" style="font-size:11px;margin-top:4px;color:#ffcb2d">Add a tracking number to enable “Mark complete”.</div>':'';
+    const relist=(lid&&(o.status==='complete'||o.status==='refunded'))?('<button class="sm ghost" onclick="sellerRelist('+lid+')">↻ Relist</button>'):'';
     const ref=(o.status!=='refunded'&&(o.refunded_cents||0)<(o.total_cents||0))?('<button class="sm ghost" onclick="openRefund('+o.id+',\'seller\','+((o.total_cents||0)-(o.refunded_cents||0))+')">Refund buyer</button>'):'';
     return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
       '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+(o.customer_id?(' · 🧑 '+esc(buyerRatingStr(o.customer_id))):'')+'</div>'+
       deadline+refunded+
       (addr?('<div class="muted" style="margin-top:4px">📦 '+esc(addr)+(o.ship_phone?(' · '+esc(o.ship_phone)):'')+'</div>'):'')+
       (items?('<div style="font-size:13px;margin-top:4px">'+items+'</div>'):'')+
-      (o.tracking_number?('<div class="muted">Tracking: '+esc(o.tracking_number)+'</div>'):'')+
+      (o.tracking_number?('<div class="muted">Tracking: '+esc(o.tracking_number)+'</div>'):'')+note+
       '<div class="muted" style="font-size:11px;margin-top:4px">You keep 90% of the item price + the full shipping fee (10% platform fee).</div>'+
-      '<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+ship+ref+msg+fb+'</div></div>'; }).join('');
+      '<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+ship+ref+msg+fb+relist+'</div></div>'; }).join('');
 }
 async function sellerFulfill(id,status,tracking){
   const {data,error}=await sb.functions.invoke('seller-fulfill',{body:{id:id,status:status,tracking:tracking||''}});
@@ -1186,7 +1208,7 @@ function offerCounter(offerId,suggest){
   offerAction({action:'counter',offer_id:offerId,amount_cents:cents}).then(o=>{ if(o){ toast('Counter sent.'); document.querySelectorAll('.offersmodal').forEach(m=>m.remove()); (_offersView==='seller'?openSellerOffers:openMyOffers)(); } });
 }
 function offerRespond(offerId,action){
-  offerAction({action:action,offer_id:offerId}).then(o=>{ if(o){ toast('Offer '+action+'ed.'); document.querySelectorAll('.offersmodal').forEach(m=>m.remove()); (_offersView==='seller'?openSellerOffers:openMyOffers)(); } });
+  offerAction({action:action,offer_id:offerId}).then(o=>{ if(o){ toast('Offer '+action+'ed.'); document.querySelectorAll('.offersmodal').forEach(m=>m.remove()); if(action==='accept')syncAcceptedOffers(); (_offersView==='seller'?openSellerOffers:openMyOffers)(); } });
 }
 /* group offers into threads (latest per listing+buyer) */
 function _offerThreads(rows){
@@ -1195,6 +1217,13 @@ function _offerThreads(rows){
   return Object.values(map).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 }
 function _offerExpired(o){ return o.status==='open' && o.expires_at && new Date(o.expires_at).getTime()<Date.now(); }
+function _countActionable(rows,viewer){ const now=Date.now(); let n=0; _offerThreads(rows).forEach(o=>{ if(o.status==='open'&&o.from_role!==viewer&&!(o.expires_at&&new Date(o.expires_at).getTime()<now))n++; }); return n; }
+async function countPendingOffers(){ const res={buyer:0,seller:0}; if(!wallCustomer)return res;
+  try{ const {data:bd}=await sb.from('offers').select('listing_id,buyer_id,from_role,status,expires_at,created_at').eq('buyer_id',wallCustomer.id);
+    const {data:sd}=await sb.from('offers').select('listing_id,buyer_id,from_role,status,expires_at,created_at').eq('seller_id',wallCustomer.id);
+    res.buyer=_countActionable(bd||[],'buyer'); res.seller=_countActionable(sd||[],'seller'); }catch(e){}
+  return res;
+}
 function _offerLeft(o){ if(!o.expires_at)return ''; const ms=new Date(o.expires_at).getTime()-Date.now(); if(ms<=0)return 'expired'; const h=Math.floor(ms/3600000); return h>=1?(h+'h left'):(Math.max(1,Math.floor(ms/60000))+'m left'); }
 function offerThreadCard(o,viewer){
   const title=(o.listings&&o.listings.title)||('Listing #'+o.listing_id);
@@ -1248,9 +1277,30 @@ async function buyNowOffer(listingId,acceptedCents){
   const it=Array.isArray(r)&&r[0]; if(!it||it.status!=='active'){ toast('That item isn’t available.'); return; }
   const price=(acceptedCents!=null?acceptedCents:it.price_cents);   // your private accepted price (others still see the public price)
   const cart=cartGet(); const idx=cart.findIndex(x=>x.id===it.id);
-  const row={id:it.id,title:it.title,price_cents:price,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,seller_id:it.seller_id||null,photo:(it.photos&&it.photos[0])||''};
+  const row={id:it.id,title:it.title,price_cents:price,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,seller_id:it.seller_id||null,photo:(it.photos&&it.photos[0])||'',qty:1,offer:true};
   if(idx>=0)cart[idx]=row; else cart.push(row);
   cartSet(cart); document.querySelectorAll('.offersmodal').forEach(m=>m.remove()); toast('Added at your accepted price 🛒'); openCheckout();
+}
+/* When a seller accepts your offer, the item is auto-added to your cart at the agreed price (once). */
+async function syncAcceptedOffers(){
+  if(!wallCustomer)return;
+  let added=0;
+  try{
+    const {data}=await sb.from('offers').select('listing_id,amount_cents,status,listings(status,title,shipping_cents,shipping_offered,seller_id,photos)').eq('buyer_id',wallCustomer.id).eq('status','accepted');
+    if(!data||!data.length)return;
+    let done={}; try{ done=JSON.parse(localStorage.getItem('hoc_offerAdded')||'{}'); }catch(e){ done={}; }
+    const cart=cartGet();
+    data.forEach(o=>{ const l=o.listings; if(!l||l.status!=='active')return; if(done[o.listing_id])return; if(cart.some(x=>x.id===o.listing_id))return;
+      cart.push({id:o.listing_id,title:l.title,price_cents:o.amount_cents,shipping_cents:l.shipping_cents,shipping_offered:l.shipping_offered,seller_id:l.seller_id||null,photo:(l.photos&&l.photos[0])||'',qty:1,offer:true});
+      done[o.listing_id]=1; added++; });
+    if(added){ cartSet(cart); try{ localStorage.setItem('hoc_offerAdded',JSON.stringify(done)); }catch(e){} toast(added+' accepted offer'+(added>1?'s':'')+' added to your cart 🛒'); }
+  }catch(e){}
+}
+async function sellerRelist(listingId){
+  if(!confirm('Relist this item for sale again?'))return;
+  const {error}=await sb.from('listings').update({status:'active',qty:1,updated_at:new Date().toISOString()}).eq('id',listingId);
+  if(error){ toast('Could not relist.'); return; }
+  toast('Relisted! It’s active again.'); openSellerSales(); loadMarket();
 }
 async function saveSearchAlert(){
   if(!wallCustomer){ openLogin(); return; }
@@ -1561,12 +1611,17 @@ function addToCart(id){
   const it=(_mktItems||[]).find(x=>x.id===id); if(!it){ toast('Item not found.'); return; }
   if(it.status!=='active'){ toast('That item isn’t available.'); return; }
   const cart=cartGet(); if(cart.some(x=>x.id===id)){ toast('Already in your cart.'); return; }
-  cart.push({id:it.id,title:it.title,price_cents:it.price_cents,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,seller_id:it.seller_id||null,photo:(it.photos&&it.photos[0])||''});
+  const max=(it.qty!=null?it.qty:1); let qty=1;
+  if(max>1){ const v=prompt('How many would you like? (1–'+max+')','1'); if(v===null)return; qty=Math.min(max,Math.max(1,parseInt(v,10)||1)); }
+  cart.push({id:it.id,title:it.title,price_cents:it.price_cents,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,seller_id:it.seller_id||null,photo:(it.photos&&it.photos[0])||'',qty:qty,max:max});
   cartSet(cart); toast('Added to cart 🛒');
 }
+function cartChangeQty(id,delta){ const cart=cartGet(); const x=cart.find(c=>c.id===id); if(!x)return; const max=x.max||1; x.qty=Math.min(max,Math.max(1,(x.qty||1)+delta)); cartSet(cart); openCart(); }
+function cartQty(x){ return (x.qty&&x.qty>0)?x.qty:1; }
+function cartQtyMap(){ const m={}; cartGet().forEach(x=>{ m[x.id]=cartQty(x); }); return m; }
 async function startSellerCheckout(cart){
   toast('Opening secure checkout…');
-  const {data,error}=await sb.functions.invoke('seller-checkout',{body:{item_ids:cart.map(x=>x.id)}});
+  const {data,error}=await sb.functions.invoke('seller-checkout',{body:{item_ids:cart.map(x=>x.id),qtys:cartQtyMap()}});
   let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
   if(out&&out.ok&&out.url){ location.href=out.url; } else toast((out&&out.error)||'Could not start checkout.');
 }
@@ -1592,9 +1647,10 @@ function openCart(){
   const cart=cartGet();
   const w=document.createElement('div'); w.className='scanmodal cartmodal'; document.body.appendChild(w);
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  const sub=cart.reduce((a,x)=>a+(+x.price_cents||0),0);
-  const rows=cart.length?cart.map(x=>'<div class="memrow"><div class="memmain"><div class="memname">'+esc(x.title)+'</div><div class="mememail">'+mUSD(x.price_cents)+(x.shipping_offered?(' · ships'+(x.shipping_cents?' '+mUSD(x.shipping_cents):'')):' · pickup')+'</div></div>'+
-    '<button class="memdel" onclick="removeFromCart('+x.id+')">✕</button></div>').join(''):'<div class="muted" style="text-align:center;margin:10px 0">Your cart is empty.</div>';
+  const sub=cart.reduce((a,x)=>a+((+x.price_cents||0)*cartQty(x)),0);
+  const rows=cart.length?cart.map(x=>{ const stepper=(x.max&&x.max>1)?('<div class="qtystep"><button onclick="cartChangeQty('+x.id+',-1)">−</button><span>'+cartQty(x)+'</span><button onclick="cartChangeQty('+x.id+',1)">+</button></div>'):'';
+    return '<div class="memrow"><div class="memmain"><div class="memname">'+esc(x.title)+(cartQty(x)>1?(' ×'+cartQty(x)):'')+'</div><div class="mememail">'+mUSD(x.price_cents)+(x.shipping_offered?(' · ships'+(x.shipping_cents?' '+mUSD(x.shipping_cents):'')):' · pickup')+'</div></div>'+
+    stepper+'<button class="memdel" onclick="removeFromCart('+x.id+')">✕</button></div>'; }).join(''):'<div class="muted" style="text-align:center;margin:10px 0">Your cart is empty.</div>';
   w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto"><h3 style="color:var(--gold)">Your cart</h3>'+rows+
     (cart.length?('<div class="cartsub">Subtotal: <b>'+mUSD(sub)+'</b></div><div class="muted" style="margin:6px 0">Shipping, FL sales tax, and secure card payment are added at checkout.</div>'):'')+
     '<div class="row" style="margin-top:10px"><button class="gold" id="ck_go" style="flex:1"'+(cart.length?'':' disabled')+'>Checkout</button><button class="ghost" id="ck_x">Close</button></div></div>';
@@ -1618,7 +1674,7 @@ async function openCheckout(){
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w&&!w.dataset.busy)close(); });
   _sqCard=null;
   function val2(id){ const e=w.querySelector('#'+id); return e?(e.value||'').trim():''; }
-  function totals(ful){ const sub=cart.reduce((a,x)=>a+(+x.price_cents||0),0); const ship=ful==='ship'?cart.reduce((a,x)=>a+(+x.shipping_cents||0),0):0; const tax=Math.round(sub*0.075); return {sub,ship,tax,total:sub+ship+tax}; }
+  function totals(ful){ const sub=cart.reduce((a,x)=>a+((+x.price_cents||0)*cartQty(x)),0); const ship=ful==='ship'?cart.reduce((a,x)=>a+(+x.shipping_cents||0),0):0; const tax=Math.round(sub*0.075); return {sub,ship,tax,total:sub+ship+tax}; }
   function render(){
     const t=totals(fulfillment);
     const fulPick='<div class="muted" style="margin:8px 0">📦 Shipped to your address</div>';
@@ -1630,7 +1686,7 @@ async function openCheckout(){
       '<div class="grid2"><label class="fld" style="margin:0"><span>ZIP</span><input id="sh_zip" inputmode="numeric"/></label><label class="fld" style="margin:0"><span>Phone</span><input id="sh_phone" type="tel" inputmode="tel" value="'+esc(wallCustomer.phone||'')+'"/></label></div>'
     );
     w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:92vh;overflow:auto"><h3 style="color:var(--gold)">Checkout</h3>'+
-      '<div class="ckitems">'+cart.map(x=>'<div class="ckrow"><span>'+esc(x.title)+'</span><span>'+mUSD(x.price_cents)+'</span></div>').join('')+'</div>'+
+      '<div class="ckitems">'+cart.map(x=>'<div class="ckrow"><span>'+esc(x.title)+(cartQty(x)>1?(' ×'+cartQty(x)):'')+'</span><span>'+mUSD((x.price_cents||0)*cartQty(x))+'</span></div>').join('')+'</div>'+
       fulPick+addr+
       '<div class="cktot"><div class="ckrow"><span>Subtotal</span><span>'+mUSD(t.sub)+'</span></div>'+
       (t.ship?('<div class="ckrow"><span>Shipping</span><span>'+mUSD(t.ship)+'</span></div>'):'')+
@@ -1658,7 +1714,7 @@ async function openCheckout(){
     let tok;
     try{ const res=await _sqCard.tokenize(); if(res.status!=='OK')throw new Error((res.errors&&res.errors[0]&&res.errors[0].message)||'Please check your card details.'); tok=res.token; }
     catch(e){ if(er)er.textContent=String(e.message||e); btn.disabled=false; btn.textContent='Pay'; delete w.dataset.busy; return; }
-    const payload={token:tok,idempotency_key:((crypto.randomUUID&&crypto.randomUUID())||String(Date.now())),item_ids:cart.map(x=>x.id),fulfillment:fulfillment,ship:ship,billing_same:true};
+    const payload={token:tok,idempotency_key:((crypto.randomUUID&&crypto.randomUUID())||String(Date.now())),item_ids:cart.map(x=>x.id),qtys:cartQtyMap(),fulfillment:fulfillment,ship:ship,billing_same:true};
     let out=null;
     try{ const {data,error}=await sb.functions.invoke('checkout',{body:payload});
       if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } } else out=data;
@@ -1747,15 +1803,26 @@ async function enableNotifications(kind){
   try{
     const perm=await Notification.requestPermission(); if(perm!=='granted'){ toast('Notifications were not enabled.'); return; }
     const reg=await navigator.serviceWorker.ready;
-    let sub=await reg.pushManager.getSubscription();
-    if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlB64ToUint8(cfg.VAPID_PUBLIC)});
+    // Always create a FRESH subscription with the current VAPID key. A stale subscription
+    // (made with an older key) is silently rejected by the push service, so drop it first.
+    try{ const old=await reg.pushManager.getSubscription(); if(old)await old.unsubscribe(); }catch(_){}
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlB64ToUint8(cfg.VAPID_PUBLIC)});
     const j=sub.toJSON()||{}; const keys=j.keys||{}; const endpoint=j.endpoint, p256dh=keys.p256dh, auth=keys.auth;
     if(!endpoint||!p256dh||!auth){ toast('Could not set up notifications.'); return; }
     if(kind==='staff'){ const s=staffSession(); if(!s){ toast('Sign in as staff first.'); return; } if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p)return; _staffPw=hashPass(p); }
       const r=await sbRpc('push_subscribe_staff',{p_user:s.username,p_pass:_staffPw,p_endpoint:endpoint,p_p256dh:p256dh,p_auth:auth});
-      if(r===true){ toast('🔔 Staff notifications enabled!'); if(typeof updateInstallBanner==='function')updateInstallBanner(); } else { _staffPw=null; toast('Could not enable (check your password).'); } }
-    else { if(!wallCustomer){ toast('Please sign in first.'); return; } const {error}=await sb.from('push_subscriptions').upsert({endpoint:endpoint,p256dh:p256dh,auth:auth,audience:'customer',customer_id:wallCustomer.id},{onConflict:'endpoint'}); if(!error){ toast('🔔 Notifications enabled!'); if(typeof updateInstallBanner==='function')updateInstallBanner(); } else toast('Could not enable notifications.'); }
+      if(r===true){ toast('🔔 Staff notifications on! Sending a test…'); if(typeof updateInstallBanner==='function')updateInstallBanner(); pushTest(); } else { _staffPw=null; toast('Could not enable (check your password).'); } }
+    else { if(!wallCustomer){ toast('Please sign in first.'); return; } const {error}=await sb.from('push_subscriptions').upsert({endpoint:endpoint,p256dh:p256dh,auth:auth,audience:'customer',customer_id:wallCustomer.id},{onConflict:'endpoint'}); if(!error){ toast('🔔 Notifications on! Sending a test…'); if(typeof updateInstallBanner==='function')updateInstallBanner(); pushTest(); } else toast('Could not enable notifications.'); }
   }catch(e){ toast('Could not enable notifications.'); }
+}
+async function pushTest(){
+  try{
+    let out;
+    if(staffSession()){ if(!_staffPw){ return; } out=await sbFn('push-test',{p_user:staffSession().username,p_pass:_staffPw}); }
+    else { const {data,error}=await sb.functions.invoke('push-test',{body:{}}); out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } } }
+    if(out&&out.ok){ if(out.sent>0)toast('✅ Test sent — you should see a notification.'); else toast('No devices subscribed yet on this account.'); }
+    else if(out&&out.error){ toast('Test failed: '+out.error); }
+  }catch(e){}
 }
 let _ordSub='active', _ordersCache=[], _newOrderCount=0;
 async function loadOrders(){
@@ -1843,8 +1910,12 @@ function openStaffLogin(){
   loginStep();
 }
 function openStaffAccount(){ const s=staffSession(); if(!s)return;
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w); const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:400px;width:100%;max-height:92vh;overflow:auto;position:relative"><button class="modalx" id="a_x">✕</button><h3 style="color:var(--gold)">'+esc(s.username)+'’s account</h3>'+
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w); const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+
+    '<div class="pagehead"><h3 style="color:var(--gold);margin:0">'+esc(s.username)+'’s account</h3><button class="pageclose" id="a_x">✕ Close</button></div>'+
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">💵 House of Cards balance</div><div id="hoc_balance" class="muted">Loading…</div>'+
+    '<div class="row" style="margin:6px 0"><button class="ghost" id="hoc_bal_btn" style="flex:1">Refresh balance & transactions</button></div>'+
+    '<hr class="sep">'+
     '<label class="fld"><span>Email</span><input id="a_e" type="email" value="'+esc(s.email||'')+'"/></label>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Change password (optional):</div>'+
     '<label class="fld"><span>Current password</span><input id="a_old" type="password"/></label>'+
@@ -1861,6 +1932,8 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     '<div class="row"><button class="ghost" id="sq_test" style="flex:1">Test Square connection</button></div>'+
     '<div id="sq_result" class="muted" style="margin-top:6px"></div></div>';
   w.querySelector('#a_x').onclick=close;
+  w.querySelector('#hoc_bal_btn').onclick=()=>loadStaffBalance(w.querySelector('#hoc_balance'));
+  loadStaffBalance(w.querySelector('#hoc_balance'));
   w.querySelector('#st_notif').onclick=()=>enableNotifications('staff');
   w.querySelector('#sq_test').onclick=async()=>{ const out=w.querySelector('#sq_result'); out.textContent='Checking…';
     const r=await sbFn('square-health');

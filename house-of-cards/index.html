@@ -137,6 +137,13 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .mktcond.promoted{color:var(--gold);font-weight:800}
 .vbadge{display:inline-block;background:#2160B0;color:#fff;font-size:10px;font-weight:800;border-radius:6px;padding:0 5px;margin-left:2px}
 .sellerlink{color:var(--gold);font-weight:800;text-decoration:underline;cursor:pointer}
+.pagewrap{align-items:stretch!important;justify-content:center;padding:0!important}
+.pagecard{max-width:560px;width:100%;min-height:100dvh;border-radius:0!important;overflow:auto;padding-top:calc(env(safe-area-inset-top) + 12px)!important}
+.pagehead{position:sticky;top:0;background:linear-gradient(180deg,#1c1e2b,#15161f);display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;margin:0 0 10px;z-index:6;border-bottom:1px solid #2c2f42}
+.pageclose{background:var(--red);color:#fff;border:none;box-shadow:none;border-radius:10px;padding:9px 16px;font-weight:900;font-size:14px}
+.qtystep{display:flex;align-items:center;gap:6px;margin-right:6px}
+.qtystep button{padding:2px 9px;font-size:16px;border-radius:8px;border-width:2px}
+.qtystep span{min-width:18px;text-align:center;font-weight:800}
 .notifrow{background:#15161f;border:1px solid #2c2f42;border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
 .notifrow.unread{border-color:var(--gold);background:#1c1e2b}
 .notiftitle{font-weight:800;color:var(--cream);font-size:14px}
@@ -363,9 +370,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260622w"></script>
-<script src="social.js?v=20260622w"></script>
-<script src="app.js?v=20260622w"></script>
+<script src="config.js?v=20260622x"></script>
+<script src="social.js?v=20260622x"></script>
+<script src="app.js?v=20260622x"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
