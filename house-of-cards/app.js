@@ -254,7 +254,7 @@ function render(){
     else if(av==='signup'){ stopBounce(); el('view').innerHTML=viewSignup(); }
     else if(av==='subscribe'){ stopBounce(); el('view').innerHTML=viewSubscribe(); }
     else if(av==='landing'){ el('view').innerHTML=viewLanding(); startBounce(); }
-    else { stopBounce(); el('view').innerHTML=viewWall(); if(typeof wallLoadStats==='function')wallLoadStats(); if(typeof wallEnsureCustomer==='function')wallEnsureCustomer(); }
+    else { stopBounce(); el('view').innerHTML=viewWall(); if(typeof wallLoadStats==='function')wallLoadStats(); if(typeof wallEnsureCustomer==='function')wallEnsureCustomer(); if(typeof updateInstallBanner==='function')updateInstallBanner(); }
     const bn0=el('botnav'); if(bn0)bn0.style.display='none';
     afterRenderFocus(); updateImgChip(); return; }
   stopBounce();
@@ -430,6 +430,7 @@ function viewWall(){
 
   return '<div class="wall">'+
     custBar+
+    '<div id="installBanner"></div>'+
     '<div class="wall-hero">'+
       '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
@@ -676,11 +677,13 @@ function sellerCard(x){
   const badges='<span class="ordstatus s_'+status+'">'+status+'</span>'+(x.verified?' <span class="membadge acct">✔ verified</span>':'')+(x.banned?' <span class="membadge">banned</span>':'')+(rt?(' <span class="membadge">'+rt+'</span>'):'');
   const b=[];
   if(x.status==='requested') b.push('<button class="sm gold" onclick="sellerAction(\''+x.id+'\',\'approved\',null)">Approve</button>');
+  if(x.status==='review') b.push('<button class="sm gold" onclick="sellerAction(\''+x.id+'\',\'approved\',null)">Keep active (clear review)</button>');
   if(x.status==='approved') b.push('<button class="sm ghost" onclick="sellerAction(\''+x.id+'\',\'\','+(x.verified?'false':'true')+')">'+(x.verified?'Unverify':'Verify')+'</button>');
   if(x.banned) b.push('<button class="sm ghost" onclick="sellerAction(\''+x.id+'\',\'approved\',null)">Unban</button>');
   else b.push('<button class="sm red" onclick="sellerAction(\''+x.id+'\',\'banned\',null)">Ban</button>');
+  const reviewNote=(x.status==='review')?'<div class="muted" style="margin-top:4px;color:#ffcb2d">⚠️ Auto-paused — rating below 80%. Review and keep active or ban.</div>':'';
   return '<div class="ordcard"><div class="ordhead"><b>'+esc(x.name||x.username||'User')+(x.username?(' <span class="membadge">@'+esc(x.username)+'</span>'):'')+'</b>'+badges+'</div>'+
-    (x.email?('<div class="mememail">'+esc(x.email)+'</div>'):'')+
+    (x.email?('<div class="mememail">'+esc(x.email)+'</div>'):'')+reviewNote+
     '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+b.join('')+'</div></div>';
 }
 async function sellerAction(id,status,verified){
@@ -829,7 +832,16 @@ async function loadMySeller(){ _mySeller=null; if(!wallCustomer)return; try{ con
 function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); await loadWatchlist(); render(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
 let _sellerRatings={};
 async function loadSellerRatings(){ try{ const r=await sbRpc('seller_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.seller_id]=x; }); _sellerRatings=m; if(el('wMarket'))renderMarketGrid(); } }catch(e){} }
-function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
+function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; if(!r.cnt)return 'New seller'; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
+function sellerName(sid){ const r=sid&&_sellerRatings[sid]; return (r&&r.name)||'Seller'; }
+function sellerVerified(sid){ const r=sid&&_sellerRatings[sid]; return !!(r&&r.verified); }
+/* one-line seller label for a listing: House of Cards (promoted) or the seller's name + verified + rating */
+function sellerLabel(sid){
+  if(!sid) return '<div class="mktcond promoted">⭐ House of Cards · Promoted</div>';
+  const v=sellerVerified(sid)?' <span class="vbadge">✔ Verified</span>':'';
+  const rt=ratingStr(sid);
+  return '<div class="mktcond">🧑 '+esc(sellerName(sid))+v+(rt?(' · '+rt):'')+'</div>';
+}
 async function customerSignUp(p){
   if(!cloudOn()) return {error:'Accounts are offline right now.'};
   const name=((p.first||'')+' '+(p.last||'')).trim();
@@ -959,8 +971,9 @@ function openFeedback(orderId,role,rateeId){
   w.querySelector('#fb_x').onclick=close;
   w.querySelector('#fb_go').onclick=async()=>{
     const comment=(w.querySelector('#fb_c').value||'').trim();
-    const {error}=await sb.from('feedback').insert({order_id:orderId,rater_id:wallCustomer.id,ratee_id:(rateeId||null),role:role,stars:chosen,comment:comment||null});
-    if(error){ toast(/duplicate|unique/i.test(error.message||'')?'You already left feedback for this order.':'Could not submit feedback.'); return; }
+    const {data,error}=await sb.functions.invoke('feedback-submit',{body:{order_id:orderId,role:role,stars:chosen,comment:comment}});
+    let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+    if(!out||out.ok!==true){ toast((out&&out.error)||'Could not submit feedback.'); return; }
     close(); toast('Thanks for your feedback! ★'); loadSellerRatings();
   };
 }
@@ -1182,7 +1195,7 @@ function hocRoute(raw){
 })();
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];
-let _mktItems=[]; let _mktSub='active', _mktSort='new', _mktSearch='', _mktPortal='selling';
+let _mktItems=[]; let _mktSub='active', _mktSort='featured', _mktSearch='', _mktPortal='selling';
 function mUSD(c){ return '$'+(((+c||0)/100).toFixed(2)); }
 function listingPayload(it,ov){ return Object.assign({
   title:it.title||'', description:it.description||'', condition:it.condition||'',
@@ -1214,7 +1227,7 @@ function drawMarketControls(){
   const portalRow = staff ? ('<div class="mktsubs"><button class="mktsub'+(_mktPortal==='selling'?' on':'')+'" onclick="setMktPortal(\'selling\')">🏷️ Selling portal</button><button class="mktsub'+(_mktPortal==='customer'?' on':'')+'" onclick="setMktPortal(\'customer\')">🛍️ Customer portal</button></div>') : '';
   const subs=[['active','Active'],['sold','Sold']]; if(selling)subs.push(['hidden','Hidden']);
   c.innerHTML=portalRow+'<div class="mktbar"><input id="mktSearch" class="mktsearch" placeholder="Search cards…" value="'+esc(_mktSearch)+'"/>'+
-    '<select id="mktSort" class="mktsort">'+['new:Newest','plow:Price ↑','phigh:Price ↓','name:Name A–Z'].map(o=>{const p=o.split(':');return '<option value="'+p[0]+'"'+(_mktSort===p[0]?' selected':'')+'>'+p[1]+'</option>';}).join('')+'</select></div>'+
+    '<select id="mktSort" class="mktsort">'+['featured:Featured ✨','new:Newest','plow:Price ↑','phigh:Price ↓','name:Name A–Z'].map(o=>{const p=o.split(':');return '<option value="'+p[0]+'"'+(_mktSort===p[0]?' selected':'')+'>'+p[1]+'</option>';}).join('')+'</select></div>'+
     '<div class="mktsubs">'+subs.map(s=>'<button class="mktsub'+(_mktSub===s[0]?' on':'')+'" onclick="setMktSub(\''+s[0]+'\')">'+s[1]+'</button>').join('')+'</div>';
   const si=el('mktSearch'); if(si)si.oninput=()=>{ _mktSearch=si.value; renderMarketGrid(); drawSearchAlert(); };
   const so=el('mktSort'); if(so)so.onchange=()=>{ _mktSort=so.value; renderMarketGrid(); };
@@ -1238,7 +1251,16 @@ function renderMarketGrid(){
   else items=items.filter(x=>x.status!=='sold'&&x.status!=='hidden');
   const q=_mktSearch.trim().toLowerCase();
   if(q) items=items.filter(x=>(((x.title||'')+' '+(x.description||'')+' '+(x.condition||'')).toLowerCase().indexOf(q)>=0));
-  items.sort((a,b)=>{ if(_mktSort==='plow')return (a.price_cents||0)-(b.price_cents||0); if(_mktSort==='phigh')return (b.price_cents||0)-(a.price_cents||0); if(_mktSort==='name')return String(a.title||'').localeCompare(String(b.title||'')); return (b.id||0)-(a.id||0); });
+  // priority tier: House of Cards (promoted) first, verified sellers second, everyone else third
+  const tier=x=> (!x.seller_id?0:(sellerVerified(x.seller_id)?1:2));
+  items.sort((a,b)=>{
+    if(_mktSort==='plow')return (a.price_cents||0)-(b.price_cents||0);
+    if(_mktSort==='phigh')return (b.price_cents||0)-(a.price_cents||0);
+    if(_mktSort==='name')return String(a.title||'').localeCompare(String(b.title||''));
+    if(_mktSort==='new')return (b.id||0)-(a.id||0);
+    /* 'featured' (default): tier, then newest within tier */
+    const t=tier(a)-tier(b); if(t)return t; return (b.id||0)-(a.id||0);
+  });
   if(!items.length){ cont.innerHTML='<div class="muted" style="text-align:center">No '+(_mktSub==='sold'?'sold items':(_mktSub==='hidden'?'hidden items':'items'))+(q?' match your search':((!asBuyer&&_mktSub==='active')?' yet — tap “Add listing”.':'.'))+'</div>'; return; }
   cont.innerHTML=items.map(x=>mktCard(x,asBuyer)).join('');
 }
@@ -1248,7 +1270,7 @@ function mktCard(it,asBuyer){
   const img=ph?('<img class="mktimg" loading="lazy" src="'+esc(ph)+'"/>'):'<div class="mktimg mktnoimg">No photo</div>';
   const tags=[]; if(it.shipping_offered)tags.push('Ships'+(it.shipping_cents?(' '+mUSD(it.shipping_cents)):''));
   if(it.shipping_offered&&it.ship_days!=null)tags.push('Ships in '+it.ship_days+'d');
-  const badge=sold?'<div class="mktflag sold">SOLD</div>':(hidden?'<div class="mktflag hid">HIDDEN</div>':'');
+  const badge=sold?'<div class="mktflag sold">SOLD</div>':(hidden?'<div class="mktflag hid">HIDDEN</div>':(!it.seller_id?'<div class="mktflag promo">PROMOTED</div>':(sellerVerified(it.seller_id)?'<div class="mktflag verif">VERIFIED</div>':'')));
   const buy=(!sold&&!hidden)?('<button class="sm gold" onclick="event.stopPropagation();addToCart('+it.id+')">Add to cart</button>'):'';
   // buyer-only extras: watch (♥) + make offer on third-party seller items
   const ownSeller = wallCustomer && it.seller_id===wallCustomer.id;
@@ -1266,7 +1288,7 @@ function mktCard(it,asBuyer){
     '<div class="mkttitle">'+esc(it.title)+'</div>'+
     '<div class="mktprice">'+mUSD(it.price_cents)+'</div>'+
     (it.condition?('<div class="mktcond">'+esc(it.condition)+'</div>'):'')+
-    (it.seller_id?('<div class="mktcond">🧑 Seller'+(ratingStr(it.seller_id)?(' · '+ratingStr(it.seller_id)):'')+'</div>'):'')+
+    sellerLabel(it.seller_id)+
     (tags.length?('<div class="mkttags">'+tags.map(t=>'<span class="mkttag">'+esc(t)+'</span>').join('')+'</div>'):'')+
     buyerCtl+sellerCtl+staffCtl+'</div>';
 }
@@ -1294,6 +1316,7 @@ function showListingDetail(it,opts){
   w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto"><div class="mktdetgal">'+gallery+'</div>'+
     '<h3 style="color:var(--gold);margin:10px 0 2px">'+esc(it.title)+'</h3>'+
     '<div class="mktprice" style="font-size:22px">'+mUSD(it.price_cents)+'</div>'+
+    sellerLabel(it.seller_id)+
     (it.condition?('<div class="mktcond">Condition: '+esc(it.condition)+'</div>'):'')+
     (ship?('<div class="muted" style="margin:6px 0">'+esc(ship)+'</div>'):'')+
     (it.description?('<div style="margin:8px 0;white-space:pre-wrap">'+esc(it.description)+'</div>'):'')+
@@ -1512,6 +1535,29 @@ async function orderShip(id){ const t=prompt('Tracking number (optional):'); if(
 async function orderReady(id){ const s=prompt('Pickup location & available time slots:'); if(s===null)return; if(await orderUpdate(id,'ready','',s)){ toast('Marked ready — customer notified.'); loadOrders(); } }
 async function orderComplete(id){ if(!confirm('Mark this order complete?'))return; if(await orderUpdate(id,'complete','','')){ toast('Order complete.'); loadOrders(); } }
 async function notifyAll(title,body){ const s=staffSession(); if(!s||!_staffPw)return; try{ await sbFn('broadcast',{p_user:s.username,p_pass:_staffPw,title:title,body:body}); }catch(e){} }
+/* ---- Install + notifications banner (shown until the user adds to home screen AND enables push) ---- */
+function isStandalone(){ try{ return (window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)||window.navigator.standalone===true; }catch(e){ return false; } }
+function notifOn(){ try{ return typeof Notification!=='undefined' && Notification.permission==='granted'; }catch(e){ return false; } }
+function bannerDismissed(){ try{ return sessionStorage.getItem('hoc_banner_x')==='1'; }catch(e){ return false; } }
+function dismissBanner(){ try{ sessionStorage.setItem('hoc_banner_x','1'); }catch(e){} updateInstallBanner(); }
+function updateInstallBanner(){
+  const box=el('installBanner'); if(!box)return;
+  const standalone=isStandalone(); const push=notifOn();
+  if((standalone&&push)||bannerDismissed()){ box.innerHTML=''; return; }
+  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent||'');
+  let title, msg, btn='';
+  if(!standalone){
+    title='📲 Add House of Cards to your phone';
+    msg=ios ? 'Tap the Share button, then “Add to Home Screen” — so you stay logged in and get alerts.'
+            : 'Install the app (browser menu → “Add to Home screen” / “Install app”) to stay logged in and get alerts.';
+  } else {
+    title='🔔 Turn on notifications';
+    msg='Get alerts for orders, messages, offers, shows and more.';
+    btn='<button class="sm gold" onclick="enableNotifications(\''+(staffSession()?'staff':'customer')+'\')">Enable notifications</button>';
+  }
+  box.innerHTML='<div class="installbanner"><button class="ibx" onclick="dismissBanner()">✕</button>'+
+    '<div class="ibtitle">'+title+'</div><div class="ibmsg">'+esc(msg)+'</div>'+(btn?('<div style="margin-top:8px">'+btn+'</div>'):'')+'</div>';
+}
 /* ---- Web Push (app notifications) ---- */
 function urlB64ToUint8(base64){ const pad='='.repeat((4-base64.length%4)%4); const b=(base64+pad).replace(/-/g,'+').replace(/_/g,'/'); const raw=atob(b); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i); return arr; }
 async function enableNotifications(kind){
@@ -1528,8 +1574,8 @@ async function enableNotifications(kind){
     if(!endpoint||!p256dh||!auth){ toast('Could not set up notifications.'); return; }
     if(kind==='staff'){ const s=staffSession(); if(!s){ toast('Sign in as staff first.'); return; } if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p)return; _staffPw=hashPass(p); }
       const r=await sbRpc('push_subscribe_staff',{p_user:s.username,p_pass:_staffPw,p_endpoint:endpoint,p_p256dh:p256dh,p_auth:auth});
-      if(r===true) toast('🔔 Staff notifications enabled!'); else { _staffPw=null; toast('Could not enable (check your password).'); } }
-    else { if(!wallCustomer){ toast('Please sign in first.'); return; } const {error}=await sb.from('push_subscriptions').upsert({endpoint:endpoint,p256dh:p256dh,auth:auth,audience:'customer',customer_id:wallCustomer.id},{onConflict:'endpoint'}); if(!error) toast('🔔 Notifications enabled!'); else toast('Could not enable notifications.'); }
+      if(r===true){ toast('🔔 Staff notifications enabled!'); if(typeof updateInstallBanner==='function')updateInstallBanner(); } else { _staffPw=null; toast('Could not enable (check your password).'); } }
+    else { if(!wallCustomer){ toast('Please sign in first.'); return; } const {error}=await sb.from('push_subscriptions').upsert({endpoint:endpoint,p256dh:p256dh,auth:auth,audience:'customer',customer_id:wallCustomer.id},{onConflict:'endpoint'}); if(!error){ toast('🔔 Notifications enabled!'); if(typeof updateInstallBanner==='function')updateInstallBanner(); } else toast('Could not enable notifications.'); }
   }catch(e){ toast('Could not enable notifications.'); }
 }
 let _ordSub='active', _ordersCache=[], _newOrderCount=0;
