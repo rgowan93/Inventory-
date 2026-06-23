@@ -357,8 +357,9 @@ function viewWall(){
   const cartBtn='<button class="custbtn" onclick="openCart()">🛒 Cart (<span id="cartCount">'+cartCount()+'</span>)</button>';
   const signedIn = staff || !!cust;
   const whoLabel = staff ? ('👤 '+esc(staffSession().username)+' · staff') : (cust ? ('👤 '+esc(cust.name||cust.email||'Member')) : '');
+  const bellBtn='<button class="custbtn" onclick="openInbox()" style="position:relative">🔔<span id="notifDot" class="tabbadge" style="display:none"></span></button>';
   const custBar = cloudOn() ? ('<div class="custbar">'+(signedIn
-    ? '<span class="custhi">'+whoLabel+'</span>'+cartBtn+'<button class="custbtn" onclick="openAccount()">Account</button><button class="custbtn" onclick="signOutAll()">Sign out</button>'
+    ? '<span class="custhi">'+whoLabel+'</span>'+bellBtn+cartBtn+'<button class="custbtn" onclick="openAccount()">Account</button><button class="custbtn" onclick="signOutAll()">Sign out</button>'
     : '<span class="custhi muted">House of Cards</span>'+cartBtn+'<button class="custbtn gold" onclick="openLogin()">Log in</button><button class="custbtn" onclick="openCustomerSignup()">Create account</button>'
   )+'</div>') : '';
   let active=ui.wallTab||'home'; if(active==='members'&&!staff) active='home';
@@ -829,7 +830,7 @@ async function loadWallCustomer(){
 }
 let _mySeller=null;
 async function loadMySeller(){ _mySeller=null; if(!wallCustomer)return; try{ const {data}=await sb.from('sellers').select('status,verified,payouts_enabled').eq('id',wallCustomer.id).maybeSingle(); _mySeller=data||null; }catch(e){} }
-function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); await loadWatchlist(); render(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
+function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); await loadWatchlist(); render(); loadNotifBadge(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
 let _sellerRatings={};
 async function loadSellerRatings(){ try{ const r=await sbRpc('seller_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.seller_id]=x; }); _sellerRatings=m; if(el('wMarket'))renderMarketGrid(); } }catch(e){} }
 function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; if(!r.cnt)return '100% · New seller'; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
@@ -1175,6 +1176,72 @@ async function saveSearchAlert(){
   if(error&&!/duplicate|unique/i.test(error.message||'')){ toast('Could not save alert.'); return; }
   toast('🔔 We’ll alert you when “'+term+'” is listed.');
 }
+/* ===== Paid promotion: seller pays House of Cards $5 to feature a listing (non-refundable) ===== */
+function openPromote(listingId){
+  const cfg=window.HOC_CONFIG||{};
+  if(!wallCustomer){ openLogin(); return; }
+  if(!cfg.SQUARE_APP_ID||!cfg.SQUARE_LOCATION_ID){ toast('Payments aren’t configured yet.'); return; }
+  const it=(_mktItems||[]).find(x=>x.id===listingId);
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>{ if(!w.dataset.busy)w.remove(); }; w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  let card=null;
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%;max-height:92vh;overflow:auto;position:relative"><button class="modalx" id="pr_x">✕</button>'+
+    '<h3 style="color:var(--gold)">⭐ Promote your listing</h3>'+
+    '<div class="muted" style="margin-bottom:8px">'+(it?('“'+esc(it.title)+'” '):'')+'will appear at the very top of the marketplace — above House of Cards and verified sellers.</div>'+
+    '<div class="cktot"><div class="ckrow cktotal"><span>Promotion fee</span><span>$5.00</span></div></div>'+
+    '<div class="muted" style="font-size:12px;margin:6px 0">One-time, <b>non-refundable</b>. Charged securely by Square.</div>'+
+    '<div class="muted" style="margin:8px 0 4px">Card details</div><div id="pr-card" class="sqcard"></div>'+
+    '<div id="pr-err" class="ckerr"></div>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="pr_pay" style="flex:1">Pay $5.00</button><button class="ghost" id="pr_cancel">Cancel</button></div></div>';
+  w.querySelector('#pr_x').onclick=close; w.querySelector('#pr_cancel').onclick=close;
+  (async()=>{ const er=w.querySelector('#pr-err');
+    try{ const Square=await loadSquareSdk(); if(!_sqPayments)_sqPayments=Square.payments(cfg.SQUARE_APP_ID,cfg.SQUARE_LOCATION_ID);
+      const host=w.querySelector('#pr-card'); if(!host)return; host.innerHTML=''; card=await _sqPayments.card(); await card.attach('#pr-card');
+    }catch(e){ if(er)er.textContent='Could not load the secure card form. Refresh and try again.'; }
+  })();
+  w.querySelector('#pr_pay').onclick=async()=>{
+    const btn=w.querySelector('#pr_pay'); const er=w.querySelector('#pr-err'); if(er)er.textContent='';
+    if(!card){ if(er)er.textContent='The card form isn’t ready yet — one moment.'; return; }
+    w.dataset.busy='1'; btn.disabled=true; btn.textContent='Processing…';
+    let tok;
+    try{ const res=await card.tokenize(); if(res.status!=='OK')throw new Error((res.errors&&res.errors[0]&&res.errors[0].message)||'Please check your card details.'); tok=res.token; }
+    catch(e){ if(er)er.textContent=String(e.message||e); btn.disabled=false; btn.textContent='Pay $5.00'; delete w.dataset.busy; return; }
+    let out=null;
+    try{ const {data,error}=await sb.functions.invoke('promote-pay',{body:{listing_id:listingId,token:tok,idempotency_key:((crypto.randomUUID&&crypto.randomUUID())||String(Date.now()))}});
+      if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } } else out=data;
+    }catch(e){ out=null; }
+    if(out&&out.ok){ delete w.dataset.busy; w.remove(); toast('⭐ Listing promoted!'); loadMarket(); }
+    else { if(er)er.textContent=(out&&out.error)||'Payment didn’t go through. Please try again.'; btn.disabled=false; btn.textContent='Pay $5.00'; delete w.dataset.busy; }
+  };
+}
+/* ===== In-app notification inbox (for users who haven't enabled push, so nothing is missed) ===== */
+let _notifUnread=0;
+async function loadNotifBadge(){
+  _notifUnread=0;
+  try{
+    if(staffSession()&&_staffPw){ const r=await sbRpc('staff_notifications',{p_user:staffSession().username,p_pass:_staffPw}); if(r&&r.ok){ const ns=r.notifications||[]; let seen=0; try{ seen=+(localStorage.getItem('hoc_notifSeen')||0); }catch(e){} _notifUnread=ns.filter(n=>(n.id||0)>seen).length; } }
+    else if(wallCustomer){ const {count}=await sb.from('notifications').select('id',{count:'exact',head:true}).eq('customer_id',wallCustomer.id).eq('read',false); _notifUnread=count||0; }
+  }catch(e){}
+  paintNotifDot();
+}
+function paintNotifDot(){ const d=el('notifDot'); if(!d)return; if(_notifUnread>0){ d.textContent=_notifUnread>99?'99+':String(_notifUnread); d.style.display=''; } else d.style.display='none'; }
+async function openInbox(){
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="nb_x">✕</button><h3 style="color:var(--gold)">🔔 Notifications</h3><div id="nb_list"><div class="muted">Loading…</div></div></div>';
+  w.querySelector('#nb_x').onclick=close;
+  const list=w.querySelector('#nb_list');
+  let items=[];
+  if(staffSession()){ if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p){ close(); return; } _staffPw=hashPass(p); } const r=await sbRpc('staff_notifications',{p_user:staffSession().username,p_pass:_staffPw}); items=(r&&r.ok)?(r.notifications||[]):[]; const maxId=items.reduce((m,n)=>Math.max(m,n.id||0),0); try{ localStorage.setItem('hoc_notifSeen',String(maxId)); }catch(e){} }
+  else if(wallCustomer){ const {data}=await sb.from('notifications').select('*').eq('customer_id',wallCustomer.id).order('created_at',{ascending:false}).limit(60); items=data||[]; try{ await sb.from('notifications').update({read:true}).eq('customer_id',wallCustomer.id).eq('read',false); }catch(e){} }
+  else { list.innerHTML='<div class="muted" style="text-align:center">Sign in to see your notifications.</div>'; return; }
+  _notifUnread=0; paintNotifDot();
+  if(!items.length){ list.innerHTML='<div class="muted" style="text-align:center">No notifications yet.</div>'; return; }
+  list.innerHTML=items.map(n=>'<div class="notifrow'+(n.read===false?' unread':'')+'" onclick="closeAndRoute(\''+esc(n.url||'./')+'\',this)">'+
+    '<div class="notiftitle">'+esc(n.title)+'</div>'+(n.body?('<div class="notifbody">'+esc(n.body)+'</div>'):'')+
+    '<div class="notiftime">'+new Date(n.created_at).toLocaleString()+'</div></div>').join('');
+}
+function closeAndRoute(url,node){ const m=node&&node.closest('.scanmodal'); if(m)m.remove(); hocRoute(url); }
 /* ===== Seller storefront: tap a seller's name to see their listings + rating history ===== */
 async function openSellerStore(sid){
   if(!sid)return;
@@ -1229,7 +1296,7 @@ async function loadMarket(){
   const cont=el('wMarket'); if(!cont)return;
   let items=null;
   if(staffSession()&&_staffPw){ const r=await sbRpc('staff_listings',{p_user:staffSession().username,p_pass:_staffPw}); if(r&&r.ok)items=r.listings; }
-  if(!items){ const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,ship_days,status,seller_id&status=neq.hidden&order=created_at.desc&limit=200'); items=Array.isArray(r)?r:[]; }
+  if(!items){ const r=await sbGet('listings?select=id,title,description,condition,price_cents,qty,photos,local_pickup,shipping_offered,shipping_cents,ship_days,status,seller_id,promoted&status=neq.hidden&order=created_at.desc&limit=200'); items=Array.isArray(r)?r:[]; }
   _mktItems=items;
   drawMarketControls();
   renderMarketGrid();
@@ -1274,8 +1341,8 @@ function renderMarketGrid(){
   else items=items.filter(x=>x.status!=='sold'&&x.status!=='hidden');
   const q=_mktSearch.trim().toLowerCase();
   if(q) items=items.filter(x=>(((x.title||'')+' '+(x.description||'')+' '+(x.condition||'')).toLowerCase().indexOf(q)>=0));
-  // priority tier: House of Cards (promoted) first, verified sellers second, everyone else third
-  const tier=x=> (!x.seller_id?0:(sellerVerified(x.seller_id)?1:2));
+  // priority tier: paid promotions first, then House of Cards, then verified sellers, then everyone else
+  const tier=x=> (x.promoted?-1:(!x.seller_id?0:(sellerVerified(x.seller_id)?1:2)));
   items.sort((a,b)=>{
     if(_mktSort==='plow')return (a.price_cents||0)-(b.price_cents||0);
     if(_mktSort==='phigh')return (b.price_cents||0)-(a.price_cents||0);
@@ -1293,7 +1360,7 @@ function mktCard(it,asBuyer){
   const img=ph?('<img class="mktimg" loading="lazy" src="'+esc(ph)+'"/>'):'<div class="mktimg mktnoimg">No photo</div>';
   const tags=[]; if(it.shipping_offered)tags.push('Ships'+(it.shipping_cents?(' '+mUSD(it.shipping_cents)):''));
   if(it.shipping_offered&&it.ship_days!=null)tags.push('Ships in '+it.ship_days+'d');
-  const badge=sold?'<div class="mktflag sold">SOLD</div>':(hidden?'<div class="mktflag hid">HIDDEN</div>':(!it.seller_id?'<div class="mktflag promo">PROMOTED</div>':(sellerVerified(it.seller_id)?'<div class="mktflag verif">VERIFIED</div>':'')));
+  const badge=sold?'<div class="mktflag sold">SOLD</div>':(hidden?'<div class="mktflag hid">HIDDEN</div>':(it.promoted?'<div class="mktflag promo">⭐ PROMOTED</div>':(!it.seller_id?'<div class="mktflag promo">PROMOTED</div>':(sellerVerified(it.seller_id)?'<div class="mktflag verif">VERIFIED</div>':''))));
   const buy=(!sold&&!hidden)?('<button class="sm gold" onclick="event.stopPropagation();addToCart('+it.id+')">Add to cart</button>'):'';
   // buyer-only extras: watch (♥) + make offer on third-party seller items
   const ownSeller = wallCustomer && it.seller_id===wallCustomer.id;
@@ -1301,7 +1368,8 @@ function mktCard(it,asBuyer){
   const offer=(asBuyer&&it.seller_id&&!ownSeller&&!sold&&!hidden)?('<button class="sm ghost" onclick="event.stopPropagation();openOffer('+it.id+','+(it.price_cents||0)+')">💰 Offer</button>'):'';
   const buyerCtl=(buy||watch||offer)?('<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+buy+watch+offer+'</div>'):'';
   // seller editing their own listing straight from the grid
-  const sellerCtl=(ownSeller&&!staffSession())?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="sm ghost" onclick="event.stopPropagation();sellerEditListing('+it.id+')">✏️ Edit price / details</button></div>'):'';
+  const promoBtn=(ownSeller&&!staffSession()&&!sold&&!hidden)?(it.promoted?'<span class="membadge acct">⭐ Promoted</span>':'<button class="sm gold" onclick="event.stopPropagation();openPromote('+it.id+')">⭐ Promote $5</button>'):'';
+  const sellerCtl=(ownSeller&&!staffSession())?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="sm ghost" onclick="event.stopPropagation();sellerEditListing('+it.id+')">✏️ Edit price / details</button>'+promoBtn+'</div>'):'';
   const staffCtl=(staffSession()&&!asBuyer)?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+
     '<button class="sm ghost" onclick="event.stopPropagation();openListingEdit('+it.id+')">Edit</button>'+
     '<button class="sm ghost" onclick="event.stopPropagation();toggleListingHidden('+it.id+')">'+(hidden?'Unhide':'Hide')+'</button>'+
@@ -1614,6 +1682,7 @@ async function loadOrders(){
   const maxId=_ordersCache.reduce((m,o)=>Math.max(m,o.id||0),0);
   try{ localStorage.setItem('hoc_lastOrderSeen',String(maxId)); }catch(e){}
   _newOrderCount=0; const btn=document.querySelector('.walltab[data-k="orders"]'); if(btn)btn.innerHTML='📦 Orders';
+  loadNotifBadge();
   renderOrders();
 }
 function setOrdSub(s){ _ordSub=s; renderOrders(); }

@@ -137,6 +137,11 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .mktcond.promoted{color:var(--gold);font-weight:800}
 .vbadge{display:inline-block;background:#2160B0;color:#fff;font-size:10px;font-weight:800;border-radius:6px;padding:0 5px;margin-left:2px}
 .sellerlink{color:var(--gold);font-weight:800;text-decoration:underline;cursor:pointer}
+.notifrow{background:#15161f;border:1px solid #2c2f42;border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.notifrow.unread{border-color:var(--gold);background:#1c1e2b}
+.notiftitle{font-weight:800;color:var(--cream);font-size:14px}
+.notifbody{color:var(--muted);font-size:13px;margin-top:2px}
+.notiftime{color:#5a5f78;font-size:11px;margin-top:4px}
 .installbanner{position:relative;background:linear-gradient(180deg,#1f2230,#15161f);border:2px solid var(--gold);border-radius:14px;padding:12px 36px 12px 14px;margin:0 0 14px;box-shadow:0 8px 22px rgba(0,0,0,.4)}
 .installbanner .ibtitle{font-weight:900;color:var(--gold);font-size:15px}
 .installbanner .ibmsg{color:var(--cream);font-size:13px;margin-top:3px}
@@ -358,9 +363,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260622t"></script>
-<script src="social.js?v=20260622t"></script>
-<script src="app.js?v=20260622t"></script>
+<script src="config.js?v=20260622u"></script>
+<script src="social.js?v=20260622u"></script>
+<script src="app.js?v=20260622u"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
