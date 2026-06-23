@@ -1203,7 +1203,7 @@ function offerThreadCard(o,viewer){
   const who = o.from_role==='buyer' ? 'Buyer' : 'Seller';
   let line, acts='';
   if(st==='accepted'){ line='✅ Accepted at '+mUSD(o.amount_cents);
-    if(viewer==='buyer') acts='<button class="sm gold" onclick="event.stopPropagation();buyNowOffer('+o.listing_id+')">Buy now '+mUSD(o.amount_cents)+'</button>'; }
+    if(viewer==='buyer') acts='<button class="sm gold" onclick="event.stopPropagation();buyNowOffer('+o.listing_id+','+o.amount_cents+')">Buy now '+mUSD(o.amount_cents)+'</button>'; }
   else if(st==='declined'){ line='Declined — '+mUSD(o.amount_cents);
     acts='<button class="sm ghost" onclick="event.stopPropagation();offerCounter('+o.id+','+o.amount_cents+')">Send new offer</button>'; }
   else if(st==='expired'){ line='⌛ Expired — '+mUSD(o.amount_cents); }
@@ -1243,10 +1243,13 @@ async function openMyOffers(){
   const threads=_offerThreads(data); const list=w.querySelector('#mo_list');
   list.innerHTML=threads.length?threads.map(o=>offerThreadCard(o,'buyer')).join(''):'<div class="muted" style="text-align:center">You haven’t made any offers yet.</div>';
 }
-async function buyNowOffer(listingId){
+async function buyNowOffer(listingId,acceptedCents){
   const r=await sbGet('listings?select=id,title,price_cents,shipping_cents,shipping_offered,seller_id,status,photos&id=eq.'+listingId+'&limit=1');
   const it=Array.isArray(r)&&r[0]; if(!it||it.status!=='active'){ toast('That item isn’t available.'); return; }
-  const cart=cartGet(); if(!cart.some(x=>x.id===it.id)) cart.push({id:it.id,title:it.title,price_cents:it.price_cents,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,seller_id:it.seller_id||null,photo:(it.photos&&it.photos[0])||''});
+  const price=(acceptedCents!=null?acceptedCents:it.price_cents);   // your private accepted price (others still see the public price)
+  const cart=cartGet(); const idx=cart.findIndex(x=>x.id===it.id);
+  const row={id:it.id,title:it.title,price_cents:price,shipping_cents:it.shipping_cents,shipping_offered:it.shipping_offered,seller_id:it.seller_id||null,photo:(it.photos&&it.photos[0])||''};
+  if(idx>=0)cart[idx]=row; else cart.push(row);
   cartSet(cart); document.querySelectorAll('.offersmodal').forEach(m=>m.remove()); toast('Added at your accepted price 🛒'); openCheckout();
 }
 async function saveSearchAlert(){
