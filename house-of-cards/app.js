@@ -774,8 +774,8 @@ async function sellerRefreshPayouts(cont){
 let _sellerListings=[], _sellerDraw=null;
 async function openSellerListings(){
   if(!wallCustomer)return;
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
   async function draw(){
     const {data}=await sb.from('listings').select('id,title,price_cents,status,condition,description,shipping_cents,ship_days,photos,qty,promoted').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false});
     _sellerListings=(data||[]).filter(x=>x.status!=='sold');   // sold items move to “My sales”
@@ -783,7 +783,7 @@ async function openSellerListings(){
     const rows=_sellerListings.length?_sellerListings.map(it=>{ const s=_sellerStats[it.id]||{}; const stat='👀 '+(s.watchers||0)+' · 💰 '+(s.offers||0)+(it.promoted?' · ⭐':'');
       const promo=it.promoted?'':'<button class="sm gold" onclick="openPromote('+it.id+')">⭐ $5</button>';
       return '<div class="memrow"><div class="memmain"><div class="memname">'+esc(it.title)+' <span class="membadge">'+esc(it.status)+'</span></div><div class="mememail">'+mUSD(it.price_cents)+' · '+stat+'</div></div>'+promo+'<button class="sm ghost" onclick="sellerEditListing('+it.id+')">Edit</button><button class="memdel" onclick="sellerDeleteListing('+it.id+')">✕</button></div>'; }).join(''):'<div class="muted" style="text-align:center;margin:8px 0">No listings yet — add your first card.</div>';
-    w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="sl_x">✕</button><h3 style="color:var(--gold)">My listings</h3>'+rows+'<div class="row" style="margin-top:10px"><button class="gold" id="sl_add" style="flex:1">＋ Add listing</button></div></div>';
+    w.innerHTML='<div class="card pagecard">'+pageHead('My listings','sl_x')+rows+'<div class="row" style="margin-top:10px"><button class="gold" id="sl_add" style="flex:1">＋ Add listing</button></div></div>';
     w.querySelector('#sl_x').onclick=close; w.querySelector('#sl_add').onclick=()=>openSellerListingEdit(null);
   }
   _sellerDraw=draw; draw();
@@ -795,11 +795,11 @@ async function sellerDeleteListing(id){ if(!confirm('Delete this listing?'))retu
 function openSellerListingEdit(it){
   if(!wallCustomer)return;
   let photos=(it&&Array.isArray(it.photos))?it.photos.slice():[];
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
   const condOpts=LISTING_CONDITIONS.map(c=>'<option'+((it&&it.condition===c)?' selected':'')+'>'+c+'</option>').join('');
   function drawPhotos(){ const d=w.querySelector('#sp_thumbs'); if(!d)return; d.innerHTML=photos.length?photos.map((p,i)=>'<span class="lpthumb"><img src="'+esc(p)+'"/><button type="button" data-i="'+i+'" class="lpdel">✕</button></span>').join(''):'<span class="muted">No photos yet</span>'; d.querySelectorAll('.lpdel').forEach(b=>b.onclick=()=>{ photos.splice(+b.dataset.i,1); drawPhotos(); }); }
-  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="sp_x">✕</button><h3 style="color:var(--gold)">'+(it?'Edit listing':'Add listing')+'</h3>'+
+  w.innerHTML='<div class="card pagecard">'+pageHead((it?'Edit listing':'Add listing'),'sp_x')+
     '<label class="fld"><span>Title</span><input id="sp_title" value="'+esc(it?it.title:'')+'"/></label>'+
     '<label class="fld"><span>Description</span><textarea id="sp_desc" rows="3">'+esc(it?(it.description||''):'')+'</textarea></label>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>Price (USD)</span><input id="sp_price" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.price_cents||0)/100):'')+'"/></label>'+
@@ -853,6 +853,8 @@ async function loadMySeller(){ _mySeller=null; if(!wallCustomer)return; try{ con
 function wallEnsureCustomer(){ if(_wallCustInit||!cloudOn())return; _wallCustInit=true; loadWallCustomer().then(async()=>{ if(wallCustomer){ await loadMySeller(); await loadWatchlist(); render(); loadNotifBadge(); syncAcceptedOffers(); } checkStripeReturn(); loadSellerRatings(); }).catch(()=>{}); }
 let _sellerRatings={};
 async function loadSellerRatings(){ try{ const r=await sbRpc('seller_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.seller_id]=x; }); _sellerRatings=m; if(el('wMarket'))renderMarketGrid(); } }catch(e){} }
+/* full-screen "page" header used by the big views (replaces cramped pop-ups) */
+function pageHead(title,closeId){ return '<div class="pagehead"><h3 style="color:var(--gold);margin:0">'+esc(title)+'</h3><button class="pageclose" id="'+closeId+'">✕ Close</button></div>'; }
 function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; if(!r.cnt)return '100% · New seller'; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
 function sellerName(sid){ const r=sid&&_sellerRatings[sid]; return (r&&r.name)||'Seller'; }
 function sellerVerified(sid){ const r=sid&&_sellerRatings[sid]; return !!(r&&r.verified); }
@@ -1009,9 +1011,9 @@ function openFeedback(orderId,role,rateeId){
 async function openSellerSales(){
   if(!wallCustomer)return;
   const ex=document.querySelector('.salesmodal'); if(ex)ex.remove();
-  const w=document.createElement('div'); w.className='scanmodal salesmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="ss_x">✕</button><h3 style="color:var(--gold)">My sales</h3><div id="ss_list"><div class="muted">Loading…</div></div></div>';
+  const w=document.createElement('div'); w.className='scanmodal pagewrap salesmodal'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('My sales','ss_x')+'<div id="ss_list"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#ss_x').onclick=close;
   await loadBuyerRatings();
   const {data}=await sb.from('orders').select('id,status,total_cents,created_at,customer_id,customer_name,ship_name,ship_address1,ship_city,ship_state,ship_zip,ship_phone,tracking_number,ship_by,refunded_cents,order_items(title,price_cents,qty,listing_id)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(50);
@@ -1053,10 +1055,10 @@ function _msgBubble(m,viewer){
   return '<div class="msgb '+(mine?'me':'them')+'"><div class="msgmeta">'+esc(m.sender_name||m.sender_role)+' · '+new Date(m.created_at).toLocaleString()+' · '+tag+'</div><div class="msgtxt">'+esc(m.body)+'</div></div>';
 }
 async function openThread(orderId,viewer){
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
   const toSel = viewer==='buyer' ? '<select id="mt_to" class="mktsort" style="flex:0 0 auto"><option value="buyer_seller">To: Seller</option><option value="buyer_staff">To: House of Cards</option></select>' : '';
-  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;display:flex;flex-direction:column;position:relative"><button class="modalx" id="mt_x">✕</button><h3 style="color:var(--gold)">Messages · Order #'+orderId+'</h3>'+
+  w.innerHTML='<div class="card pagecard" style="display:flex;flex-direction:column">'+pageHead('Messages · Order #'+orderId,'mt_x')+
     '<div id="mt_list" class="msglist"><div class="muted">Loading…</div></div>'+
     '<div class="row" style="gap:6px;margin-top:8px">'+toSel+'<input id="mt_in" class="mktsearch" placeholder="Write a message…" style="flex:1"/><button class="gold sm" id="mt_send">Send</button></div></div>';
   w.querySelector('#mt_x').onclick=close;
@@ -1122,9 +1124,9 @@ const _DKIND={not_received:'Item not received',item_issue:'Problem with item',re
 async function openStaffCases(){
   const cr=_staffCreds(); if(!cr)return;
   const ex=document.querySelector('.casesmodal'); if(ex)ex.remove();
-  const w=document.createElement('div'); w.className='scanmodal casesmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="cx_x">✕</button><h3 style="color:var(--gold)">🛡️ Buyer cases</h3><div id="cx_list"><div class="muted">Loading…</div></div></div>';
+  const w=document.createElement('div'); w.className='scanmodal pagewrap casesmodal'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('🛡️ Buyer cases','cx_x')+'<div id="cx_list"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#cx_x').onclick=close;
   const r=await sbRpc('staff_disputes',{p_user:cr.p_user,p_pass:cr.p_pass});
   const list=w.querySelector('#cx_list');
@@ -1170,9 +1172,9 @@ function buyerRatingStr(bid){ const r=bid&&_buyerRatings[bid]; if(!r||!r.cnt)ret
 /* ---- Watchlist ---- */
 async function openWatchlist(){
   if(!wallCustomer){ openLogin(); return; }
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="wl_x">✕</button><h3 style="color:var(--gold)">♥ My watchlist</h3><div id="wl_list" class="mktgrid"><div class="muted">Loading…</div></div></div>';
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('♥ My watchlist','wl_x')+'<div id="wl_list" class="mktgrid"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#wl_x').onclick=close;
   const {data}=await sb.from('watchlist').select('listing_id, listings(id,title,description,condition,price_cents,qty,photos,shipping_offered,shipping_cents,ship_days,status,seller_id,promoted)').order('created_at',{ascending:false});
   const items=(data||[]).map(r=>r.listings).filter(Boolean);
@@ -1252,9 +1254,9 @@ let _offersView='seller';
 async function openSellerOffers(){
   if(!wallCustomer)return; _offersView='seller';
   document.querySelectorAll('.offersmodal').forEach(m=>m.remove());
-  const w=document.createElement('div'); w.className='scanmodal offersmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="so_x">✕</button><h3 style="color:var(--gold)">💰 Offers on your items</h3><div id="so_list"><div class="muted">Loading…</div></div></div>';
+  const w=document.createElement('div'); w.className='scanmodal pagewrap offersmodal'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('💰 Offers on your items','so_x')+'<div id="so_list"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#so_x').onclick=close;
   await loadBuyerRatings();
   const {data}=await sb.from('offers').select('id,amount_cents,status,from_role,expires_at,created_at,listing_id,buyer_id,listings(title)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(120);
@@ -1264,9 +1266,9 @@ async function openSellerOffers(){
 async function openMyOffers(){
   if(!wallCustomer)return; _offersView='buyer';
   document.querySelectorAll('.offersmodal').forEach(m=>m.remove());
-  const w=document.createElement('div'); w.className='scanmodal offersmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="mo_x">✕</button><h3 style="color:var(--gold)">💰 My offers</h3><div id="mo_list"><div class="muted">Loading…</div></div></div>';
+  const w=document.createElement('div'); w.className='scanmodal pagewrap offersmodal'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('💰 My offers','mo_x')+'<div id="mo_list"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#mo_x').onclick=close;
   const {data}=await sb.from('offers').select('id,amount_cents,status,from_role,expires_at,created_at,listing_id,buyer_id,listings(title)').eq('buyer_id',wallCustomer.id).order('created_at',{ascending:false}).limit(120);
   const threads=_offerThreads(data); const list=w.querySelector('#mo_list');
@@ -1359,9 +1361,9 @@ async function loadNotifBadge(){
 }
 function paintNotifDot(){ const d=el('notifDot'); if(!d)return; if(_notifUnread>0){ d.textContent=_notifUnread>99?'99+':String(_notifUnread); d.style.display=''; } else d.style.display='none'; }
 async function openInbox(){
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
-  w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="nb_x">✕</button><h3 style="color:var(--gold)">🔔 Notifications</h3><div id="nb_list"><div class="muted">Loading…</div></div></div>';
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('🔔 Notifications','nb_x')+'<div id="nb_list"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#nb_x').onclick=close;
   const list=w.querySelector('#nb_list');
   let items=[];
@@ -1378,12 +1380,11 @@ function closeAndRoute(url,node){ const m=node&&node.closest('.scanmodal'); if(m
 /* ===== Seller storefront: tap a seller's name to see their listings + rating history ===== */
 async function openSellerStore(sid){
   if(!sid)return;
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
   const r=_sellerRatings[sid]||{}; const name=(r.name)||'Seller'; const verified=!!r.verified;
   const ratingLine = r.cnt ? ('★ '+r.avg+' · '+r.cnt+' rating'+(r.cnt===1?'':'s')+(r.pos!=null?(' · '+r.pos+'% positive'):'')) : '100% positive · New seller';
-  w.innerHTML='<div class="card" style="max-width:480px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="st_x">✕</button>'+
-    '<h3 style="color:var(--gold);margin-bottom:2px">'+esc(name)+(verified?' <span class="vbadge">✔ Verified</span>':'')+'</h3>'+
+  w.innerHTML='<div class="card pagecard">'+pageHead(name+(verified?' ✔':''),'st_x')+
     '<div class="muted" style="margin-bottom:10px">'+esc(ratingLine)+'</div>'+
     '<div class="wall-sec" style="margin:6px 0 10px">Listings</div><div id="st_listings" class="mktgrid"><div class="muted">Loading…</div></div>'+
     '<div class="wall-sec" style="margin:16px 0 10px">Feedback</div><div id="st_fb"><div class="muted">Loading…</div></div></div>';
@@ -1528,8 +1529,8 @@ async function openPurchasedListing(id){
 }
 function showListingDetail(it,opts){
   opts=opts||{};
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
   const sold=it.status==='sold'||(it.qty!=null&&it.qty<=0);
   const gallery=(it.photos&&it.photos.length)?it.photos.map(p=>'<img class="mktdetimg" loading="lazy" src="'+esc(p)+'"/>').join(''):'<div class="mktimg mktnoimg" style="max-width:none">No photo</div>';
   const ship=it.shipping_offered?('Ships'+(it.shipping_cents?(' for '+mUSD(it.shipping_cents)):'')+(it.ship_days!=null?(' · within '+it.ship_days+' day'+(it.ship_days==1?'':'s')+' of payment'):'')):(it.local_pickup?'Local pickup only':'');
@@ -1540,7 +1541,7 @@ function showListingDetail(it,opts){
   const extra=(opts.buyable&&!sold&&!ownSeller)?('<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+
     '<button class="ghost sm" id="md_watch" style="flex:1">'+(isWatching(it.id)?'♥ Watching':'♡ Watch')+'</button>'+
     (it.seller_id?'<button class="ghost sm" id="md_offer" style="flex:1">💰 Make offer</button>':'')+'</div>'):'';
-  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto"><div class="mktdetgal">'+gallery+'</div>'+
+  w.innerHTML='<div class="card pagecard">'+pageHead('Listing','md_x')+'<div class="mktdetgal">'+gallery+'</div>'+
     '<h3 style="color:var(--gold);margin:10px 0 2px">'+esc(it.title)+'</h3>'+
     '<div class="mktprice" style="font-size:22px">'+mUSD(it.price_cents)+'</div>'+
     sellerLabel(it.seller_id)+
@@ -1548,7 +1549,7 @@ function showListingDetail(it,opts){
     (ship?('<div class="muted" style="margin:6px 0">'+esc(ship)+'</div>'):'')+
     (it.description?('<div style="margin:8px 0;white-space:pre-wrap">'+esc(it.description)+'</div>'):'')+
     extra+
-    '<div class="row" style="margin-top:10px">'+action+'<button class="ghost" id="md_x">Close</button></div></div>';
+    '<div class="row" style="margin-top:10px">'+action+'</div></div>';
   w.querySelector('#md_x').onclick=close;
   const add=w.querySelector('#md_add'); if(add)add.onclick=()=>{ addToCart(it.id); close(); };
   const wb=w.querySelector('#md_watch'); if(wb)wb.onclick=async()=>{ await toggleWatch(it.id); wb.textContent=isWatching(it.id)?'♥ Watching':'♡ Watch'; };
@@ -1558,12 +1559,12 @@ async function openListingEdit(id){
   if(!staffSession()){ openStaffLogin(); return; }
   const it=(id!=null)?(_mktItems||[]).find(x=>x.id===id):null;
   let photos=(it&&Array.isArray(it.photos))?it.photos.slice():[];
-  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
   const condOpts=LISTING_CONDITIONS.map(c=>'<option'+((it&&it.condition===c)?' selected':'')+'>'+c+'</option>').join('');
   function drawPhotos(){ const d=w.querySelector('#lp_thumbs'); if(!d)return; d.innerHTML=photos.length?photos.map((p,i)=>'<span class="lpthumb"><img src="'+esc(p)+'"/><button type="button" data-i="'+i+'" class="lpdel">✕</button></span>').join(''):'<span class="muted">No photos yet</span>';
     d.querySelectorAll('.lpdel').forEach(b=>b.onclick=()=>{ photos.splice(+b.dataset.i,1); drawPhotos(); }); }
-  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto"><h3 style="color:var(--gold)">'+(it?'Edit listing':'Add listing')+'</h3>'+
+  w.innerHTML='<div class="card pagecard">'+pageHead((it?'Edit listing':'Add listing'),'lp_x')+
     '<label class="fld"><span>Title</span><input id="lp_title" value="'+esc(it?it.title:'')+'" placeholder="e.g. Charizard PSA 10"/></label>'+
     '<label class="fld"><span>Description</span><textarea id="lp_desc" rows="3">'+esc(it?(it.description||''):'')+'</textarea></label>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>Price (USD)</span><input id="lp_price" type="number" step="0.01" inputmode="decimal" value="'+(it?((it.price_cents||0)/100):'')+'"/></label>'+
@@ -1573,7 +1574,7 @@ async function openListingEdit(id){
     '<label class="fld"><span>Ship within (days after payment)</span><input id="lp_days" type="number" inputmode="numeric" value="'+(it&&it.ship_days!=null?it.ship_days:3)+'"/></label>'+
     '<div class="muted" style="margin:2px 0 6px">All items ship to the buyer. Set the shipping cost and how soon you’ll ship.</div>'+
     '<div class="fld"><span>Photos</span><div id="lp_thumbs" class="lpthumbs"></div><button class="ghost" id="lp_addphoto" style="margin-top:6px">📷 Add photos</button></div>'+
-    '<div class="row" style="margin-top:10px"><button class="gold" id="lp_save" style="flex:1">Save listing</button><button class="ghost" id="lp_x">Cancel</button></div></div>';
+    '<div class="row" style="margin-top:10px"><button class="gold" id="lp_save" style="flex:1">Save listing</button></div></div>';
   w.querySelector('#lp_x').onclick=close; drawPhotos();
   w.querySelector('#lp_addphoto').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.multiple=true;
     inp.onchange=async()=>{ const files=Array.from(inp.files||[]); if(!files.length)return; let n=0;
@@ -1645,15 +1646,15 @@ function removeFromCart(id){ cartSet(cartGet().filter(x=>x.id!==id)); openCart()
 function openCart(){
   const ex=document.querySelector('.cartmodal'); if(ex)ex.remove();
   const cart=cartGet();
-  const w=document.createElement('div'); w.className='scanmodal cartmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const w=document.createElement('div'); w.className='scanmodal pagewrap cartmodal'; document.body.appendChild(w);
+  const close=()=>w.remove();
   const sub=cart.reduce((a,x)=>a+((+x.price_cents||0)*cartQty(x)),0);
   const rows=cart.length?cart.map(x=>{ const stepper=(x.max&&x.max>1)?('<div class="qtystep"><button onclick="cartChangeQty('+x.id+',-1)">−</button><span>'+cartQty(x)+'</span><button onclick="cartChangeQty('+x.id+',1)">+</button></div>'):'';
     return '<div class="memrow"><div class="memmain"><div class="memname">'+esc(x.title)+(cartQty(x)>1?(' ×'+cartQty(x)):'')+'</div><div class="mememail">'+mUSD(x.price_cents)+(x.shipping_offered?(' · ships'+(x.shipping_cents?' '+mUSD(x.shipping_cents):'')):' · pickup')+'</div></div>'+
     stepper+'<button class="memdel" onclick="removeFromCart('+x.id+')">✕</button></div>'; }).join(''):'<div class="muted" style="text-align:center;margin:10px 0">Your cart is empty.</div>';
-  w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto"><h3 style="color:var(--gold)">Your cart</h3>'+rows+
+  w.innerHTML='<div class="card pagecard">'+pageHead('Your cart','ck_x')+rows+
     (cart.length?('<div class="cartsub">Subtotal: <b>'+mUSD(sub)+'</b></div><div class="muted" style="margin:6px 0">Shipping, FL sales tax, and secure card payment are added at checkout.</div>'):'')+
-    '<div class="row" style="margin-top:10px"><button class="gold" id="ck_go" style="flex:1"'+(cart.length?'':' disabled')+'>Checkout</button><button class="ghost" id="ck_x">Close</button></div></div>';
+    '<div class="row" style="margin-top:10px"><button class="gold" id="ck_go" style="flex:1"'+(cart.length?'':' disabled')+'>Checkout</button></div></div>';
   w.querySelector('#ck_x').onclick=close;
   const go=w.querySelector('#ck_go'); if(go)go.onclick=()=>{ close(); openCheckout(); };
 }
@@ -1670,8 +1671,8 @@ async function openCheckout(){
   if(merchants[0]!=='hoc'){ return startSellerCheckout(cart); }
   if(!cfg.SQUARE_APP_ID||!cfg.SQUARE_LOCATION_ID){ toast('Payments aren’t configured yet.'); return; }
   let fulfillment='ship';   // shipping-only for now (local pickup removed)
-  const w=document.createElement('div'); w.className='scanmodal checkoutmodal'; document.body.appendChild(w);
-  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w&&!w.dataset.busy)close(); });
+  const w=document.createElement('div'); w.className='scanmodal pagewrap checkoutmodal'; document.body.appendChild(w);
+  const close=()=>{ if(w.dataset.busy)return; w.remove(); };
   _sqCard=null;
   function val2(id){ const e=w.querySelector('#'+id); return e?(e.value||'').trim():''; }
   function totals(ful){ const sub=cart.reduce((a,x)=>a+((+x.price_cents||0)*cartQty(x)),0); const ship=ful==='ship'?cart.reduce((a,x)=>a+(+x.shipping_cents||0),0):0; const tax=Math.round(sub*0.075); return {sub,ship,tax,total:sub+ship+tax}; }
@@ -1685,7 +1686,7 @@ async function openCheckout(){
       '<div class="grid2"><label class="fld" style="margin:0"><span>City</span><input id="sh_city"/></label><label class="fld" style="margin:0"><span>State</span><input id="sh_state"/></label></div>'+
       '<div class="grid2"><label class="fld" style="margin:0"><span>ZIP</span><input id="sh_zip" inputmode="numeric"/></label><label class="fld" style="margin:0"><span>Phone</span><input id="sh_phone" type="tel" inputmode="tel" value="'+esc(wallCustomer.phone||'')+'"/></label></div>'
     );
-    w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:92vh;overflow:auto"><h3 style="color:var(--gold)">Checkout</h3>'+
+    w.innerHTML='<div class="card pagecard">'+pageHead('Checkout','ck_cancel')+
       '<div class="ckitems">'+cart.map(x=>'<div class="ckrow"><span>'+esc(x.title)+(cartQty(x)>1?(' ×'+cartQty(x)):'')+'</span><span>'+mUSD((x.price_cents||0)*cartQty(x))+'</span></div>').join('')+'</div>'+
       fulPick+addr+
       '<div class="cktot"><div class="ckrow"><span>Subtotal</span><span>'+mUSD(t.sub)+'</span></div>'+
@@ -1695,7 +1696,7 @@ async function openCheckout(){
       '<div class="muted" style="margin:8px 0 4px">Card details</div><div id="sq-card" class="sqcard"></div>'+
       '<div id="sq-err" class="ckerr"></div>'+
       '<div class="muted" style="font-size:11px;margin:6px 0">🔒 Secure payment by Square. <b>All sales final.</b></div>'+
-      '<div class="row" style="margin-top:8px"><button class="gold" id="ck_pay" style="flex:1">Pay '+mUSD(t.total)+'</button><button class="ghost" id="ck_cancel">Cancel</button></div></div>';
+      '<div class="row" style="margin-top:8px"><button class="gold" id="ck_pay" style="flex:1">Pay '+mUSD(t.total)+'</button></div></div>';
     w.querySelector('#ck_cancel').onclick=close;
     w.querySelector('#ck_pay').onclick=pay;
   }
