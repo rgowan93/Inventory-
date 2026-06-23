@@ -912,14 +912,19 @@ function openCustomerAccount(){
 }
 async function loadMyOrders(cont){
   if(!cont||!cloudOn())return;
-  try{ const { data, error } = await sb.from('orders').select('id,status,fulfillment,total_cents,created_at,tracking_number,pickup_slot,seller_id,order_items(listing_id,title,price_cents)').order('created_at',{ascending:false}).limit(50);
+  try{ const { data, error } = await sb.from('orders').select('id,status,fulfillment,total_cents,created_at,tracking_number,pickup_slot,seller_id,ship_by,refunded_cents,order_items(listing_id,title,price_cents)').order('created_at',{ascending:false}).limit(50);
     if(error||!data||!data.length){ cont.innerHTML='<div class="muted">No orders yet.</div>'; return; }
     cont.innerHTML=data.map(o=>{ const items=(o.order_items||[]).map(i=>'<button class="lnkitem" onclick="openPurchasedListing('+(i.listing_id||0)+')">'+esc(i.title)+'</button>').join('');
       const extra=o.tracking_number?(' · Tracking: '+esc(o.tracking_number)):(o.pickup_slot?(' · Pickup: '+esc(o.pickup_slot)):'');
-      const fb=(o.status==='complete')?('<div style="margin-top:6px"><button class="sm gold" onclick="openFeedback('+o.id+',\'buyer_to_seller\','+(o.seller_id?('\''+o.seller_id+'\''):'null')+')">★ Leave feedback</button></div>'):'';
+      const deadline=(o.ship_by&&(o.status==='paid'))?('<div class="muted" style="margin-top:4px">⏱️ Seller to ship by '+new Date(o.ship_by).toLocaleDateString()+'</div>'):'';
+      const refunded=(o.refunded_cents>0)?('<div class="muted" style="margin-top:4px">↩️ Refunded '+mUSD(o.refunded_cents)+'</div>'):'';
+      const fb=(o.status==='complete')?('<button class="sm gold" onclick="openFeedback('+o.id+',\'buyer_to_seller\','+(o.seller_id?('\''+o.seller_id+'\''):'null')+')">★ Leave feedback</button>'):'';
+      const msg=o.seller_id?('<button class="sm ghost" onclick="openThread('+o.id+',\'buyer\')">💬 Messages</button>'):'';
+      const caseBtn=(o.status!=='refunded'&&o.status!=='canceled')?('<button class="sm ghost" onclick="openCase('+o.id+','+(o.seller_id?('\''+o.seller_id+'\''):'null')+')">🛡️ Get help / refund</button>'):'';
+      const actions=(fb||msg||caseBtn)?('<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+fb+msg+caseBtn+'</div>'):'';
       return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
         '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+' · '+esc(o.fulfillment)+extra+'</div>'+
-        (items?('<div class="lnkitems">'+items+'</div>'):'')+fb+'</div>'; }).join('');
+        deadline+refunded+(items?('<div class="lnkitems">'+items+'</div>'):'')+actions+'</div>'; }).join('');
   }catch(e){ cont.innerHTML='<div class="muted">Could not load orders.</div>'; }
 }
 function openFeedback(orderId,role,rateeId){
@@ -948,19 +953,25 @@ async function openSellerSales(){
   const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
   w.innerHTML='<div class="card" style="max-width:440px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="ss_x">✕</button><h3 style="color:var(--gold)">My sales</h3><div id="ss_list"><div class="muted">Loading…</div></div></div>';
   w.querySelector('#ss_x').onclick=close;
-  const {data}=await sb.from('orders').select('id,status,total_cents,created_at,customer_id,customer_name,ship_name,ship_address1,ship_city,ship_state,ship_zip,ship_phone,tracking_number,order_items(title,price_cents)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(50);
+  const {data}=await sb.from('orders').select('id,status,total_cents,created_at,customer_id,customer_name,ship_name,ship_address1,ship_city,ship_state,ship_zip,ship_phone,tracking_number,ship_by,refunded_cents,order_items(title,price_cents)').eq('seller_id',wallCustomer.id).order('created_at',{ascending:false}).limit(50);
   const list=w.querySelector('#ss_list'); const rows=data||[];
   if(!rows.length){ list.innerHTML='<div class="muted" style="text-align:center">No sales yet.</div>'; return; }
   list.innerHTML=rows.map(o=>{ const items=(o.order_items||[]).map(i=>esc(i.title)).join(', ');
     const addr=[o.ship_name,o.ship_address1,o.ship_city,o.ship_state,o.ship_zip].filter(Boolean).join(', ');
-    const fb=(o.status==='complete')?('<div style="margin-top:6px"><button class="sm gold" onclick="openFeedback('+o.id+',\'seller_to_buyer\','+(o.customer_id?('\''+o.customer_id+'\''):'null')+')">★ Rate buyer</button></div>'):'';
-    const ful=(o.status!=='complete'&&o.status!=='canceled')?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="sm ghost" onclick="sellerShip('+o.id+')">Add tracking / Shipped</button><button class="sm gold" onclick="sellerCompleteSale('+o.id+')">Mark complete</button></div>'):'';
+    const deadline=(o.ship_by&&o.status==='paid')?('<div class="muted" style="margin-top:4px">⏱️ Ship by '+new Date(o.ship_by).toLocaleDateString()+'</div>'):'';
+    const refunded=(o.refunded_cents>0)?('<div class="muted" style="margin-top:4px">↩️ Refunded '+mUSD(o.refunded_cents)+'</div>'):'';
+    const fb=(o.status==='complete')?('<button class="sm gold" onclick="openFeedback('+o.id+',\'seller_to_buyer\','+(o.customer_id?('\''+o.customer_id+'\''):'null')+')">★ Rate buyer</button>'):'';
+    const msg='<button class="sm ghost" onclick="openThread('+o.id+',\'seller\')">💬 Message buyer</button>';
+    const ship=(o.status!=='complete'&&o.status!=='canceled'&&o.status!=='refunded')?('<button class="sm ghost" onclick="sellerShip('+o.id+')">Add tracking / Shipped</button><button class="sm gold" onclick="sellerCompleteSale('+o.id+')">Mark complete</button>'):'';
+    const ref=(o.status!=='refunded'&&(o.refunded_cents||0)<(o.total_cents||0))?('<button class="sm ghost" onclick="openRefund('+o.id+',\'seller\','+((o.total_cents||0)-(o.refunded_cents||0))+')">Refund buyer</button>'):'';
     return '<div class="ordcard"><div class="ordhead"><b>Order #'+o.id+'</b><span class="ordstatus s_'+esc(o.status)+'">'+esc(o.status)+'</span></div>'+
       '<div class="muted">'+new Date(o.created_at).toLocaleDateString()+' · '+mUSD(o.total_cents)+'</div>'+
+      deadline+refunded+
       (addr?('<div class="muted" style="margin-top:4px">📦 '+esc(addr)+(o.ship_phone?(' · '+esc(o.ship_phone)):'')+'</div>'):'')+
       (items?('<div style="font-size:13px;margin-top:4px">'+items+'</div>'):'')+
       (o.tracking_number?('<div class="muted">Tracking: '+esc(o.tracking_number)+'</div>'):'')+
-      '<div class="muted" style="font-size:11px;margin-top:4px">You keep your sale minus the 5% fee.</div>'+ful+fb+'</div>'; }).join('');
+      '<div class="muted" style="font-size:11px;margin-top:4px">You keep 90% of the item price + the full shipping fee (10% platform fee).</div>'+
+      '<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+ship+ref+msg+fb+'</div></div>'; }).join('');
 }
 async function sellerFulfill(id,status,tracking){
   const {data,error}=await sb.functions.invoke('seller-fulfill',{body:{id:id,status:status,tracking:tracking||''}});
@@ -969,6 +980,112 @@ async function sellerFulfill(id,status,tracking){
 }
 async function sellerShip(id){ const t=prompt('Tracking number (optional):'); if(t===null)return; if(await sellerFulfill(id,'shipped',t)){ toast('Marked shipped — buyer notified.'); openSellerSales(); } }
 async function sellerCompleteSale(id){ if(!confirm('Mark this sale complete?'))return; if(await sellerFulfill(id,'complete','')){ toast('Marked complete.'); openSellerSales(); } }
+/* ===== Messaging, cases & refunds (buyer / seller / House of Cards protection) ===== */
+function _staffCreds(){ const s=staffSession(); if(!s){ openStaffLogin(); return null; } if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p)return null; _staffPw=hashPass(p); } return {p_user:s.username,p_pass:_staffPw}; }
+function _msgBubble(m,viewer){
+  const mine=(viewer==='staff'&&m.sender_role==='staff')||(viewer==='buyer'&&m.sender_role==='buyer')||(viewer==='seller'&&m.sender_role==='seller');
+  const tag=m.channel==='buyer_staff'?'House of Cards':'Seller chat';
+  return '<div class="msgb '+(mine?'me':'them')+'"><div class="msgmeta">'+esc(m.sender_name||m.sender_role)+' · '+new Date(m.created_at).toLocaleString()+' · '+tag+'</div><div class="msgtxt">'+esc(m.body)+'</div></div>';
+}
+async function openThread(orderId,viewer){
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  const toSel = viewer==='buyer' ? '<select id="mt_to" class="mktsort" style="flex:0 0 auto"><option value="buyer_seller">To: Seller</option><option value="buyer_staff">To: House of Cards</option></select>' : '';
+  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;display:flex;flex-direction:column;position:relative"><button class="modalx" id="mt_x">✕</button><h3 style="color:var(--gold)">Messages · Order #'+orderId+'</h3>'+
+    '<div id="mt_list" class="msglist"><div class="muted">Loading…</div></div>'+
+    '<div class="row" style="gap:6px;margin-top:8px">'+toSel+'<input id="mt_in" class="mktsearch" placeholder="Write a message…" style="flex:1"/><button class="gold sm" id="mt_send">Send</button></div></div>';
+  w.querySelector('#mt_x').onclick=close;
+  async function load(){
+    let msgs=[];
+    if(viewer==='staff'){ const cr=_staffCreds(); if(!cr){ close(); return; } const r=await sbRpc('staff_order_messages',{p_user:cr.p_user,p_pass:cr.p_pass,p_order:orderId}); msgs=(r&&r.ok)?r.messages:[]; }
+    else { const {data}=await sb.from('messages').select('*').eq('order_id',orderId).order('created_at',{ascending:true}); msgs=data||[]; }
+    const list=w.querySelector('#mt_list');
+    list.innerHTML=msgs.length?msgs.map(m=>_msgBubble(m,viewer)).join(''):'<div class="muted" style="text-align:center">No messages yet. Say hello 👋</div>';
+    list.scrollTop=list.scrollHeight;
+  }
+  w.querySelector('#mt_send').onclick=async()=>{
+    const inp=w.querySelector('#mt_in'); const body=(inp.value||'').trim(); if(!body)return; inp.value='';
+    if(viewer==='staff'){ const cr=_staffCreds(); if(!cr)return; const r=await sbFn('staff-msg',{p_user:cr.p_user,p_pass:cr.p_pass,order_id:orderId,body:body}); if(!r||r.ok!==true){ toast((r&&r.error)||'Could not send.'); return; } }
+    else { const chan=viewer==='buyer'?(w.querySelector('#mt_to').value||'buyer_seller'):'buyer_seller'; const {data,error}=await sb.functions.invoke('message-send',{body:{order_id:orderId,channel:chan,body:body}}); let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } } if(!out||out.ok!==true){ toast((out&&out.error)||'Could not send.'); return; } }
+    load();
+  };
+  w.querySelector('#mt_in').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); w.querySelector('#mt_send').click(); } });
+  load();
+}
+function openCase(orderId,sellerId){
+  if(!wallCustomer){ openLogin(); return; }
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:420px;width:100%;position:relative"><button class="modalx" id="cs_x">✕</button><h3 style="color:var(--gold)">Open a case · Order #'+orderId+'</h3>'+
+    '<label class="fld"><span>What’s the problem?</span><select id="cs_kind">'+
+      '<option value="not_received">Item didn’t arrive</option><option value="item_issue">Problem with the item</option><option value="refund_request">Request a refund</option><option value="other">Something else</option></select></label>'+
+    '<label class="fld"><span>Who should handle it?</span><select id="cs_against"><option value="seller">Work it out with the seller</option><option value="hoc">Escalate to House of Cards staff</option></select></label>'+
+    '<label class="fld"><span>Details</span><textarea id="cs_detail" rows="4" placeholder="Tell us what happened…"></textarea></label>'+
+    '<div class="muted" style="font-size:12px;margin-bottom:6px">You’re protected: your card was charged through Square/Stripe and you keep full card-dispute rights. Most issues are resolved here first.</div>'+
+    '<div class="row" style="margin-top:4px"><button class="gold" id="cs_go" style="flex:1">Submit case</button></div></div>';
+  w.querySelector('#cs_x').onclick=close;
+  w.querySelector('#cs_go').onclick=async()=>{
+    const kind=w.querySelector('#cs_kind').value, against=w.querySelector('#cs_against').value, detail=(w.querySelector('#cs_detail').value||'').trim();
+    const {data,error}=await sb.functions.invoke('case-open',{body:{order_id:orderId,kind:kind,against:against,detail:detail}});
+    let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
+    if(!out||out.ok!==true){ toast((out&&out.error)||'Could not open case.'); return; }
+    close(); toast('Case opened — we’ll be in touch. 🛡️'); openThread(orderId,'buyer');
+  };
+}
+function openRefund(orderId,viewer,maxCents){
+  const w=document.createElement('div'); w.className='scanmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:400px;width:100%;position:relative"><button class="modalx" id="rf_x">✕</button><h3 style="color:var(--gold)">Issue refund · Order #'+orderId+'</h3>'+
+    '<label class="fld"><span>Refund amount (USD)</span><input id="rf_amt" type="number" step="0.01" inputmode="decimal" value="'+((maxCents||0)/100).toFixed(2)+'"/></label>'+
+    '<label class="fld"><span>Reason / note</span><textarea id="rf_note" rows="3"></textarea></label>'+
+    '<div class="muted" style="font-size:12px;margin-bottom:6px">Refunds go back to the buyer’s card. For seller items the amount is pulled back from the seller’s payout.</div>'+
+    '<div class="row" style="margin-top:4px"><button class="gold" id="rf_go" style="flex:1">Refund</button></div></div>';
+  w.querySelector('#rf_x').onclick=close;
+  w.querySelector('#rf_go').onclick=async()=>{
+    const cents=Math.round((parseFloat(w.querySelector('#rf_amt').value)||0)*100); if(cents<=0){ toast('Enter an amount.'); return; }
+    const note=(w.querySelector('#rf_note').value||'').trim();
+    if(!confirm('Refund '+mUSD(cents)+' to the buyer?'))return;
+    let out;
+    if(viewer==='staff'){ const cr=_staffCreds(); if(!cr)return; out=await sbFn('refund',{p_user:cr.p_user,p_pass:cr.p_pass,order_id:orderId,amount_cents:cents,resolution:note}); }
+    else { const {data,error}=await sb.functions.invoke('refund',{body:{order_id:orderId,amount_cents:cents,resolution:note}}); out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } } }
+    if(!out||out.ok!==true){ toast((out&&out.error)||'Refund failed.'); return; }
+    close(); toast('Refund issued '+mUSD(cents)+'.');
+    if(viewer==='staff')openStaffCases(); else openSellerSales();
+  };
+}
+const _DKIND={not_received:'Item not received',item_issue:'Problem with item',refund_request:'Refund requested',other:'Issue'};
+async function openStaffCases(){
+  const cr=_staffCreds(); if(!cr)return;
+  const ex=document.querySelector('.casesmodal'); if(ex)ex.remove();
+  const w=document.createElement('div'); w.className='scanmodal casesmodal'; document.body.appendChild(w);
+  const close=()=>w.remove(); w.addEventListener('click',e=>{ if(e.target===w)close(); });
+  w.innerHTML='<div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto;position:relative"><button class="modalx" id="cx_x">✕</button><h3 style="color:var(--gold)">🛡️ Buyer cases</h3><div id="cx_list"><div class="muted">Loading…</div></div></div>';
+  w.querySelector('#cx_x').onclick=close;
+  const r=await sbRpc('staff_disputes',{p_user:cr.p_user,p_pass:cr.p_pass});
+  const list=w.querySelector('#cx_list');
+  if(!r||r.ok!==true){ _staffPw=null; list.innerHTML='<div class="muted" style="text-align:center">Couldn’t verify your password. <button class="sm ghost" onclick="openStaffCases()">Try again</button></div>'; return; }
+  const ds=r.disputes||[];
+  if(!ds.length){ list.innerHTML='<div class="muted" style="text-align:center">No cases. 🎉</div>'; return; }
+  list.innerHTML=ds.map(d=>{
+    const open=(d.status==='open'||d.status==='seller_responded'||d.status==='escalated');
+    const acts=open?('<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+
+      '<button class="sm ghost" onclick="openThread('+d.order_id+',\'staff\')">💬 Thread</button>'+
+      '<button class="sm gold" onclick="openRefund('+d.order_id+',\'staff\','+(d.order_total_cents||0)+')">Refund</button>'+
+      '<button class="sm ghost" onclick="staffCaseStatus('+d.order_id+',\'resolved\')">Mark resolved</button>'+
+      '<button class="sm ghost" onclick="staffCaseStatus('+d.order_id+',\'closed\')">Close</button></div>')
+      :('<div class="row" style="gap:6px;margin-top:6px"><button class="sm ghost" onclick="openThread('+d.order_id+',\'staff\')">💬 Thread</button></div>');
+    return '<div class="ordcard"><div class="ordhead"><b>Order #'+d.order_id+'</b><span class="ordstatus s_'+esc(d.status)+'">'+esc(d.status)+'</span></div>'+
+      '<div class="muted">'+esc(_DKIND[d.kind]||d.kind)+' · '+(d.against==='hoc'?'escalated to staff':'seller')+' · '+mUSD(d.order_total_cents)+'</div>'+
+      '<div style="margin-top:2px">'+esc(d.customer_name||'Customer')+'</div>'+
+      (d.detail?('<div class="muted" style="margin-top:4px">“'+esc(d.detail)+'”</div>'):'')+
+      ((d.refund_cents>0)?('<div class="muted">Refunded: '+mUSD(d.refund_cents)+'</div>'):'')+acts+'</div>';
+  }).join('');
+}
+async function staffCaseStatus(orderId,status){
+  const cr=_staffCreds(); if(!cr)return;
+  const r=await sbFn('staff-msg',{p_user:cr.p_user,p_pass:cr.p_pass,order_id:orderId,status:status});
+  if(r&&r.ok){ toast('Case '+status+'.'); openStaffCases(); } else toast((r&&r.error)||'Could not update.');
+}
 /* ============================== Marketplace (Phase 2: listings + browse + cart) ============================== */
 const LISTING_CONDITIONS=['Sealed','Graded','Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New','Used'];
 let _mktItems=[]; let _mktSub='active', _mktSort='new', _mktSearch='', _mktPortal='selling';
@@ -1245,11 +1362,15 @@ function openOrderConfirm(id,total){
 }
 /* ---- Staff Orders (view + basic fulfillment; full workflow in Phase 4) ---- */
 function orderActions(o){
-  if(o.status==='complete'||o.status==='canceled')return '';
   const b=[];
-  if(o.fulfillment==='ship') b.push('<button class="sm ghost" onclick="orderShip('+o.id+')">Add tracking / Shipped</button>');
-  else b.push('<button class="sm ghost" onclick="orderReady('+o.id+')">Set pickup time / Ready</button>');
-  b.push('<button class="sm gold" onclick="orderComplete('+o.id+')">Mark complete</button>');
+  if(o.status!=='complete'&&o.status!=='canceled'&&o.status!=='refunded'){
+    if(o.fulfillment==='ship') b.push('<button class="sm ghost" onclick="orderShip('+o.id+')">Add tracking / Shipped</button>');
+    else b.push('<button class="sm ghost" onclick="orderReady('+o.id+')">Set pickup time / Ready</button>');
+    b.push('<button class="sm gold" onclick="orderComplete('+o.id+')">Mark complete</button>');
+  }
+  b.push('<button class="sm ghost" onclick="openThread('+o.id+',\'staff\')">💬 Messages</button>');
+  if(o.status!=='refunded'&&(o.refunded_cents||0)<(o.total_cents||0)) b.push('<button class="sm ghost" onclick="openRefund('+o.id+',\'staff\','+((o.total_cents||0)-(o.refunded_cents||0))+')">Refund</button>');
+  if(!b.length)return '';
   return '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">'+b.join('')+'</div>';
 }
 function orderCard(o){
@@ -1312,7 +1433,7 @@ async function loadOrders(){
 function setOrdSub(s){ _ordSub=s; renderOrders(); }
 function renderOrders(){
   const cont=el('wOrders'); if(!cont)return;
-  const c=el('wOrdersControls'); if(c){ const subs=[['active','Active'],['complete','Complete']]; c.innerHTML='<div class="mktsubs">'+subs.map(x=>'<button class="mktsub'+(_ordSub===x[0]?' on':'')+'" onclick="setOrdSub(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div>'; }
+  const c=el('wOrdersControls'); if(c){ const subs=[['active','Active'],['complete','Complete']]; c.innerHTML='<div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><div class="mktsubs" style="flex:1">'+subs.map(x=>'<button class="mktsub'+(_ordSub===x[0]?' on':'')+'" onclick="setOrdSub(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div><button class="sm ghost" onclick="openStaffCases()">🛡️ Cases</button></div>'; }
   let o=_ordersCache.slice();
   if(_ordSub==='complete') o=o.filter(x=>x.status==='complete'||x.status==='canceled');
   else o=o.filter(x=>x.status!=='complete'&&x.status!=='canceled');
