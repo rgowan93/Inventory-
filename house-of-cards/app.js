@@ -625,12 +625,44 @@ function myPhone(){ try{ const a=JSON.parse(localStorage.getItem('hoc_textSignup
 function staffSession(){ try{ return JSON.parse(localStorage.getItem('hoc_staff')||'null'); }catch(e){ return null; } }
 function setStaffSession(o){ try{ if(o)localStorage.setItem('hoc_staff',JSON.stringify(o)); else localStorage.removeItem('hoc_staff'); }catch(e){} }
 let _staffPw=null;  // in-memory only: the signed-in staff member's password hash, so admin actions don't re-prompt each time
+/* ---- Face ID / fingerprint unlock (WebAuthn gates a locally-stored password hash on this device) ---- */
+function _b64u(buf){ const b=new Uint8Array(buf); let s=''; for(let i=0;i<b.length;i++)s+=String.fromCharCode(b[i]); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function _unb64u(str){ str=String(str).replace(/-/g,'+').replace(/_/g,'/'); const pad='='.repeat((4-str.length%4)%4); const raw=atob(str+pad); const b=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++)b[i]=raw.charCodeAt(i); return b.buffer; }
+function _rand(n){ const a=new Uint8Array(n); crypto.getRandomValues(a); return a; }
+function bioSupported(){ return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create); }
+function bioEnabledFor(u){ try{ return !!localStorage.getItem('hoc_bio_'+u); }catch(e){ return false; } }
+async function bioRegister(){
+  const s=staffSession(); if(!s){ toast('Sign in as staff first.'); return false; }
+  if(!bioSupported()){ toast('Face ID / fingerprint isn’t available on this device/browser.'); return false; }
+  if(!_staffPw){ const p=prompt('Confirm your staff password to enable Face ID:'); if(!p)return false; _staffPw=hashPass(p); }
+  const ok=await sbRpc('staff_ok',{p_user:s.username,p_pass:_staffPw}); if(ok!==true){ _staffPw=null; toast('Password didn’t verify — try again.'); return false; }
+  try{
+    const cred=await navigator.credentials.create({publicKey:{ challenge:_rand(32), rp:{name:'House of Cards'}, user:{id:new TextEncoder().encode(s.username), name:s.username, displayName:s.username}, pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}], authenticatorSelection:{authenticatorAttachment:'platform', userVerification:'required'}, timeout:60000, attestation:'none' }});
+    if(!cred){ toast('Could not set up Face ID.'); return false; }
+    localStorage.setItem('hoc_bio_'+s.username, JSON.stringify({id:_b64u(cred.rawId), pw:_staffPw}));
+    toast('✅ Face ID / fingerprint unlock enabled.'); return true;
+  }catch(e){ toast('Face ID setup canceled.'); return false; }
+}
+function bioForget(){ const s=staffSession(); if(s){ try{ localStorage.removeItem('hoc_bio_'+s.username); }catch(e){} toast('Face ID unlock removed from this device.'); } }
+async function bioUnlock(u){
+  try{ const raw=localStorage.getItem('hoc_bio_'+u); if(!raw)return null; const d=JSON.parse(raw); if(!d||!d.id||!d.pw)return null;
+    const a=await navigator.credentials.get({publicKey:{ challenge:_rand(32), allowCredentials:[{type:'public-key', id:_unb64u(d.id)}], userVerification:'required', timeout:60000 }});
+    return a?d.pw:null;
+  }catch(e){ return null; }
+}
+/* Get the staff password hash, using Face ID if set up, otherwise a one-time prompt. */
+async function ensureStaffPw(){
+  if(_staffPw)return _staffPw;
+  const s=staffSession(); if(!s)return null;
+  if(bioEnabledFor(s.username)){ const h=await bioUnlock(s.username); if(h){ _staffPw=h; return _staffPw; } }
+  const p=prompt('Confirm your staff password:'); if(p===null||p==='')return null; _staffPw=hashPass(p); return _staffPw;
+}
 function staffLogout(){ setStaffSession(null); _staffPw=null; ui.wallTab='home'; toast('Signed out.'); render(); }
 // Run a staff-only write RPC (add/delete shows, flyers, media, comments). Requires a real
 // staff sign-in; confirms the password once per session, then caches it in memory.
 async function staffDo(fn,args,okMsg){
   const s=staffSession(); if(!s){ toast('Please sign in as staff to do that.'); openStaffLogin(); return null; }
-  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(p===null||p==='')return null; _staffPw=hashPass(p); }
+  if(!(await ensureStaffPw()))return null;
   const res=await sbRpc(fn,Object.assign({p_user:s.username,p_pass:_staffPw},args||{}));
   if(res===null||res===false){ _staffPw=null; toast('Couldn’t verify your staff password — try again.'); return null; }
   if(okMsg)toast(okMsg);
@@ -639,7 +671,7 @@ async function staffDo(fn,args,okMsg){
 async function loadMembers(){
   const cont=el('wMemberList'); if(!cont)return;
   const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
-  if(!_staffPw){ const p=prompt('Confirm your staff password to view members:'); if(!p){ cont.innerHTML='<div class="muted" style="text-align:center">Enter your password to view members. <button class="sm ghost" onclick="loadMembers()">Try again</button></div>'; return; } _staffPw=hashPass(p); }
+  if(!(await ensureStaffPw())){ cont.innerHTML='<div class="muted" style="text-align:center">Unlock to view members. <button class="sm ghost" onclick="loadMembers()">Try again</button></div>'; return; }
   cont.innerHTML='<div class="muted" style="text-align:center">Loading…</div>';
   const res=await sbRpc('staff_members',{p_user:s.username,p_pass:_staffPw});
   if(!res||res.ok!==true){ _staffPw=null; cont.innerHTML='<div class="muted" style="text-align:center">Couldn\'t verify your password. <button class="sm ghost" onclick="loadMembers()">Try again</button></div>'; return; }
@@ -665,7 +697,7 @@ async function removeMember(kind,id,name){
 /* ---- Staff: sellers list (approve / verify / ban) ---- */
 async function loadSellers(){
   const cont=el('wSellers'); if(!cont)return; const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
-  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p){ cont.innerHTML='<div class="muted" style="text-align:center">Enter your password. <button class="sm ghost" onclick="loadSellers()">Try again</button></div>'; return; } _staffPw=hashPass(p); }
+  if(!(await ensureStaffPw())){ cont.innerHTML='<div class="muted" style="text-align:center">Unlock to view sellers. <button class="sm ghost" onclick="loadSellers()">Try again</button></div>'; return; }
   cont.innerHTML='<div class="muted" style="text-align:center">Loading…</div>';
   const r=await sbRpc('staff_sellers',{p_user:s.username,p_pass:_staffPw});
   if(!r||r.ok!==true){ _staffPw=null; cont.innerHTML='<div class="muted" style="text-align:center">Couldn’t verify your password. <button class="sm ghost" onclick="loadSellers()">Try again</button></div>'; return; }
@@ -690,7 +722,7 @@ function sellerCard(x){
 }
 async function sellerAction(id,status,verified){
   const s=staffSession(); if(!s){ openStaffLogin(); return; }
-  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p)return; _staffPw=hashPass(p); }
+  if(!(await ensureStaffPw()))return;
   const r=await sbFn('seller-admin',{p_user:s.username,p_pass:_staffPw,id:id,status:status,verified:verified});
   if(r&&r.ok){ toast('Updated — seller notified.'); loadSellers(); }
   else if(r&&r.error){ toast(r.error); } else { _staffPw=null; toast('Couldn’t update (check your password).'); }
@@ -753,7 +785,7 @@ async function loadSellerBalance(box){
 }
 async function loadStaffBalance(box){
   if(!box)return; const s=staffSession(); if(!s){ box.textContent='Staff only.'; return; }
-  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p){ box.textContent='Enter your password to view.'; return; } _staffPw=hashPass(p); }
+  if(!(await ensureStaffPw())){ box.textContent='Unlock to view.'; return; }
   box.textContent='Loading…';
   const out=await sbFn('staff-balance',{p_user:s.username,p_pass:_staffPw});
   if(!out||out.ok!==true){ _staffPw=out?_staffPw:null; box.textContent=(out&&out.error)||'Could not load balance.'; return; }
@@ -1049,7 +1081,7 @@ async function sellerFulfill(id,status,tracking){
 async function sellerShip(id){ const t=prompt('Tracking number (optional):'); if(t===null)return; if(await sellerFulfill(id,'shipped',t)){ toast('Marked shipped — buyer notified.'); openSellerSales(); } }
 async function sellerCompleteSale(id){ if(!confirm('Mark this sale complete?'))return; if(await sellerFulfill(id,'complete','')){ toast('Marked complete.'); openSellerSales(); } }
 /* ===== Messaging, cases & refunds (buyer / seller / House of Cards protection) ===== */
-function _staffCreds(){ const s=staffSession(); if(!s){ openStaffLogin(); return null; } if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p)return null; _staffPw=hashPass(p); } return {p_user:s.username,p_pass:_staffPw}; }
+async function _staffCreds(){ const s=staffSession(); if(!s){ openStaffLogin(); return null; } const pw=await ensureStaffPw(); if(!pw)return null; return {p_user:s.username,p_pass:pw}; }
 function _msgBubble(m,viewer){
   const mine=(viewer==='staff'&&m.sender_role==='staff')||(viewer==='buyer'&&m.sender_role==='buyer')||(viewer==='seller'&&m.sender_role==='seller');
   const tag=m.channel==='buyer_staff'?'House of Cards':'Seller chat';
@@ -1065,7 +1097,7 @@ async function openThread(orderId,viewer){
   w.querySelector('#mt_x').onclick=close;
   async function load(){
     let msgs=[];
-    if(viewer==='staff'){ const cr=_staffCreds(); if(!cr){ close(); return; } const r=await sbRpc('staff_order_messages',{p_user:cr.p_user,p_pass:cr.p_pass,p_order:orderId}); msgs=(r&&r.ok)?r.messages:[]; }
+    if(viewer==='staff'){ const cr=await _staffCreds(); if(!cr){ close(); return; } const r=await sbRpc('staff_order_messages',{p_user:cr.p_user,p_pass:cr.p_pass,p_order:orderId}); msgs=(r&&r.ok)?r.messages:[]; }
     else { const {data}=await sb.from('messages').select('*').eq('order_id',orderId).order('created_at',{ascending:true}); msgs=data||[]; }
     const list=w.querySelector('#mt_list');
     list.innerHTML=msgs.length?msgs.map(m=>_msgBubble(m,viewer)).join(''):'<div class="muted" style="text-align:center">No messages yet. Say hello 👋</div>';
@@ -1073,7 +1105,7 @@ async function openThread(orderId,viewer){
   }
   w.querySelector('#mt_send').onclick=async()=>{
     const inp=w.querySelector('#mt_in'); const body=(inp.value||'').trim(); if(!body)return; inp.value='';
-    if(viewer==='staff'){ const cr=_staffCreds(); if(!cr)return; const r=await sbFn('staff-msg',{p_user:cr.p_user,p_pass:cr.p_pass,order_id:orderId,body:body}); if(!r||r.ok!==true){ toast((r&&r.error)||'Could not send.'); return; } }
+    if(viewer==='staff'){ const cr=await _staffCreds(); if(!cr)return; const r=await sbFn('staff-msg',{p_user:cr.p_user,p_pass:cr.p_pass,order_id:orderId,body:body}); if(!r||r.ok!==true){ toast((r&&r.error)||'Could not send.'); return; } }
     else { const chan=viewer==='buyer'?(w.querySelector('#mt_to').value||'buyer_seller'):'buyer_seller'; const {data,error}=await sb.functions.invoke('message-send',{body:{order_id:orderId,channel:chan,body:body}}); let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } } if(!out||out.ok!==true){ toast((out&&out.error)||'Could not send.'); return; } }
     load();
   };
@@ -1114,7 +1146,7 @@ function openRefund(orderId,viewer,maxCents){
     const note=(w.querySelector('#rf_note').value||'').trim();
     if(!confirm('Refund '+mUSD(cents)+' to the buyer?'))return;
     let out;
-    if(viewer==='staff'){ const cr=_staffCreds(); if(!cr)return; out=await sbFn('refund',{p_user:cr.p_user,p_pass:cr.p_pass,order_id:orderId,amount_cents:cents,resolution:note}); }
+    if(viewer==='staff'){ const cr=await _staffCreds(); if(!cr)return; out=await sbFn('refund',{p_user:cr.p_user,p_pass:cr.p_pass,order_id:orderId,amount_cents:cents,resolution:note}); }
     else { const {data,error}=await sb.functions.invoke('refund',{body:{order_id:orderId,amount_cents:cents,resolution:note}}); out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } } }
     if(!out||out.ok!==true){ toast((out&&out.error)||'Refund failed.'); return; }
     close(); toast('Refund issued '+mUSD(cents)+'.');
@@ -1123,7 +1155,7 @@ function openRefund(orderId,viewer,maxCents){
 }
 const _DKIND={not_received:'Item not received',item_issue:'Problem with item',refund_request:'Refund requested',other:'Issue'};
 async function openStaffCases(){
-  const cr=_staffCreds(); if(!cr)return;
+  const cr=await _staffCreds(); if(!cr)return;
   const ex=document.querySelector('.casesmodal'); if(ex)ex.remove();
   const w=document.createElement('div'); w.className='scanmodal pagewrap casesmodal'; document.body.appendChild(w);
   const close=()=>w.remove();
@@ -1150,7 +1182,7 @@ async function openStaffCases(){
   }).join('');
 }
 async function staffCaseStatus(orderId,status){
-  const cr=_staffCreds(); if(!cr)return;
+  const cr=await _staffCreds(); if(!cr)return;
   const r=await sbFn('staff-msg',{p_user:cr.p_user,p_pass:cr.p_pass,order_id:orderId,status:status});
   if(r&&r.ok){ toast('Case '+status+'.'); openStaffCases(); } else toast((r&&r.error)||'Could not update.');
 }
@@ -1367,7 +1399,7 @@ async function openInbox(){
   w.querySelector('#nb_x').onclick=close;
   const list=w.querySelector('#nb_list');
   let items=[];
-  if(staffSession()){ if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p){ close(); return; } _staffPw=hashPass(p); } const r=await sbRpc('staff_notifications',{p_user:staffSession().username,p_pass:_staffPw}); items=(r&&r.ok)?(r.notifications||[]):[]; const maxId=items.reduce((m,n)=>Math.max(m,n.id||0),0); try{ localStorage.setItem('hoc_notifSeen',String(maxId)); }catch(e){} }
+  if(staffSession()){ if(!(await ensureStaffPw())){ close(); return; } const r=await sbRpc('staff_notifications',{p_user:staffSession().username,p_pass:_staffPw}); items=(r&&r.ok)?(r.notifications||[]):[]; const maxId=items.reduce((m,n)=>Math.max(m,n.id||0),0); try{ localStorage.setItem('hoc_notifSeen',String(maxId)); }catch(e){} }
   else if(wallCustomer){ const {data}=await sb.from('notifications').select('*').eq('customer_id',wallCustomer.id).order('created_at',{ascending:false}).limit(60); items=data||[]; try{ await sb.from('notifications').update({read:true}).eq('customer_id',wallCustomer.id).eq('read',false); }catch(e){} }
   else { list.innerHTML='<div class="muted" style="text-align:center">Sign in to see your notifications.</div>'; return; }
   _notifUnread=0; paintNotifDot();
@@ -1789,7 +1821,7 @@ function orderCard(o){
 }
 async function orderUpdate(id,status,tracking,pickup){
   const s=staffSession(); if(!s){ openStaffLogin(); return null; }
-  if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(p===null||p==='')return null; _staffPw=hashPass(p); }
+  if(!(await ensureStaffPw()))return null;
   const r=await sbFn('order-update',{p_user:s.username,p_pass:_staffPw,id:id,status:status,tracking:tracking||'',pickup:pickup||''});
   if(!r||r.ok!==true){ _staffPw=null; toast((r&&r.error)||'Couldn’t update — check your password.'); return null; }
   return r;
@@ -1837,7 +1869,7 @@ async function enableNotifications(kind){
     const sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlB64ToUint8(cfg.VAPID_PUBLIC)});
     const j=sub.toJSON()||{}; const keys=j.keys||{}; const endpoint=j.endpoint, p256dh=keys.p256dh, auth=keys.auth;
     if(!endpoint||!p256dh||!auth){ toast('Could not set up notifications.'); return; }
-    if(kind==='staff'){ const s=staffSession(); if(!s){ toast('Sign in as staff first.'); return; } if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p)return; _staffPw=hashPass(p); }
+    if(kind==='staff'){ const s=staffSession(); if(!s){ toast('Sign in as staff first.'); return; } if(!(await ensureStaffPw()))return;
       const r=await sbRpc('push_subscribe_staff',{p_user:s.username,p_pass:_staffPw,p_endpoint:endpoint,p_p256dh:p256dh,p_auth:auth});
       if(r===true){ toast('🔔 Staff notifications on! Sending a test…'); if(typeof updateInstallBanner==='function')updateInstallBanner(); pushTest(); } else { _staffPw=null; toast('Could not enable (check your password).'); } }
     else { if(!wallCustomer){ toast('Please sign in first.'); return; } const {error}=await sb.from('push_subscriptions').upsert({endpoint:endpoint,p256dh:p256dh,auth:auth,audience:'customer',customer_id:wallCustomer.id},{onConflict:'endpoint'}); if(!error){ toast('🔔 Notifications on! Sending a test…'); if(typeof updateInstallBanner==='function')updateInstallBanner(); pushTest(); } else toast('Could not enable notifications.'); }
@@ -1855,7 +1887,7 @@ async function pushTest(){
 let _ordSub='active', _ordersCache=[], _newOrderCount=0;
 async function loadOrders(){
   const cont=el('wOrders'); if(!cont)return; const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
-  if(!_staffPw){ const p=prompt('Confirm your staff password to view orders:'); if(!p){ cont.innerHTML='<div class="muted" style="text-align:center">Enter your password. <button class="sm ghost" onclick="loadOrders()">Try again</button></div>'; return; } _staffPw=hashPass(p); }
+  if(!(await ensureStaffPw())){ cont.innerHTML='<div class="muted" style="text-align:center">Unlock to view orders. <button class="sm ghost" onclick="loadOrders()">Try again</button></div>'; return; }
   cont.innerHTML='<div class="muted" style="text-align:center">Loading…</div>';
   const r=await sbRpc('staff_orders',{p_user:s.username,p_pass:_staffPw});
   if(!r||r.ok!==true){ _staffPw=null; cont.innerHTML='<div class="muted" style="text-align:center">Couldn’t verify your password. <button class="sm ghost" onclick="loadOrders()">Try again</button></div>'; return; }
@@ -1954,6 +1986,9 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     '<label class="fld"><span>Their phone (optional)</span><input id="ns_ph" inputmode="tel"/></label>'+
     '<label class="fld"><span>Your password (to authorize)</span><input id="ns_pw" type="password"/></label>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="ns_go" style="flex:1">Create staff account</button></div>'+
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">Face ID / fingerprint unlock</div>'+
+    '<div class="row"><button class="ghost" id="st_bio" style="flex:1">'+(bioEnabledFor(s.username)?'✅ Face ID on — turn off':'🔓 Set up Face ID / fingerprint')+'</button></div>'+
+    '<div class="muted" style="font-size:11px;margin-top:4px">Unlock staff actions with your face/fingerprint instead of typing your password on this device.</div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Phone notifications</div>'+
     '<div class="row"><button class="ghost" id="st_notif" style="flex:1">🔔 Enable order alerts on this phone</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Square payments (setup check)</div>'+
@@ -1963,8 +1998,9 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     '<div class="row"><button class="ghost" id="str_test" style="flex:1">Test Stripe connection</button></div>'+
     '<div id="str_result" class="muted" style="margin-top:6px"></div></div>';
   w.querySelector('#a_x').onclick=close;
+  w.querySelector('#st_bio').onclick=async()=>{ if(bioEnabledFor(s.username)){ bioForget(); close(); openStaffAccount(); } else { const ok=await bioRegister(); if(ok){ close(); openStaffAccount(); } } };
   w.querySelector('#str_test').onclick=async()=>{ const out=w.querySelector('#str_result'); out.textContent='Checking…';
-    if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p){ out.textContent='Enter your password.'; return; } _staffPw=hashPass(p); }
+    if(!(await ensureStaffPw())){ out.textContent='Unlock to check.'; return; }
     const r=await sbFn('stripe-health',{p_user:staffSession().username,p_pass:_staffPw});
     if(!r){ out.textContent='Could not reach the server.'; return; }
     if(r.ok){ out.innerHTML=(r.live_ok?'✅ LIVE — ':'⚠️ ')+'key <b>'+esc(r.secret_prefix||'?')+'</b>, '+(r.livemode?'live mode':'TEST mode')+', webhook '+(r.webhook_set?('set ('+esc(r.webhook_prefix||'')+')'):'NOT set ❌')+(r.secret_has_whitespace||r.webhook_has_whitespace?'<br>⚠️ extra spaces detected in a secret (handled, but trim them)':''); }
