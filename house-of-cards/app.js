@@ -815,15 +815,15 @@ async function loadStaffBalance(box){
   if(!box)return; const s=staffSession(); if(!s){ box.textContent='Staff only.'; return; }
   if(!(await ensureStaffPw())){ box.textContent='Unlock to view.'; return; }
   box.textContent='Loading…';
-  const out=await sbFn('staff-balance',{p_user:s.username,p_pass:_staffPw});
-  if(!out||out.ok!==true){ _staffPw=out?_staffPw:null; box.textContent=(out&&out.error)||'Could not load balance.'; return; }
-  const tx=(out.recent||[]).map(t=>'<div class="ckrow"><span>'+(t.created?new Date(t.created).toLocaleDateString():'')+(t.note?(' · '+esc(t.note)):'')+(t.status&&t.status!=='COMPLETED'?(' · '+esc(t.status)):'')+'</span><span>'+mUSD(t.amount)+(t.refunded?(' (−'+mUSD(t.refunded)+')'):'')+'</span></div>').join('');
+  const r=await sbRpc('staff_balance_summary',{p_user:s.username,p_pass:_staffPw});
+  if(!r||r.ok!==true){ _staffPw=null; box.textContent='Could not load balance.'; return; }
+  const tx=(r.recent||[]).map(t=>'<div class="ckrow"><span>'+(t.created_at?new Date(t.created_at).toLocaleDateString():'')+' · '+esc(t.kind)+((t.status&&t.status!=='complete'&&t.status!=='paid')?(' · '+esc(t.status)):'')+'</span><span>'+mUSD(t.amount)+(t.refunded?(' (−'+mUSD(t.refunded)+')'):'')+'</span></div>').join('');
   box.innerHTML='<div style="background:#0e0f17;border:1px solid #2c2f42;border-radius:10px;padding:10px">'+
-    '<div class="ckrow"><span><b>Collected (recent)</b></span><span><b>'+mUSD(out.gross_cents||0)+'</b></span></div>'+
-    '<div class="ckrow"><span>Refunded</span><span>−'+mUSD(out.refunded_cents||0)+'</span></div>'+
-    '<div class="ckrow cktotal"><span>Net</span><span>'+mUSD(out.net_cents||0)+'</span></div>'+
-    (tx?('<div class="muted" style="margin:6px 0 2px;font-size:11px">Recent Square transactions ('+esc(out.env||'')+')</div>'+tx):'')+
-    '<div class="muted" style="font-size:11px;margin-top:6px">Square sales (House of Cards). Seller payouts go to each seller’s own Stripe account.</div></div>';
+    '<div class="ckrow"><span>House of Cards sales (Square)</span><span>'+mUSD(r.square_net||0)+'</span></div>'+
+    '<div class="ckrow"><span>Marketplace fees (Stripe 10%)</span><span>'+mUSD(r.fee_net||0)+'</span></div>'+
+    '<div class="ckrow cktotal"><span><b>Total earned (app)</b></span><span><b>'+mUSD(r.total_net||0)+'</b></span></div>'+
+    (tx?('<div class="muted" style="margin:6px 0 2px;font-size:11px">Recent app activity</div>'+tx):'<div class="muted" style="font-size:12px;margin-top:6px">No app sales yet.</div>')+
+    '<div class="muted" style="font-size:11px;margin-top:6px">App earnings only (online). Your full Square balance — including in‑person sales — is in the Square app. Seller payouts go to each seller’s own Stripe.</div></div>';
 }
 async function sellerRefreshPayouts(cont){
   const {data,error}=await sb.functions.invoke('connect-onboard',{body:{action:'refresh'}});
