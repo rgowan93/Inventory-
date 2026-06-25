@@ -22,9 +22,9 @@ window.HOC_CONFIG = {
      - The Square ACCESS TOKEN is a SECRET and must NEVER go here. It lives only as a
        Supabase Edge Function secret named SQUARE_ACCESS_TOKEN.
      - Use "sandbox" while testing, then switch to "production" with live values. */
-  SQUARE_ENV: "sandbox",
-  SQUARE_APP_ID: "sandbox-sq0idb-tXgXopZO7RcUCNTI__pvjg",
-  SQUARE_LOCATION_ID: "L6KBN4VHSHK29",   // Sandbox Default Test Account (Main)
+  SQUARE_ENV: "production",
+  SQUARE_APP_ID: "sq0idp-hSteLh91oEfx5DG7Lkpoyw",
+  SQUARE_LOCATION_ID: "LCF26XCHA5M03",   // House of Cards (Main), 7050 Jefferson St
 
   /* Web Push (app notifications). Public VAPID key only — safe to ship.
      The matching PRIVATE key lives only as a Supabase Edge Function secret (VAPID_PRIVATE). */
