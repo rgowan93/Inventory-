@@ -466,13 +466,15 @@ function openLogin(){
   if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
   const close=()=>w.remove();
-  w.innerHTML='<div class="card pagecard">'+pageHead('Log in','lg_x2')+
+  const bioBtn=(custBioEnabled()&&bioSupported())?'<div class="row" style="margin-bottom:10px"><button class="gold" id="lg_bio" style="flex:1">🔓 Sign in with Face ID</button></div><div class="muted" style="text-align:center;margin-bottom:6px">— or —</div>':'';
+  w.innerHTML='<div class="card pagecard">'+pageHead('Log in','lg_x2')+bioBtn+
     '<label class="fld"><span>Email (customers) or username (staff)</span><input id="lg_key" autocapitalize="off"/></label>'+
     '<label class="fld"><span>Password</span><input id="lg_pw" type="password"/></label>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="lg_go" style="flex:1">Log in</button></div>'+
     '<div style="text-align:center;margin-top:10px"><button class="btn-link" id="lg_new">New customer? Create an account</button></div>'+
     '<div style="text-align:center;margin-top:8px"><button class="btn-link" id="lg_staff">First-time staff / forgot password</button></div></div>';
   w.querySelector('#lg_x2').onclick=close;
+  { const bb=w.querySelector('#lg_bio'); if(bb)bb.onclick=()=>custBioLogin(); }
   w.querySelector('#lg_new').onclick=()=>{ close(); openCustomerSignup(); };
   w.querySelector('#lg_staff').onclick=()=>{ close(); openStaffLogin(); };
   w.querySelector('#lg_go').onclick=async()=>{
@@ -656,6 +658,32 @@ async function ensureStaffPw(){
   const s=staffSession(); if(!s)return null;
   if(bioEnabledFor(s.username)){ const h=await bioUnlock(s.username); if(h){ _staffPw=h; return _staffPw; } }
   const p=prompt('Confirm your staff password:'); if(p===null||p==='')return null; _staffPw=hashPass(p); return _staffPw;
+}
+/* ---- Face ID login for customers/sellers (biometric unlocks a saved Supabase session on this device) ---- */
+function custBioEnabled(){ try{ return !!localStorage.getItem('hoc_bio_cust'); }catch(e){ return false; } }
+function custBioForget(){ try{ localStorage.removeItem('hoc_bio_cust'); }catch(e){} }
+async function custBioRegister(){
+  if(!wallCustomer){ toast('Sign in first.'); return false; }
+  if(!bioSupported()){ toast('Face ID / fingerprint isn’t available on this device/browser.'); return false; }
+  let session=null; try{ const r=await sb.auth.getSession(); session=r&&r.data&&r.data.session; }catch(e){}
+  if(!session||!session.refresh_token){ toast('Please sign in again, then enable Face ID.'); return false; }
+  try{
+    const cred=await navigator.credentials.create({publicKey:{ challenge:_rand(32), rp:{name:'House of Cards'}, user:{id:new TextEncoder().encode(wallCustomer.id), name:(wallCustomer.email||wallCustomer.username||'member'), displayName:(wallCustomer.name||'member')}, pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}], authenticatorSelection:{authenticatorAttachment:'platform', userVerification:'required'}, timeout:60000, attestation:'none' }});
+    if(!cred){ toast('Could not set up Face ID.'); return false; }
+    localStorage.setItem('hoc_bio_cust', JSON.stringify({id:_b64u(cred.rawId), rt:session.refresh_token}));
+    toast('✅ Face ID login enabled.'); return true;
+  }catch(e){ toast('Face ID setup canceled.'); return false; }
+}
+async function custBioLogin(){
+  try{
+    const raw=localStorage.getItem('hoc_bio_cust'); if(!raw){ toast('Set up Face ID first.'); return; } const d=JSON.parse(raw);
+    const a=await navigator.credentials.get({publicKey:{ challenge:_rand(32), allowCredentials:[{type:'public-key', id:_unb64u(d.id)}], userVerification:'required', timeout:60000 }});
+    if(!a)return;
+    const {data,error}=await sb.auth.refreshSession({refresh_token:d.rt});
+    if(error||!data||!data.session){ toast('Saved sign-in expired — please log in once with your password.'); custBioForget(); return; }
+    try{ const nt=data.session.refresh_token; if(nt){ d.rt=nt; localStorage.setItem('hoc_bio_cust',JSON.stringify(d)); } }catch(e){}
+    await loadWallCustomer(); document.querySelectorAll('.scanmodal').forEach(m=>m.remove()); toast('Welcome back! 👋'); render();
+  }catch(e){ toast('Face ID sign-in didn’t work — use your password.'); }
 }
 function staffLogout(){ setStaffSession(null); _staffPw=null; ui.wallTab='home'; toast('Signed out.'); render(); }
 // Run a staff-only write RPC (add/delete shows, flyers, media, comments). Requires a real
@@ -990,6 +1018,7 @@ function openCustomerAccount(){
     '<div id="ca_buyerrating" class="muted" style="margin:2px 2px 8px"></div>'+
     '<div class="row" style="gap:6px;margin:8px 0"><button class="ghost" id="cu_notif" style="flex:1">🔔 Enable notifications</button><button class="ghost" id="cu_test">Test</button></div>'+
     '<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px"><button class="ghost" id="ca_watch" style="flex:1">♥ Watchlist</button><button class="ghost" id="ca_offers" style="flex:1">💰 My offers</button></div>'+
+    '<div class="row" style="gap:6px;margin-bottom:6px"><button class="ghost" id="ca_bio" style="flex:1">'+(custBioEnabled()?'✅ Face ID login on — turn off':'🔓 Set up Face ID login')+'</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Selling</div><div id="ca_seller"><div class="muted">…</div></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">My orders</div><div id="ca_orders"><div class="muted">Loading…</div></div>'+
     '<div class="row" style="margin-top:10px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button></div></div>';
@@ -998,6 +1027,7 @@ function openCustomerAccount(){
   w.querySelector('#cu_test').onclick=()=>pushTest();
   w.querySelector('#ca_watch').onclick=openWatchlist;
   w.querySelector('#ca_offers').onclick=openMyOffers;
+  w.querySelector('#ca_bio').onclick=async()=>{ if(custBioEnabled()){ custBioForget(); toast('Face ID login removed.'); close(); openCustomerAccount(); } else { const ok=await custBioRegister(); if(ok){ close(); openCustomerAccount(); } } };
   w.querySelector('#ca_out').onclick=()=>{ close(); customerSignOut(); };
   loadSellerStatus(w.querySelector('#ca_seller'));
   loadMyOrders(w.querySelector('#ca_orders'));
