@@ -1958,8 +1958,17 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     '<div class="row"><button class="ghost" id="st_notif" style="flex:1">🔔 Enable order alerts on this phone</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Square payments (setup check)</div>'+
     '<div class="row"><button class="ghost" id="sq_test" style="flex:1">Test Square connection</button></div>'+
-    '<div id="sq_result" class="muted" style="margin-top:6px"></div></div>';
+    '<div id="sq_result" class="muted" style="margin-top:6px"></div>'+
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">Stripe (seller payouts) setup check</div>'+
+    '<div class="row"><button class="ghost" id="str_test" style="flex:1">Test Stripe connection</button></div>'+
+    '<div id="str_result" class="muted" style="margin-top:6px"></div></div>';
   w.querySelector('#a_x').onclick=close;
+  w.querySelector('#str_test').onclick=async()=>{ const out=w.querySelector('#str_result'); out.textContent='Checking…';
+    if(!_staffPw){ const p=prompt('Confirm your staff password:'); if(!p){ out.textContent='Enter your password.'; return; } _staffPw=hashPass(p); }
+    const r=await sbFn('stripe-health',{p_user:staffSession().username,p_pass:_staffPw});
+    if(!r){ out.textContent='Could not reach the server.'; return; }
+    if(r.ok){ out.innerHTML=(r.live_ok?'✅ LIVE — ':'⚠️ ')+'key <b>'+esc(r.secret_prefix||'?')+'</b>, '+(r.livemode?'live mode':'TEST mode')+', webhook '+(r.webhook_set?('set ('+esc(r.webhook_prefix||'')+')'):'NOT set ❌')+(r.secret_has_whitespace||r.webhook_has_whitespace?'<br>⚠️ extra spaces detected in a secret (handled, but trim them)':''); }
+    else { out.innerHTML='❌ '+esc(r.error||'Stripe not connected')+(r.secret_prefix?(' (key '+esc(r.secret_prefix)+')'):''); } };
   w.querySelector('#hoc_bal_btn').onclick=()=>loadStaffBalance(w.querySelector('#hoc_balance'));
   loadStaffBalance(w.querySelector('#hoc_balance'));
   w.querySelector('#st_notif').onclick=()=>enableNotifications('staff');
