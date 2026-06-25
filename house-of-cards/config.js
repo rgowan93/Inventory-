@@ -32,8 +32,9 @@ window.HOC_CONFIG = {
 
   /* Stripe Connect (third-party seller payments). Publishable key only — safe to ship.
      Secret key lives only as a Supabase Edge Function secret (STRIPE_SECRET_KEY).
-     Currently TEST mode. Live publishable key (swap both this and the secret to go live):
-       pk_live_51TkzbXITh3Oog0PeUEriBuNXA37HTLJIzjmGK9DMFm6JWWRLLycmTHD6lQnYnHg0LeBbmfWInHULT74WoM7ut7kp00fKXvdyH1 */
-  STRIPE_ENV: "test",
-  STRIPE_PUBLISHABLE_KEY: "pk_test_51TkzbXITh3Oog0PeUuBkbbQytC1lxVk89aP5gzLesb8VazpmO8kuE9ytRwMy3oQM729Wfa6OEoVVUOPoWVMiuPBE00PRbOVcPp"
+     LIVE mode. (Checkout is hosted by Stripe and created server-side, so what actually
+     controls live vs test is the STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET secrets in Supabase.)
+     Test publishable key (for reference): pk_test_51TkzbXITh3Oog0PeUuBkbbQytC1lxVk89aP5gzLesb8VazpmO8kuE9ytRwMy3oQM729Wfa6OEoVVUOPoWVMiuPBE00PRbOVcPp */
+  STRIPE_ENV: "live",
+  STRIPE_PUBLISHABLE_KEY: "pk_live_51TkzbXITh3Oog0PeUEriBuNXA37HTLJIzjmGK9DMFm6JWWRLLycmTHD6lQnYnHg0LeBbmfWInHULT74WoM7ut7kp00fKXvdyH1"
 };
