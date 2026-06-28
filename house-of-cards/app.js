@@ -780,6 +780,20 @@ async function loadSellerStatus(cont){
     else cont.innerHTML='';
   }catch(e){ cont.innerHTML=''; }
 }
+async function loadStripePlatformBalance(box){
+  if(!box)return; const s=staffSession(); if(!s)return;
+  if(!(await ensureStaffPw())){ box.textContent='Unlock to view.'; return; }
+  box.textContent='Loading…';
+  const r=await sbFn('stripe-platform-balance',{p_user:s.username,p_pass:_staffPw});
+  if(!r||r.ok!==true){ box.textContent=(r&&r.error)||'Could not load Stripe balance.'; return; }
+  const tx=(r.recent||[]).map(t=>'<div class="ckrow"><span>'+(t.created?new Date(t.created*1000).toLocaleDateString():'')+' · '+esc(t.type||'')+'</span><span>'+mUSD(t.net!=null?t.net:t.amount)+'</span></div>').join('');
+  box.innerHTML='<div style="background:#0e0f17;border:1px solid #2c2f42;border-radius:10px;padding:10px">'+
+    '<div class="ckrow"><span><b>Available</b></span><span><b>'+mUSD(r.available_cents||0)+'</b></span></div>'+
+    '<div class="ckrow"><span>Pending</span><span>'+mUSD(r.pending_cents||0)+'</span></div>'+
+    (r.livemode?'':'<div class="muted" style="font-size:11px;color:#ffcb2d">⚠️ Stripe is in TEST mode</div>')+
+    (tx?('<div class="muted" style="margin:6px 0 2px;font-size:11px">Recent Stripe transactions</div>'+tx):'')+
+    '<div class="muted" style="font-size:11px;margin-top:6px">Your 10% platform fees collect here and pay out to your bank on Stripe’s schedule.</div></div>';
+}
 async function requestSeller(cont){
   const {data,error}=await sb.functions.invoke('seller-apply',{body:{}});
   let out=data; if(error){ try{ out=await error.context.json(); }catch(_){ out=null; } }
@@ -2005,6 +2019,8 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     '<div class="pagehead"><h3 style="color:var(--gold);margin:0">'+esc(s.username)+'’s account</h3><button class="pageclose" id="a_x">✕ Close</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">💵 House of Cards balance</div><div id="hoc_balance" class="muted">Loading…</div>'+
     '<div class="row" style="margin:6px 0"><button class="ghost" id="hoc_bal_btn" style="flex:1">Refresh balance & transactions</button></div>'+
+    '<div class="muted" style="margin:8px 0 6px">💳 Stripe platform balance (your collected fees)</div><div id="str_balance" class="muted">Tap to load…</div>'+
+    '<div class="row" style="margin:6px 0"><button class="ghost" id="str_bal_btn" style="flex:1">Load Stripe balance</button></div>'+
     '<hr class="sep">'+
     '<label class="fld"><span>Email</span><input id="a_e" type="email" value="'+esc(s.email||'')+'"/></label>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Change password (optional):</div>'+
@@ -2037,6 +2053,7 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     else { out.innerHTML='❌ '+esc(r.error||'Stripe not connected')+(r.secret_prefix?(' (key '+esc(r.secret_prefix)+')'):''); } };
   w.querySelector('#hoc_bal_btn').onclick=()=>loadStaffBalance(w.querySelector('#hoc_balance'));
   loadStaffBalance(w.querySelector('#hoc_balance'));
+  w.querySelector('#str_bal_btn').onclick=()=>loadStripePlatformBalance(w.querySelector('#str_balance'));
   w.querySelector('#st_notif').onclick=()=>enableNotifications('staff');
   w.querySelector('#sq_test').onclick=async()=>{ const out=w.querySelector('#sq_result'); out.textContent='Checking…';
     const r=await sbFn('square-health');
