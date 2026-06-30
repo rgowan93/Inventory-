@@ -348,6 +348,76 @@ button.lg{font-size:16px;padding:14px 26px}
   .card{box-shadow:none;border:1px solid #999;background:#fff;color:#000}
   .barcode-label{border:1px dashed #000}
 }
+/* ============================================================
+   ✨ Glass theme — frosted, futuristic surfaces (override layer)
+   ============================================================ */
+:root{ --glass:rgba(26,29,44,.55); --glass-2:rgba(32,36,54,.62); --glassline:rgba(255,255,255,.10); --gold-glow:rgba(244,180,0,.30); --blue-glow:rgba(33,96,176,.28); }
+body{ background:#0a0b11; position:relative; }
+/* animated ambient glow behind everything */
+body::before{ content:""; position:fixed; inset:-20% -20% -20% -20%; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(40% 35% at 18% 12%, var(--gold-glow), transparent 60%),
+    radial-gradient(45% 40% at 85% 18%, var(--blue-glow), transparent 60%),
+    radial-gradient(50% 45% at 50% 100%, rgba(122,77,187,.22), transparent 60%);
+  filter:blur(30px); animation:glassdrift 22s ease-in-out infinite alternate; }
+@keyframes glassdrift{ 0%{transform:translate3d(0,0,0) scale(1)} 100%{transform:translate3d(0,-3%,0) scale(1.08)} }
+body{ background-image:linear-gradient(180deg,#0a0b11,#0c0e16 55%,#090a10); }
+.wall{ background:transparent!important; }
+
+/* frosted glass for all the main surfaces */
+.card,.pagecard,.mktcard,.ordcard,.qrtile,.showcard,.installbanner,.notifrow{
+  background:var(--glass)!important;
+  -webkit-backdrop-filter:blur(16px) saturate(150%); backdrop-filter:blur(16px) saturate(150%);
+  border:1px solid var(--glassline)!important;
+  box-shadow:0 14px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.07)!important;
+}
+.card{ border-radius:18px!important; }
+.mktcard,.ordcard,.qrtile,.showcard,.notifrow{ border-radius:16px!important; }
+.notifrow.unread{ border-color:var(--gold-glow)!important; box-shadow:0 0 0 1px var(--gold-glow), 0 14px 40px rgba(0,0,0,.45)!important; }
+.mktcard:active{ transform:translateY(1px) scale(.997); }
+
+/* page header: translucent frosted bar */
+.pagehead{ background:rgba(14,16,24,.6)!important; -webkit-backdrop-filter:blur(18px); backdrop-filter:blur(18px);
+  border-bottom:1px solid var(--glassline)!important; padding-left:2px; padding-right:2px; }
+.pagecard{ background:transparent!important; backdrop-filter:none; box-shadow:none!important; border:none!important; }
+
+/* full-screen page overlays get a blurred backdrop */
+.scanmodal{ background:rgba(8,9,15,.6)!important; -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
+.scanmodal.pagewrap{ background:rgba(8,9,15,.72)!important; }
+
+/* buttons — glassy with a soft sheen */
+button{ border:1px solid var(--glassline); border-radius:13px;
+  background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02)); color:var(--cream);
+  -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+  box-shadow:0 6px 18px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.08); transition:transform .08s, box-shadow .15s, filter .15s; }
+button:active{ transform:translateY(1px) scale(.99); }
+button.gold{ background:linear-gradient(180deg,#FFD64A,#F1A800); color:#1a1300; border-color:rgba(255,215,74,.5);
+  box-shadow:0 8px 22px rgba(244,180,0,.30), inset 0 1px 0 rgba(255,255,255,.4); }
+button.blue{ background:linear-gradient(180deg,#2f7fe0,#1a55a8); color:#fff; border-color:rgba(47,127,224,.5);
+  box-shadow:0 8px 22px rgba(33,96,176,.34), inset 0 1px 0 rgba(255,255,255,.18); }
+button.red{ background:linear-gradient(180deg,#ef4a3d,#c5271c); color:#fff; border-color:rgba(239,74,61,.5); }
+button.ghost{ background:rgba(255,255,255,.04); border-color:var(--glassline); box-shadow:none; }
+.pageclose{ background:linear-gradient(180deg,#ef4a3d,#c5271c)!important; border:1px solid rgba(239,74,61,.5)!important; }
+.wall-cta{ border:1px solid rgba(255,215,74,.5); box-shadow:0 12px 34px rgba(244,180,0,.38), inset 0 1px 0 rgba(255,255,255,.45); }
+
+/* tabs / chips — glass pills with a glowing active state */
+.walltab{ background:rgba(255,255,255,.05); border:1px solid var(--glassline); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
+.walltab.on{ background:linear-gradient(180deg,#FFD64A,#F1A800); color:#1a1300; border-color:rgba(255,215,74,.6); box-shadow:0 6px 18px rgba(244,180,0,.35); }
+.mktsub,.subtabs button{ background:rgba(255,255,255,.04); border:1px solid var(--glassline); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
+.mktsub.on{ background:linear-gradient(180deg,#2f7fe0,#1a55a8); color:#fff; border-color:rgba(47,127,224,.55); }
+
+/* inputs — subtle frosted fields */
+.fld input,.fld textarea,.fld select,.mktsearch,.mktsort,input,textarea,select{
+  background:rgba(10,12,20,.55)!important; border:1px solid var(--glassline)!important; color:var(--cream);
+  border-radius:11px; -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
+.fld input:focus,.fld textarea:focus,.fld select:focus,.mktsearch:focus{ outline:none; border-color:var(--gold-glow)!important; box-shadow:0 0 0 3px rgba(244,180,0,.14)!important; }
+
+/* the dark inset money/summary boxes → glass */
+.cktot,.cktotal{ }
+.ordstatus{ -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
+.toast{ background:rgba(12,14,22,.82)!important; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); border:1px solid var(--gold-glow)!important; }
+.wall-logo{ box-shadow:0 0 0 6px rgba(244,180,0,.14),0 16px 50px rgba(0,0,0,.6),0 0 60px var(--gold-glow); }
+@media (prefers-reduced-motion: reduce){ body::before{ animation:none; } }
 </style>
 </head>
 <body>
@@ -374,9 +444,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260623h"></script>
-<script src="social.js?v=20260623h"></script>
-<script src="app.js?v=20260623h"></script>
+<script src="config.js?v=20260623i"></script>
+<script src="social.js?v=20260623i"></script>
+<script src="app.js?v=20260623i"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
