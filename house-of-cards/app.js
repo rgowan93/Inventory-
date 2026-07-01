@@ -2152,14 +2152,25 @@ async function openAfterpayDashboard(){
     '<div class="card"><div class="muted">Today</div><div class="big">'+mUSD(t.today_cents||0)+'</div></div>'+
     '<div class="card"><div class="muted">Sales</div><div class="big">'+(t.captured_count||0)+'</div></div>'+
     '<div class="card"><div class="muted">Pending</div><div class="big">'+(t.pending||0)+'</div></div></div>';
-  const rows=(r.sales||[]).map(s=>{ const st=s.status||'pending';
-    const badge='<span class="ordstatus s_'+(st==='captured'?'complete':(st==='declined'?'canceled':'paid'))+'">'+esc(st)+'</span>';
+  const rows=(r.sales||[]).map(s=>{ const st=(s.refunded_cents>0&&s.refunded_cents>=s.amount_cents)?'refunded':(s.status||'pending');
+    const badge='<span class="ordstatus s_'+(st==='captured'?'complete':(st==='refunded'?'refunded':(st==='declined'?'canceled':'paid')))+'">'+esc(st)+'</span>';
     const who=s.customer_name?(' · '+esc(s.customer_name)):''; const by=s.staff_user?(' · by '+esc(s.staff_user)):'';
+    const partRef=(s.refunded_cents>0&&st!=='refunded')?('<div class="muted" style="margin-top:3px">↩︎ Refunded '+mUSD(s.refunded_cents)+'</div>'):'';
+    const refBtn=(s.status==='captured'&&(!s.refunded_cents||s.refunded_cents<s.amount_cents))?('<div class="row" style="margin-top:8px"><button class="sm ghost" onclick="afterpayRefund('+s.id+','+s.amount_cents+')">Refund</button></div>'):'';
     return '<div class="ordcard"><div class="ordhead"><b>'+mUSD(s.amount_cents)+'</b>'+badge+'</div>'+
       '<div class="muted">'+new Date(s.created_at).toLocaleString()+who+by+'</div>'+
-      (s.label?('<div style="margin-top:4px">'+esc(s.label)+'</div>'):'')+
-      (st==='declined'&&s.decline_reason?('<div class="muted" style="margin-top:3px">'+esc(s.decline_reason)+'</div>'):'')+'</div>'; }).join('');
+      (s.label?('<div style="margin-top:4px">'+esc(s.label)+'</div>'):'')+partRef+
+      (st==='declined'&&s.decline_reason?('<div class="muted" style="margin-top:3px">'+esc(s.decline_reason)+'</div>'):'')+refBtn+'</div>'; }).join('');
   body.innerHTML=kpis+(rows||'<div class="empty">No Afterpay sales yet.</div>');
+}
+async function afterpayRefund(saleId,cents){
+  if(!isOwner()){ toast('Owner only.'); return; }
+  if(!confirm('Refund '+mUSD(cents)+' back to the customer via Afterpay?'))return;
+  if(!(await ensureStaffPw())){ return; }
+  toast('Refunding…');
+  const r=await sbFn('afterpay-refund',{p_user:staffSession().username,p_pass:_staffPw,sale_id:saleId});
+  if(r&&r.ok){ toast('Refunded '+mUSD(r.refunded_cents||cents)+'.'); openAfterpayDashboard(); }
+  else toast((r&&r.error)||'Could not refund.');
 }
 function openStaffAccount(){ const s=staffSession(); if(!s)return;
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w); const close=()=>w.remove();
