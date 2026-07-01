@@ -1085,6 +1085,7 @@ function openCustomerAccount(){
   const c=wallCustomer; if(!c){ openCustomerLogin(); return; }
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
   const close=()=>w.remove();
+  try{
   const initials=((c.name||c.email||'?').trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('')||'?').toUpperCase();
   w.innerHTML='<div class="card pagecard">'+pageHead('Your account','ca_x')+
     '<div class="acct-hero"><div class="avatar-lg avatar-ph">'+esc(initials)+'</div>'+
@@ -1109,6 +1110,7 @@ function openCustomerAccount(){
   loadMyOrders(w.querySelector('#ca_orders'));
   loadBuyerRatings().then(()=>{ const br=w.querySelector('#ca_buyerrating'); if(br){ const s=buyerRatingStr(c.id); br.textContent=s?('Your buyer rating: '+s):'Buyer rating: 100% · New buyer'; } });
   countPendingOffers().then(cnt=>{ const ob=w.querySelector('#ca_offers'); if(ob&&cnt.buyer)ob.textContent='💰 My offers ('+cnt.buyer+')'; const sb2=w.querySelector('#my_offers'); if(sb2&&cnt.seller)sb2.textContent='Offers ('+cnt.seller+')'; });
+  }catch(e){ try{ w.remove(); }catch(_){}; toast('Could not open your account. Pull down to refresh, then try again.'); }
 }
 async function loadMyOrders(cont){
   if(!cont||!cloudOn())return;
@@ -2198,6 +2200,7 @@ async function afterpayRefund(saleId,cents){
 }
 function openStaffAccount(){ const s=staffSession(); if(!s)return;
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w); const close=()=>w.remove();
+  try{
   w.innerHTML='<div class="card pagecard">'+
     '<div class="pagehead"><h3 style="color:var(--gold);margin:0">'+esc(s.username)+'’s account</h3><button class="pageclose" id="a_x">✕ Close</button></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">💵 House of Cards balance</div><div id="hoc_balance" class="muted">Loading…</div>'+
@@ -2270,6 +2273,7 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     else if(res==='baduser') toast('Username: 2+ letters/numbers, no spaces.');
     else if(res==='auth') toast('Your password is incorrect.');
     else toast('Couldn’t add staff (cloud not reachable).'); };
+  }catch(e){ try{ w.remove(); }catch(_){}; toast('Could not open your account. Pull down to refresh, then try again.'); }
 }
 let _mediaTaps=0,_mediaTapT=0;
 function mediaSecTap(){ const n=Date.now(); if(n-_mediaTapT>1500)_mediaTaps=0; _mediaTapT=n; if(++_mediaTaps>=4){ _mediaTaps=0; staffUnlock(); } }  // hidden: 4 taps on the section title to unlock staff upload
