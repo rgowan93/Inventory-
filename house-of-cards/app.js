@@ -383,23 +383,21 @@ function viewWall(){
   const cust=wallCustomer;
   const signedIn = staff || !!cust;
   let active=ui.wallTab||'home'; if(['members','sellers','orders'].indexOf(active)>=0&&!staff) active='home';
-  // slim top utility strip — icons only, right-aligned (no big Account button up high anymore)
+  // slim top utility strip — icons only, right-aligned (sign in lives on the hero button)
   const cn=cartCount();
   const cartTop='<button class="wtop-ic" onclick="openCart()" aria-label="Cart">'+svgIcon('cart')+'<span class="wtop-badge" id="cartCount"'+(cn?'':' style="display:none"')+'>'+cn+'</span></button>';
   const bellTop=signedIn?('<button class="wtop-ic" onclick="openInbox()" aria-label="Notifications">'+svgIcon('bell')+'<span id="notifDot" class="wtop-dot" style="display:none"></span></button>'):'';
-  const loginTop=signedIn?'':'<button class="wtop-btn" onclick="openLogin()">Log in</button>';
-  const wtop = cloudOn() ? ('<div class="wtop">'+loginTop+cartTop+bellTop+'</div>') : '';
-  // fixed bottom navigation (thumb reachable) — replaces the old horizontal slider
-  const primary = staff
-    ? [['home','Home','home'],['market','Shop','bag'],['orders','Orders','box'],['account','Account','user'],['more','More','grid']]
-    : [['home','Home','home'],['market','Shop','bag'],['pay','Pay','wallet'],['account','Account','user'],['more','More','grid']];
-  const MOREKEYS = staff ? ['pay','reviews','share','social','contact','photos','sellers','members'] : ['reviews','share','social','contact','photos'];
+  const wtop = cloudOn() ? ('<div class="wtop">'+cartTop+bellTop+'</div>') : '';
+  // fixed bottom navigation (thumb reachable) — primary destinations for the show front page
+  const moreBadge=(staff&&_newOrderCount)?('<span class="wnav-badge">'+_newOrderCount+'</span>'):'';
+  const primary = [['home','Home','home'],['pay','Pay','wallet'],['share','Share','share'],['social','Socials','heart'],['more','More','grid']];
+  const MOREKEYS = staff ? ['market','reviews','contact','photos','orders','sellers','members'] : ['market','reviews','contact','photos'];
   const moreActive = MOREKEYS.indexOf(active)>=0;
   const wnav='<nav class="wnav">'+primary.map(it=>{ const k=it[0];
-    const isTab=(k!=='account'&&k!=='more');
+    const isTab=(k!=='more');
     const on=((isTab&&k===active)||(k==='more'&&moreActive))?' on':'';
-    const click=isTab?("setWallTab('"+k+"')"):(k==='more'?"openWallMore()":"openAccount()");
-    const badge=(k==='orders'&&_newOrderCount)?('<span class="wnav-badge">'+_newOrderCount+'</span>'):'';
+    const click=isTab?("setWallTab('"+k+"')"):"openWallMore()";
+    const badge=(k==='more')?moreBadge:'';
     return '<button class="wnav-item'+on+'" data-k="'+k+'" onclick="'+click+'"><span class="wnav-ic">'+svgIcon(it[2])+badge+'</span><span class="wnav-lbl">'+it[1]+'</span></button>';
   }).join('')+'</nav>';
   const panel=(k,inner)=>'<div class="wpanel" data-wtab="'+k+'"'+(k===active?'':' style="display:none"')+'>'+inner+'</div>';
@@ -478,10 +476,9 @@ function viewWall(){
       '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
-      (signedIn
-        ? '<button class="wall-cta" onclick="openAccount()">'+svgIcon('user')+' Welcome'+(cust&&cust.name?' back, '+esc((cust.name||'').split(' ')[0]):'')+'</button>'
-        : '<button class="wall-cta" onclick="openCustomerSignup()">'+svgIcon('plus')+' Create your free account</button>')+
-      '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
+      (signedIn ? ''
+        : '<button class="wall-cta" onclick="openLogin()">'+svgIcon('user')+' Sign in</button>'+
+          '<div class="wall-cta-sub">Sign in or create a free account — first dibs on new singles &amp; show deals</div>')+
       '<div class="wall-stats"><span>'+svgIcon('users')+' <b id="wMembers">—</b> members</span><span class="dot">•</span><span>'+svgIcon('eye')+' <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
     '<div class="walltabwrap">'+
@@ -501,19 +498,19 @@ function viewWall(){
   '</div>'+wnav;
 }
 function openWallMore(){
-  const staff=!!staffSession();
-  const all=[['pay','Pay at Show','wallet'],['reviews','Reviews','star'],['share','Share Us','share'],['social','Follow on Social','heart'],['contact','Contact','chat'],['photos','Photos & Videos','image']];
-  if(staff) all.push(['orders','Orders','box'],['sellers','Sellers','tag'],['members','Members','users']);
-  const primary = staff ? ['home','market','orders'] : ['home','market','pay'];
-  const items=all.filter(it=>primary.indexOf(it[0])<0);
+  const staff=!!staffSession(); const signedIn=staff||!!wallCustomer;
+  // items that live off the bottom bar. data-act items run an action instead of switching a tab.
+  const items=[['market','Shop','bag'],['reviews','Reviews','star'],['contact','Contact','chat'],['photos','Photos & Videos','image']];
+  items.push(['account','Account','user','act']);
+  if(staff) items.push(['orders','Orders','box'],['sellers','Sellers','tag'],['members','Members','users']);
   const w=document.createElement('div'); w.className='wsheet-wrap'; document.body.appendChild(w);
   const close=()=>w.remove();
   requestAnimationFrame(()=>w.classList.add('show'));
   w.innerHTML='<div class="wsheet-back"></div><div class="wsheet"><div class="wsheet-grip"></div><div class="wsheet-h">More</div><div class="wsheet-grid">'+
-    items.map(it=>'<button class="wsheet-item" data-k="'+it[0]+'">'+svgIcon(it[2])+'<span>'+esc(it[1])+'</span></button>').join('')+
-    '</div>'+(staff?'<button class="ghost" style="width:100%;margin-top:12px" onclick="signOutAll()">Sign out</button>':'')+'</div>';
+    items.map(it=>'<button class="wsheet-item" data-k="'+it[0]+'"'+(it[3]?' data-act="'+it[3]+'"':'')+'>'+svgIcon(it[2])+'<span>'+esc(it[1])+'</span></button>').join('')+
+    '</div>'+(signedIn?'<button class="ghost" style="width:100%;margin-top:12px" onclick="signOutAll()">Sign out</button>':'')+'</div>';
   w.querySelector('.wsheet-back').onclick=close;
-  w.querySelectorAll('.wsheet-item').forEach(b=>b.onclick=()=>{ close(); setWallTab(b.dataset.k); });
+  w.querySelectorAll('.wsheet-item').forEach(b=>b.onclick=()=>{ close(); if(b.dataset.act==='account'){ openAccount(); } else { setWallTab(b.dataset.k); } });
 }
 function openAccount(){ if(staffSession())openStaffAccount(); else if(wallCustomer)openCustomerAccount(); else openLogin(); }
 function signOutAll(){ if(staffSession())staffLogout(); else if(wallCustomer)customerSignOut(); }
@@ -543,8 +540,7 @@ function openLogin(){
 }
 function setWallTab(key){ ui.wallTab=key; try{ localStorage.setItem('hoc_tab',key); }catch(e){}
   const staff=!!staffSession();
-  const primaryKeys = staff ? ['home','market','orders'] : ['home','market','pay'];
-  const moreKeys = staff ? ['pay','reviews','share','social','contact','photos','sellers','members'] : ['reviews','share','social','contact','photos'];
+  const moreKeys = staff ? ['market','reviews','contact','photos','orders','sellers','members'] : ['market','reviews','contact','photos'];
   document.querySelectorAll('.wnav-item').forEach(b=>{ const k=b.dataset.k;
     b.classList.toggle('on', k===key || (k==='more' && moreKeys.indexOf(key)>=0)); });
   document.querySelectorAll('.wpanel').forEach(p=>{ p.style.display=(p.dataset.wtab===key)?'':'none'; });

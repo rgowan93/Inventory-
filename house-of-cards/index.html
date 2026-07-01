@@ -573,18 +573,23 @@ button,.walltab,.mktsub,.mktcard,.custbtn,.qrtile.tap{ transition:transform .08s
    bottom tab bar (no more slider), and a More bottom-sheet.
    ============================================================ */
 :root{
-  --accent1:#a78bfa; --accent2:#22d3ee; --accent3:#5eead4;
-  --acc-grad:linear-gradient(120deg,#a78bfa,#22d3ee 55%,#5eead4);
-  --ink:#eef1f8; --ink-2:#c3c8db; --ink-3:#8f96b0;
+  --accent1:#c084fc; --accent2:#38bdf8; --accent3:#5eead4;
+  --acc-grad:linear-gradient(120deg,#d8b4fe,#a78bfa 28%,#38bdf8 72%,#5eead4);
+  --ink:#eff1f9; --ink-2:#c7ccdf; --ink-3:#949bb6;
+  --glass:rgba(31,29,54,.55); --glass-2:rgba(38,35,64,.6); --glassline:rgba(255,255,255,.12);
 }
-body{ background:#07060d!important; background-image:linear-gradient(180deg,#07060d,#0a0912 55%,#07060d)!important; }
+body{ background:#0a0916!important; background-image:linear-gradient(180deg,#0b0a18,#0d0b1e 52%,#08070f)!important; }
 body::before{
   background:
-    radial-gradient(42% 38% at 12% 6%, rgba(167,139,250,.38), transparent 62%),
-    radial-gradient(44% 40% at 88% 10%, rgba(34,211,238,.26), transparent 62%),
-    radial-gradient(60% 52% at 50% 112%, rgba(244,180,0,.12), transparent 60%) !important;
-  filter:blur(34px)!important;
+    radial-gradient(46% 40% at 10% 4%, rgba(168,132,255,.44), transparent 60%),
+    radial-gradient(46% 42% at 92% 8%, rgba(56,189,248,.30), transparent 60%),
+    radial-gradient(62% 52% at 50% 112%, rgba(236,72,153,.20), transparent 62%),
+    radial-gradient(40% 34% at 78% 96%, rgba(94,234,212,.14), transparent 60%) !important;
+  filter:blur(36px)!important;
 }
+/* richer frosted surfaces so content reads well on the deeper base */
+.card,.pagecard,.mktcard,.ordcard,.qrtile,.showcard,.installbanner,.notifrow{ background:var(--glass)!important; }
+.pagecard{ background:transparent!important; }
 
 /* iridescent focus + subtle accent touches */
 input:focus,textarea:focus,select:focus,.fld input:focus,.fld textarea:focus,.fld select:focus,.mktsearch:focus{
@@ -596,7 +601,7 @@ input:focus,textarea:focus,select:focus,.fld input:focus,.fld textarea:focus,.fl
 .card:not(.pagecard),.mktcard,.qrtile,.showcard,.ordcard,.notifrow,.installbanner{ position:relative; }
 .card:not(.pagecard)::after,.mktcard::after,.qrtile::after,.showcard::after,.ordcard::after,.installbanner::after{
   content:""; position:absolute; inset:0; border-radius:inherit; padding:1px;
-  background:linear-gradient(135deg, rgba(167,139,250,.5), rgba(34,211,238,.22) 45%, rgba(255,255,255,0) 72%);
+  background:linear-gradient(135deg, rgba(192,132,252,.55), rgba(56,189,248,.26) 45%, rgba(255,255,255,0) 72%);
   -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite:xor; mask-composite:exclude; pointer-events:none; }
 
@@ -622,7 +627,7 @@ input:focus,textarea:focus,select:focus,.fld input:focus,.fld textarea:focus,.fl
   border-radius:12px; transition:background .2s, box-shadow .2s; }
 .wnav-item svg.i{ width:22px; height:22px; }
 .wnav-item.on{ color:#fff; }
-.wnav-item.on .wnav-ic{ background:linear-gradient(135deg,rgba(167,139,250,.95),rgba(34,211,238,.8)); box-shadow:0 6px 18px rgba(139,92,246,.5); }
+.wnav-item.on .wnav-ic{ background:linear-gradient(135deg,#c084fc,#38bdf8); box-shadow:0 6px 20px rgba(56,189,248,.5); }
 .wnav-item.on svg.i{ stroke:#0a0913; }
 .wnav-item:active{ transform:translateY(1px); }
 .wnav-badge{ position:absolute; top:-3px; right:2px; min-width:16px; height:16px; padding:0 4px; border-radius:999px;
@@ -671,9 +676,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260623n"></script>
-<script src="social.js?v=20260623n"></script>
-<script src="app.js?v=20260623n"></script>
+<script src="config.js?v=20260623o"></script>
+<script src="social.js?v=20260623o"></script>
+<script src="app.js?v=20260623o"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
