@@ -129,7 +129,8 @@ const _ICON_PATHS={
   eye:'<path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.7"/>',
   phone:'<path d="M6 3h3l2 5-2.5 1.5a12 12 0 0 0 6 6L16 13l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 4 5a2 2 0 0 1 2-2z"/>',
   download:'<path d="M12 3v11M8 10l4 4 4-4"/><path d="M5 20h14"/>',
-  lock:'<rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'
+  lock:'<rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+  grid:'<rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/>'
 };
 function svgIcon(name,cls){ const d=_ICON_PATHS[name]; if(!d)return '';
   return '<svg class="i'+(cls?(' '+cls):'')+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>'; }
@@ -380,18 +381,27 @@ function viewWall(){
   const contacts=(w.contact||[]).filter(c=>c&&c.phone);
   const staff=!!staffSession();
   const cust=wallCustomer;
-  const cartBtn='<button class="custbtn" onclick="openCart()">'+svgIcon('cart')+' Cart (<span id="cartCount">'+cartCount()+'</span>)</button>';
   const signedIn = staff || !!cust;
-  const whoLabel = staff ? (esc(staffSession().username)+' · staff') : (cust ? esc(cust.name||cust.email||'Member') : '');
-  const bellBtn='<button class="custbtn" onclick="openInbox()" style="position:relative">'+svgIcon('bell')+'<span id="notifDot" class="tabbadge" style="display:none"></span></button>';
-  const custBar = cloudOn() ? ('<div class="custbar">'+(signedIn
-    ? '<span class="custhi">'+svgIcon('user')+' '+whoLabel+'</span><span class="right"></span>'+bellBtn+cartBtn+'<button class="custbtn" onclick="openAccount()">'+svgIcon('user')+' Account</button><button class="custbtn" onclick="signOutAll()">Sign out</button>'
-    : '<span class="custhi">House of Cards</span><span class="right"></span>'+cartBtn+'<button class="custbtn gold" onclick="openLogin()">Log in</button><button class="custbtn" onclick="openCustomerSignup()">'+svgIcon('plus')+' Create account</button>'
-  )+'</div>') : '';
   let active=ui.wallTab||'home'; if(['members','sellers','orders'].indexOf(active)>=0&&!staff) active='home';
-  const TABS=[['home','home','Home'],['market','bag','Shop'],['share','share','Share'],['social','heart','Social'],['pay','wallet','Pay'],['contact','chat','Contact'],['reviews','star','Reviews'],['photos','image','Media']];
-  if(staff) TABS.push(['orders','box','Orders'+(_newOrderCount?(' <span class="tabbadge">'+_newOrderCount+'</span>'):'')],['sellers','tag','Sellers'],['members','users','Members']);
-  const tabbar='<div class="walltabs">'+TABS.map(t=>'<button class="walltab'+(t[0]===active?' on':'')+'" data-k="'+t[0]+'" onclick="setWallTab(\''+t[0]+'\')">'+svgIcon(t[1])+'<span>'+t[2]+'</span></button>').join('')+'</div>';
+  // slim top utility strip — icons only, right-aligned (no big Account button up high anymore)
+  const cn=cartCount();
+  const cartTop='<button class="wtop-ic" onclick="openCart()" aria-label="Cart">'+svgIcon('cart')+'<span class="wtop-badge" id="cartCount"'+(cn?'':' style="display:none"')+'>'+cn+'</span></button>';
+  const bellTop=signedIn?('<button class="wtop-ic" onclick="openInbox()" aria-label="Notifications">'+svgIcon('bell')+'<span id="notifDot" class="wtop-dot" style="display:none"></span></button>'):'';
+  const loginTop=signedIn?'':'<button class="wtop-btn" onclick="openLogin()">Log in</button>';
+  const wtop = cloudOn() ? ('<div class="wtop">'+loginTop+cartTop+bellTop+'</div>') : '';
+  // fixed bottom navigation (thumb reachable) — replaces the old horizontal slider
+  const primary = staff
+    ? [['home','Home','home'],['market','Shop','bag'],['orders','Orders','box'],['account','Account','user'],['more','More','grid']]
+    : [['home','Home','home'],['market','Shop','bag'],['pay','Pay','wallet'],['account','Account','user'],['more','More','grid']];
+  const MOREKEYS = staff ? ['pay','reviews','share','social','contact','photos','sellers','members'] : ['reviews','share','social','contact','photos'];
+  const moreActive = MOREKEYS.indexOf(active)>=0;
+  const wnav='<nav class="wnav">'+primary.map(it=>{ const k=it[0];
+    const isTab=(k!=='account'&&k!=='more');
+    const on=((isTab&&k===active)||(k==='more'&&moreActive))?' on':'';
+    const click=isTab?("setWallTab('"+k+"')"):(k==='more'?"openWallMore()":"openAccount()");
+    const badge=(k==='orders'&&_newOrderCount)?('<span class="wnav-badge">'+_newOrderCount+'</span>'):'';
+    return '<button class="wnav-item'+on+'" data-k="'+k+'" onclick="'+click+'"><span class="wnav-ic">'+svgIcon(it[2])+badge+'</span><span class="wnav-lbl">'+it[1]+'</span></button>';
+  }).join('')+'</nav>';
   const panel=(k,inner)=>'<div class="wpanel" data-wtab="'+k+'"'+(k===active?'':' style="display:none"')+'>'+inner+'</div>';
 
   const homePanel=
@@ -462,7 +472,7 @@ function viewWall(){
     '<div id="wMemberList"><div class="muted" style="text-align:center">Loading…</div></div>';
 
   return '<div class="wall">'+
-    custBar+
+    wtop+
     '<div id="installBanner"></div>'+
     '<div class="wall-hero">'+
       '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
@@ -474,7 +484,6 @@ function viewWall(){
       '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
       '<div class="wall-stats"><span>'+svgIcon('users')+' <b id="wMembers">—</b> members</span><span class="dot">•</span><span>'+svgIcon('eye')+' <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
-    tabbar+
     '<div class="walltabwrap">'+
       panel('home',homePanel)+
       panel('market',marketPanel)+
@@ -489,7 +498,22 @@ function viewWall(){
       (staff?panel('members',membersPanel):'')+
     '</div>'+
     (w.website?('<div class="wall-foot">'+esc(w.website)+'</div>'):'')+
-  '</div>';
+  '</div>'+wnav;
+}
+function openWallMore(){
+  const staff=!!staffSession();
+  const all=[['pay','Pay at Show','wallet'],['reviews','Reviews','star'],['share','Share Us','share'],['social','Follow on Social','heart'],['contact','Contact','chat'],['photos','Photos & Videos','image']];
+  if(staff) all.push(['orders','Orders','box'],['sellers','Sellers','tag'],['members','Members','users']);
+  const primary = staff ? ['home','market','orders'] : ['home','market','pay'];
+  const items=all.filter(it=>primary.indexOf(it[0])<0);
+  const w=document.createElement('div'); w.className='wsheet-wrap'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  requestAnimationFrame(()=>w.classList.add('show'));
+  w.innerHTML='<div class="wsheet-back"></div><div class="wsheet"><div class="wsheet-grip"></div><div class="wsheet-h">More</div><div class="wsheet-grid">'+
+    items.map(it=>'<button class="wsheet-item" data-k="'+it[0]+'">'+svgIcon(it[2])+'<span>'+esc(it[1])+'</span></button>').join('')+
+    '</div>'+(staff?'<button class="ghost" style="width:100%;margin-top:12px" onclick="signOutAll()">Sign out</button>':'')+'</div>';
+  w.querySelector('.wsheet-back').onclick=close;
+  w.querySelectorAll('.wsheet-item').forEach(b=>b.onclick=()=>{ close(); setWallTab(b.dataset.k); });
 }
 function openAccount(){ if(staffSession())openStaffAccount(); else if(wallCustomer)openCustomerAccount(); else openLogin(); }
 function signOutAll(){ if(staffSession())staffLogout(); else if(wallCustomer)customerSignOut(); }
@@ -518,7 +542,11 @@ function openLogin(){
   setTimeout(()=>{ const k=w.querySelector('#lg_key'); if(k)k.focus(); },60);
 }
 function setWallTab(key){ ui.wallTab=key; try{ localStorage.setItem('hoc_tab',key); }catch(e){}
-  document.querySelectorAll('.walltab').forEach(b=>b.classList.toggle('on', b.dataset.k===key));
+  const staff=!!staffSession();
+  const primaryKeys = staff ? ['home','market','orders'] : ['home','market','pay'];
+  const moreKeys = staff ? ['pay','reviews','share','social','contact','photos','sellers','members'] : ['reviews','share','social','contact','photos'];
+  document.querySelectorAll('.wnav-item').forEach(b=>{ const k=b.dataset.k;
+    b.classList.toggle('on', k===key || (k==='more' && moreKeys.indexOf(key)>=0)); });
   document.querySelectorAll('.wpanel').forEach(p=>{ p.style.display=(p.dataset.wtab===key)?'':'none'; });
   if(key==='members') loadMembers();
   if(key==='sellers') loadSellers();
@@ -1747,7 +1775,7 @@ async function markListingSold(id){ const it=(_mktItems||[]).find(x=>x.id===id);
   const r=await staffDo('listing_save',{p_id:id,p_data:listingPayload(it,{status:next})}); if(r)loadMarket(); }
 /* ---- Cart (local; secure checkout arrives in Phase 3 with Square) ---- */
 function cartGet(){ try{ return JSON.parse(localStorage.getItem('hoc_cart')||'[]'); }catch(e){ return []; } }
-function cartSet(a){ try{ localStorage.setItem('hoc_cart',JSON.stringify(a)); }catch(e){} const c=el('cartCount'); if(c)c.textContent=a.length; }
+function cartSet(a){ try{ localStorage.setItem('hoc_cart',JSON.stringify(a)); }catch(e){} const c=el('cartCount'); if(c){ c.textContent=a.length; c.style.display=a.length?'':'none'; } }
 function cartCount(){ return cartGet().length; }
 function addToCart(id){
   const it=(_mktItems||[]).find(x=>x.id===id); if(!it){ toast('Item not found.'); return; }

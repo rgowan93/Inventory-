@@ -565,6 +565,86 @@ hr.sep{ border-top:1px solid rgba(255,255,255,.08); }
 .ordstatus{ font-weight:800; }
 .tabbadge{ font-weight:800; }
 button,.walltab,.mktsub,.mktcard,.custbtn,.qrtile.tap{ transition:transform .08s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease, color .16s ease; }
+/* ============================================================
+   🔮 Holo Premium v3 — distinctive palette + bottom nav + sheet
+   Shifts the app off flat gold-on-black: deep violet-black base,
+   an iridescent violet→cyan interactive accent (the "holo" signature
+   of trading cards), gradient hairline card edges, a real thumb-zone
+   bottom tab bar (no more slider), and a More bottom-sheet.
+   ============================================================ */
+:root{
+  --accent1:#a78bfa; --accent2:#22d3ee; --accent3:#5eead4;
+  --acc-grad:linear-gradient(120deg,#a78bfa,#22d3ee 55%,#5eead4);
+  --ink:#eef1f8; --ink-2:#c3c8db; --ink-3:#8f96b0;
+}
+body{ background:#07060d!important; background-image:linear-gradient(180deg,#07060d,#0a0912 55%,#07060d)!important; }
+body::before{
+  background:
+    radial-gradient(42% 38% at 12% 6%, rgba(167,139,250,.38), transparent 62%),
+    radial-gradient(44% 40% at 88% 10%, rgba(34,211,238,.26), transparent 62%),
+    radial-gradient(60% 52% at 50% 112%, rgba(244,180,0,.12), transparent 60%) !important;
+  filter:blur(34px)!important;
+}
+
+/* iridescent focus + subtle accent touches */
+input:focus,textarea:focus,select:focus,.fld input:focus,.fld textarea:focus,.fld select:focus,.mktsearch:focus{
+  border-color:rgba(34,211,238,.6)!important; box-shadow:0 0 0 3px rgba(34,211,238,.15)!important; }
+.wall-logo{ box-shadow:0 0 0 5px rgba(244,180,0,.12),0 16px 46px rgba(0,0,0,.62),0 0 64px rgba(139,92,246,.4)!important; }
+.membadge.acct,.vbadge{ background:var(--acc-grad); color:#0a0913; }
+
+/* gradient hairline edges on surfaces — premium, and clearly not flat */
+.card:not(.pagecard),.mktcard,.qrtile,.showcard,.ordcard,.notifrow,.installbanner{ position:relative; }
+.card:not(.pagecard)::after,.mktcard::after,.qrtile::after,.showcard::after,.ordcard::after,.installbanner::after{
+  content:""; position:absolute; inset:0; border-radius:inherit; padding:1px;
+  background:linear-gradient(135deg, rgba(167,139,250,.5), rgba(34,211,238,.22) 45%, rgba(255,255,255,0) 72%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor; mask-composite:exclude; pointer-events:none; }
+
+/* ---- slim top utility strip ---- */
+.wtop{ display:flex; justify-content:flex-end; align-items:center; gap:10px; padding:4px 2px 8px; }
+.wtop-btn{ padding:8px 16px; font-size:13px; font-weight:800; border-radius:999px; }
+.wtop-ic{ position:relative; width:40px; height:40px; padding:0; display:flex; align-items:center; justify-content:center;
+  border-radius:12px; background:rgba(255,255,255,.05); border:1px solid var(--glassline); box-shadow:none; }
+.wtop-ic svg.i{ width:19px; height:19px; }
+.wtop-badge{ position:absolute; top:-5px; right:-5px; min-width:17px; height:17px; padding:0 4px; border-radius:999px;
+  background:var(--red); color:#fff; font-size:10px; font-weight:900; display:flex; align-items:center; justify-content:center; }
+.wtop-dot{ position:absolute; top:6px; right:7px; width:8px; height:8px; border-radius:50%; background:var(--red); }
+
+/* ---- fixed bottom tab bar (thumb reachable) — replaces the slider ---- */
+.wall{ padding-bottom:118px!important; }
+.wnav{ position:fixed; left:50%; bottom:0; transform:translateX(-50%); width:100%; max-width:560px; z-index:60;
+  display:flex; gap:2px; padding:9px 10px calc(9px + env(safe-area-inset-bottom));
+  background:rgba(11,10,19,.72); -webkit-backdrop-filter:blur(22px) saturate(160%); backdrop-filter:blur(22px) saturate(160%);
+  border-top:1px solid var(--glassline); box-shadow:0 -12px 34px rgba(0,0,0,.55); }
+.wnav-item{ flex:1; background:none; border:none; box-shadow:none; padding:4px 2px; border-radius:14px;
+  display:flex; flex-direction:column; align-items:center; gap:4px; color:var(--ink-3); font-weight:700; font-size:10.5px; letter-spacing:.2px; }
+.wnav-ic{ position:relative; width:44px; height:30px; display:flex; align-items:center; justify-content:center;
+  border-radius:12px; transition:background .2s, box-shadow .2s; }
+.wnav-item svg.i{ width:22px; height:22px; }
+.wnav-item.on{ color:#fff; }
+.wnav-item.on .wnav-ic{ background:linear-gradient(135deg,rgba(167,139,250,.95),rgba(34,211,238,.8)); box-shadow:0 6px 18px rgba(139,92,246,.5); }
+.wnav-item.on svg.i{ stroke:#0a0913; }
+.wnav-item:active{ transform:translateY(1px); }
+.wnav-badge{ position:absolute; top:-3px; right:2px; min-width:16px; height:16px; padding:0 4px; border-radius:999px;
+  background:var(--red); color:#fff; font-size:9px; font-weight:900; display:flex; align-items:center; justify-content:center; }
+
+/* ---- More bottom-sheet ---- */
+.wsheet-wrap{ position:fixed; inset:0; z-index:210; }
+.wsheet-back{ position:absolute; inset:0; background:rgba(6,6,12,.55); -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px); opacity:0; transition:opacity .2s; }
+.wsheet-wrap.show .wsheet-back{ opacity:1; }
+.wsheet{ position:absolute; left:0; right:0; bottom:0; max-width:560px; margin:0 auto;
+  padding:10px 16px calc(20px + env(safe-area-inset-bottom));
+  background:rgba(16,15,26,.92); -webkit-backdrop-filter:blur(26px); backdrop-filter:blur(26px);
+  border-top-left-radius:24px; border-top-right-radius:24px; border:1px solid var(--glassline); border-bottom:none;
+  transform:translateY(101%); transition:transform .28s cubic-bezier(.2,.85,.25,1); box-shadow:0 -22px 54px rgba(0,0,0,.55); }
+.wsheet-wrap.show .wsheet{ transform:translateY(0); }
+.wsheet-grip{ width:40px; height:4px; border-radius:2px; background:rgba(255,255,255,.2); margin:2px auto 12px; }
+.wsheet-h{ font-weight:800; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--ink-3); margin-bottom:12px; text-align:center; }
+.wsheet-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.wsheet-item{ display:flex; flex-direction:column; align-items:center; gap:9px; padding:17px 6px; border-radius:16px;
+  background:rgba(255,255,255,.045); border:1px solid var(--glassline); color:var(--ink); font-weight:600; font-size:11.5px; line-height:1.2; text-align:center; }
+.wsheet-item svg.i{ width:24px; height:24px; color:var(--accent1); }
+.wsheet-item:active{ transform:translateY(1px); background:rgba(255,255,255,.08); }
 </style>
 </head>
 <body>
@@ -591,9 +671,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260623m"></script>
-<script src="social.js?v=20260623m"></script>
-<script src="app.js?v=20260623m"></script>
+<script src="config.js?v=20260623n"></script>
+<script src="social.js?v=20260623n"></script>
+<script src="app.js?v=20260623n"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
