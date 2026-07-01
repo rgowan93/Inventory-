@@ -534,6 +534,19 @@ button.sm{ border-radius:var(--r-sm); font-weight:600; }
 .authbrand .an b{ color:var(--gold); font-weight:900; }
 .authbrand .asub{ color:var(--ink-3); font-size:13px; margin-top:4px; font-weight:450; }
 
+/* ---- Afterpay (Pay at Show) ---- */
+.apcard{ margin-top:14px; }
+.ap-head{ display:flex; align-items:center; gap:10px; margin-bottom:2px; }
+.ap-badge{ font-weight:900; font-size:12px; letter-spacing:.3px; color:#0a0b11; background:#b2fce4;
+  padding:4px 10px; border-radius:999px; }
+.ap-h{ font-weight:800; font-size:15px; }
+.ap-result{ width:72px; height:72px; margin:8px auto 6px; border-radius:50%; display:flex; align-items:center;
+  justify-content:center; font-size:34px; font-weight:900; }
+.ap-result.good{ background:rgba(52,199,89,.16); color:#34c759; border:1px solid rgba(52,199,89,.4); }
+.ap-result.bad{ background:rgba(226,59,46,.14); color:#ff6a5c; border:1px solid rgba(226,59,46,.4); }
+.ap-result svg.i{ width:34px; height:34px; }
+.ap-rtitle{ text-align:center; font-weight:900; font-size:22px; margin-bottom:2px; }
+
 /* ---- account page header ---- */
 .acct-hero{ display:flex; align-items:center; gap:14px; padding:6px 2px 4px; }
 .acct-hero .avatar-lg{ width:60px; height:60px; }
@@ -578,9 +591,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260623k"></script>
-<script src="social.js?v=20260623k"></script>
-<script src="app.js?v=20260623k"></script>
+<script src="config.js?v=20260623l"></script>
+<script src="social.js?v=20260623l"></script>
+<script src="app.js?v=20260623l"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */

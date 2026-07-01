@@ -419,13 +419,19 @@ function viewWall(){
       social('Instagram', w.instagram?igUrl(w.instagram):'', w.instagram?('@'+String(w.instagram).replace(/^@/,'')):'')+
       social('TikTok', w.tiktok?ttUrl(w.tiktok):'', w.tiktok?('@'+String(w.tiktok).replace(/^@/,'')):'')+
     '</div>';
+  const afterpayCard = staff
+    ? ('<div class="card apcard"><div class="ap-head"><div class="ap-badge">Afterpay</div><div class="ap-h">Buy now, pay later — in person</div></div>'+
+        '<div class="muted" style="margin:2px 0 12px">Start a sale, then hand your phone to the customer to apply &amp; pay. Afterpay pays House of Cards directly — nothing to key into Square.</div>'+
+        '<button class="gold" style="width:100%" onclick="openAfterpaySale()">'+svgIcon('wallet')+' Start an Afterpay sale</button></div>')
+    : ('<div class="card apcard"><div class="ap-head"><div class="ap-badge">Afterpay</div><div class="ap-h">Buy now, pay later</div></div>'+
+        '<div class="muted" style="margin-top:4px">Splitting a purchase with Afterpay? Ask a House of Cards team member to start an Afterpay sale for you at the table.</div></div>');
   const payPanel=
     '<div class="wall-sec">Pay at Show</div>'+
     '<div class="qrgrid">'+
       pay('Venmo', w.venmo?venmoUrl(w.venmo):'', '', w.venmo)+
       pay('Cash App', w.cashapp?cashUrl(w.cashapp):'', '', w.cashapp)+
       pay('PayPal', w.paypal?paypalUrl(w.paypal):'', 'assets/wall/paypal-photo.jpeg', w.paypal)+
-    '</div>';
+    '</div>'+afterpayCard;
   const contactPanel=
     '<div class="wall-sec">Contact Us</div>'+
     (contacts.length?(
@@ -2046,6 +2052,115 @@ function openStaffLogin(){
   }
   loginStep();
 }
+/* ===================== Afterpay — Pay at Show (staff-started, customer applies) ===================== */
+function apOrigin(){ return (location.origin + location.pathname).replace(/\/index\.html$/,'/').replace(/\/$/,'')+'/'; }
+function openAfterpaySale(){
+  if(!staffSession()){ openStaffLogin(); return; }
+  if(!cloudOn()){ toast('Cloud not set up.'); return; }
+  let photo=null;
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w); const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('Afterpay sale','ap_x')+
+    '<div class="muted" style="margin-bottom:10px">Enter the amount and what they\'re buying. When you press process, hand your phone to the customer to apply &amp; pay.</div>'+
+    '<label class="fld"><span>Amount (USD)</span><input id="ap_amt" type="text" inputmode="decimal" placeholder="e.g. 120.00"/></label>'+
+    '<label class="fld"><span>What are they buying?</span><input id="ap_label" placeholder="e.g. Charizard PSA 10"/></label>'+
+    '<label class="fld"><span>Photo of the item (optional)</span><div class="row" style="gap:8px"><button class="ghost" id="ap_photo" style="flex:1">'+svgIcon('image')+' Add photo</button></div></label>'+
+    '<div id="ap_photoprev"></div>'+
+    '<div class="grid2"><label class="fld" style="margin:0"><span>Customer name (optional)</span><input id="ap_cn" autocomplete="off"/></label>'+
+    '<label class="fld" style="margin:0"><span>Text receipt to (optional)</span><input id="ap_cc" inputmode="tel" placeholder="mobile or email"/></label></div>'+
+    '<div class="banner" style="margin:12px 0">Afterpay pays House of Cards directly to your bank. There is nothing to enter into Square afterward.</div>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="ap_go" style="flex:1">'+svgIcon('wallet')+' Process &amp; hand to customer</button></div></div>';
+  w.querySelector('#ap_x').onclick=close;
+  w.querySelector('#ap_photo').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
+    inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading…'); const up=await uploadMedia(f); if(!up)return; photo=up;
+      const pv=w.querySelector('#ap_photoprev'); if(pv)pv.innerHTML='<img class="showflyer" src="'+esc(up.url)+'"/>'; w.querySelector('#ap_photo').innerHTML='✓ Photo ready — tap to replace'; };
+    inp.click(); };
+  w.querySelector('#ap_go').onclick=async()=>{
+    const amt=parseFloat((w.querySelector('#ap_amt').value||'').replace(/[^0-9.]/g,''));
+    if(!(amt>0)){ toast('Enter a valid amount.'); return; }
+    const cents=Math.round(amt*100);
+    const label=(w.querySelector('#ap_label').value||'').trim()||'In-person sale';
+    const cn=(w.querySelector('#ap_cn').value||'').trim(); const cc=(w.querySelector('#ap_cc').value||'').trim();
+    const btn=w.querySelector('#ap_go'); btn.disabled=true; btn.textContent='Starting…';
+    if(!(await ensureStaffPw())){ btn.disabled=false; btn.innerHTML=svgIcon('wallet')+' Process &amp; hand to customer'; return; }
+    const r=await sbFn('afterpay-checkout',{p_user:staffSession().username,p_pass:_staffPw,amount_cents:cents,label:label,photo_url:photo?photo.url:null,customer_name:cn,customer_contact:cc,origin:apOrigin()});
+    if(!r||!r.ok||!r.url){ toast((r&&r.error)||'Could not start Afterpay.'); btn.disabled=false; btn.innerHTML=svgIcon('wallet')+' Process &amp; hand to customer'; return; }
+    try{ localStorage.setItem('hoc_ap_pending', JSON.stringify({token:r.token,cents:cents,label:label,cn:cn,cc:cc,env:r.env,ts:Date.now()})); }catch(e){}
+    location.href=r.url;   // hand the phone to the customer — they apply & approve on Afterpay
+  };
+  setTimeout(()=>{ const a=w.querySelector('#ap_amt'); if(a)a.focus(); },60);
+}
+let _apReturnHandled=false;
+async function checkAfterpayReturn(){
+  if(_apReturnHandled)return; if(!cloudOn())return;
+  let p; try{ p=new URLSearchParams(location.search); }catch(e){ return; }
+  const marker=p.get('afterpay'); if(!marker)return;
+  _apReturnHandled=true;
+  let pending=null; try{ pending=JSON.parse(localStorage.getItem('hoc_ap_pending')||'null'); }catch(e){}
+  const clean=()=>{ try{ history.replaceState({},'',location.pathname); }catch(e){} try{ localStorage.removeItem('hoc_ap_pending'); }catch(e){} };
+  if(marker==='cancel'){ clean(); toast('Afterpay sale canceled.'); return; }
+  const token=p.get('orderToken')||p.get('token')||(pending&&pending.token);
+  const status=(p.get('status')||'').toUpperCase();
+  if(!token || (status && status!=='SUCCESS')){ clean(); toast(status==='CANCELLED'?'Afterpay sale canceled.':'Afterpay didn\'t complete.'); return; }
+  toast('Confirming Afterpay payment…');
+  const r=await sbFn('afterpay-capture',{token:token});
+  clean();
+  if(r&&r.ok){ openAfterpayResult({amount_cents:r.amount_cents,label:r.label,customer_name:r.customer_name||(pending&&pending.cn),customer_contact:r.customer_contact||(pending&&pending.cc)}); }
+  else { openAfterpayResult({error:(r&&(r.reason||r.error))||'Afterpay could not be confirmed.'}); }
+}
+function openAfterpayResult(res){
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w); const close=()=>w.remove();
+  if(res.error){
+    w.innerHTML='<div class="card pagecard">'+pageHead('Afterpay','apr_x')+
+      '<div class="ap-result bad">'+svgIcon('wallet')+'</div>'+
+      '<div class="ap-rtitle">Not completed</div><div class="muted" style="text-align:center">'+esc(res.error)+'</div>'+
+      '<div class="row" style="margin-top:16px"><button class="ghost" id="apr_done" style="flex:1">Done</button></div></div>';
+    w.querySelector('#apr_x').onclick=close; w.querySelector('#apr_done').onclick=close; return;
+  }
+  const amt=mUSD(res.amount_cents||0);
+  const cc=(res.customer_contact||'').trim();
+  const receiptBody='House of Cards receipt: '+amt+(res.label?(' — '+res.label):'')+'. Paid with Afterpay. Thank you!';
+  let receiptBtn='';
+  if(cc){ const isEmail=/^\S+@\S+\.\S+$/.test(cc);
+    const href=isEmail?('mailto:'+encodeURIComponent(cc)+'?subject='+encodeURIComponent('House of Cards receipt')+'&body='+encodeURIComponent(receiptBody))
+                      :('sms:'+cc.replace(/[^\d+]/g,'')+(/android/i.test(navigator.userAgent)?'?':'&')+'body='+encodeURIComponent(receiptBody));
+    receiptBtn='<button class="blue" id="apr_receipt" style="flex:1">'+svgIcon(isEmail?'chat':'phone')+' Send receipt to customer</button>'; }
+  w.innerHTML='<div class="card pagecard">'+pageHead('Afterpay','apr_x')+
+    '<div class="ap-result good">✓</div>'+
+    '<div class="ap-rtitle">Paid '+amt+'</div>'+
+    (res.label?('<div class="muted" style="text-align:center">'+esc(res.label)+'</div>'):'')+
+    '<div class="muted" style="text-align:center;margin-top:6px">Afterpay is paying House of Cards directly. Nothing to enter into Square.</div>'+
+    '<div class="row" style="margin-top:16px;gap:8px">'+receiptBtn+'<button class="gold" id="apr_done" style="flex:1">Done</button></div></div>';
+  w.querySelector('#apr_x').onclick=close; w.querySelector('#apr_done').onclick=close;
+  if(cc){ const rbtn=w.querySelector('#apr_receipt'); if(rbtn){ const isEmail=/^\S+@\S+\.\S+$/.test(cc);
+    const href=isEmail?('mailto:'+encodeURIComponent(cc)+'?subject='+encodeURIComponent('House of Cards receipt')+'&body='+encodeURIComponent(receiptBody))
+                      :('sms:'+cc.replace(/[^\d+]/g,'')+(/android/i.test(navigator.userAgent)?'?':'&')+'body='+encodeURIComponent(receiptBody));
+    rbtn.onclick=()=>{ try{ location.href=href; }catch(e){} }; } }
+}
+function isOwner(){ const s=staffSession(); return !!s && String(s.username||'').trim().toLowerCase()==='reggie'; }
+async function openAfterpayDashboard(){
+  if(!isOwner()){ toast('Owner only.'); return; }
+  const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w); const close=()=>w.remove();
+  w.innerHTML='<div class="card pagecard">'+pageHead('Afterpay dashboard','apd_x')+'<div id="apd_body"><div class="muted">Loading…</div></div></div>';
+  w.querySelector('#apd_x').onclick=close;
+  if(!(await ensureStaffPw())){ w.querySelector('#apd_body').innerHTML='<div class="muted">Unlock to view.</div>'; return; }
+  const r=await sbFn('afterpay-sales',{p_user:staffSession().username,p_pass:_staffPw});
+  const body=w.querySelector('#apd_body'); if(!body)return;
+  if(!r||!r.ok){ body.innerHTML='<div class="muted">'+esc((r&&r.error)||'Could not load.')+'</div>'; return; }
+  const t=r.totals||{};
+  const kpis='<div class="kpi" style="margin-bottom:14px">'+
+    '<div class="card"><div class="muted">Collected</div><div class="big">'+mUSD(t.captured_cents||0)+'</div></div>'+
+    '<div class="card"><div class="muted">Today</div><div class="big">'+mUSD(t.today_cents||0)+'</div></div>'+
+    '<div class="card"><div class="muted">Sales</div><div class="big">'+(t.captured_count||0)+'</div></div>'+
+    '<div class="card"><div class="muted">Pending</div><div class="big">'+(t.pending||0)+'</div></div></div>';
+  const rows=(r.sales||[]).map(s=>{ const st=s.status||'pending';
+    const badge='<span class="ordstatus s_'+(st==='captured'?'complete':(st==='declined'?'canceled':'paid'))+'">'+esc(st)+'</span>';
+    const who=s.customer_name?(' · '+esc(s.customer_name)):''; const by=s.staff_user?(' · by '+esc(s.staff_user)):'';
+    return '<div class="ordcard"><div class="ordhead"><b>'+mUSD(s.amount_cents)+'</b>'+badge+'</div>'+
+      '<div class="muted">'+new Date(s.created_at).toLocaleString()+who+by+'</div>'+
+      (s.label?('<div style="margin-top:4px">'+esc(s.label)+'</div>'):'')+
+      (st==='declined'&&s.decline_reason?('<div class="muted" style="margin-top:3px">'+esc(s.decline_reason)+'</div>'):'')+'</div>'; }).join('');
+  body.innerHTML=kpis+(rows||'<div class="empty">No Afterpay sales yet.</div>');
+}
 function openStaffAccount(){ const s=staffSession(); if(!s)return;
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w); const close=()=>w.remove();
   w.innerHTML='<div class="card pagecard">'+
@@ -2075,8 +2190,20 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
     '<div id="sq_result" class="muted" style="margin-top:6px"></div>'+
     '<hr class="sep"><div class="muted" style="margin-bottom:6px">Stripe (seller payouts) setup check</div>'+
     '<div class="row"><button class="ghost" id="str_test" style="flex:1">Test Stripe connection</button></div>'+
-    '<div id="str_result" class="muted" style="margin-top:6px"></div></div>';
+    '<div id="str_result" class="muted" style="margin-top:6px"></div>'+
+    '<hr class="sep"><div class="muted" style="margin-bottom:6px">Afterpay (Pay at Show) setup check</div>'+
+    '<div class="row"><button class="ghost" id="ap_test" style="flex:1">Test Afterpay connection</button></div>'+
+    '<div id="ap_result" class="muted" style="margin-top:6px"></div>'+
+    (isOwner()?('<div class="row" style="margin-top:8px"><button class="gold" id="ap_dash" style="flex:1">'+svgIcon('wallet')+' Afterpay dashboard (owner)</button></div>'):'')+
+    '</div>';
   w.querySelector('#a_x').onclick=close;
+  { const apd=w.querySelector('#ap_dash'); if(apd)apd.onclick=openAfterpayDashboard; }
+  w.querySelector('#ap_test').onclick=async()=>{ const out=w.querySelector('#ap_result'); out.textContent='Checking…';
+    if(!(await ensureStaffPw())){ out.textContent='Unlock to check.'; return; }
+    const r=await sbFn('afterpay-health',{p_user:staffSession().username,p_pass:_staffPw});
+    if(!r){ out.textContent='Could not reach the server.'; return; }
+    if(r.ok){ out.innerHTML='✅ Connected — env: <b>'+esc(r.env)+'</b>, merchant '+esc(r.merchant_id_tail||'')+(r.minimum?(', limits '+esc(r.minimum)+'–'+esc(r.maximum||'?')):'')+(r.env==='sandbox'?'<br>⚠️ Sandbox mode — set AFTERPAY_ENV=production to take real payments.':''); }
+    else { out.innerHTML='❌ '+esc(r.error||'Not connected')+(r.env?(' (env: '+esc(r.env)+')'):'')+(r.status?(' [HTTP '+r.status+']'):''); } };
   w.querySelector('#st_bio').onclick=async()=>{ if(bioEnabledFor(s.username)){ bioForget(); close(); openStaffAccount(); } else { const ok=await bioRegister(); if(ok){ close(); openStaffAccount(); } } };
   w.querySelector('#str_test').onclick=async()=>{ const out=w.querySelector('#str_result'); out.textContent='Checking…';
     if(!(await ensureStaffPw())){ out.textContent='Unlock to check.'; return; }
@@ -3421,4 +3548,5 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
   save();
   render();
   if(typeof cloudInitSession==='function'){ try{ await cloudInitSession(); }catch(e){ console.warn(e); } }
+  try{ if(typeof checkAfterpayReturn==='function') await checkAfterpayReturn(); }catch(e){}
 })();
