@@ -418,6 +418,47 @@ button.ghost{ background:rgba(255,255,255,.04); border-color:var(--glassline); b
 .toast{ background:rgba(12,14,22,.82)!important; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); border:1px solid var(--gold-glow)!important; }
 .wall-logo{ box-shadow:0 0 0 6px rgba(244,180,0,.14),0 16px 50px rgba(0,0,0,.6),0 0 60px var(--gold-glow); }
 @media (prefers-reduced-motion: reduce){ body::before{ animation:none; } }
+/* ============================================================
+   🧹 Senior polish — declutter, spacing, hierarchy, typography
+   ============================================================ */
+body{ font-size:15px; line-height:1.5; letter-spacing:.1px; }
+.muted{ color:#a7adc4; }
+/* tabs: one clean horizontal rail instead of a wrapping cloud */
+.walltabs{ flex-wrap:nowrap!important; overflow-x:auto; justify-content:flex-start; gap:8px;
+  padding:4px 2px 12px; margin:0 -4px 8px; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 16px,#000 calc(100% - 16px),transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 16px,#000 calc(100% - 16px),transparent); }
+.walltabs::-webkit-scrollbar{ display:none; }
+.walltab{ padding:9px 16px; font-size:13px; border-radius:12px; flex:0 0 auto; }
+/* calmer wall + hero */
+.wall{ padding:26px 16px 90px; }
+.wall-hero{ margin-bottom:20px; }
+.wall-title{ letter-spacing:1px; }
+.wall-sec{ margin:26px 0 14px; letter-spacing:2.5px; }
+.wall-cta{ margin-top:18px; border-radius:16px; }
+/* section headers inside pages a touch softer */
+.card h3,.pagehead h3{ letter-spacing:.2px; }
+/* consistent, roomier cards + inputs */
+.card{ padding:16px; }
+.fld{ margin-bottom:10px; }
+.fld span{ display:block; font-size:12px; font-weight:800; letter-spacing:.4px; color:#9aa0b5; margin-bottom:5px; text-transform:uppercase; }
+.fld input,.fld textarea,.fld select{ padding:12px 12px; font-size:15px; width:100%; }
+/* market grid: even, breathable */
+.mktgrid{ gap:12px; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+.mkttitle{ font-weight:800; }
+.mktprice{ color:var(--gold); font-weight:900; }
+/* rows/buttons breathing room; kill the old heavy look on small btns */
+.row{ gap:8px; }
+button.sm{ border-radius:10px; }
+/* the frosted top account/customer bar */
+.custbar{ -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); }
+/* nicer dividers */
+hr.sep{ border-top:1px solid rgba(255,255,255,.08); }
+/* status chips a bit more refined */
+.membadge,.tag,.mkttag{ border-radius:8px; }
+/* smooth everything a hair */
+*{ -webkit-tap-highlight-color:transparent; }
+button,.walltab,.mktsub,.mktcard{ transition:transform .08s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease; }
 </style>
 </head>
 <body>
@@ -444,9 +485,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260623i"></script>
-<script src="social.js?v=20260623i"></script>
-<script src="app.js?v=20260623i"></script>
+<script src="config.js?v=20260623j"></script>
+<script src="social.js?v=20260623j"></script>
+<script src="app.js?v=20260623j"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
