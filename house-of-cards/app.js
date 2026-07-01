@@ -109,6 +109,30 @@ function avatarTag(u,size){ const c='avatar-'+(size||'sm'); return (u&&u.avatar)
 function currentAvatarTag(size){ if(typeof myProfile!=='undefined'&&myProfile&&myProfile.avatar_url)
   return '<img class="avatar-'+(size||'sm')+'" src="'+esc(myProfile.avatar_url)+'" alt=""/>'; return avatarTag(me(),size); }
 const el=id=>document.getElementById(id);
+/* ---- inline SVG icon set (professional stroke icons, replace emoji in chrome) ---- */
+const _ICON_PATHS={
+  home:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h5v-6h4v6h5V9.5"/>',
+  bag:'<path d="M5 8h14l-1 12H6L5 8z"/><path d="M8.5 8V6a3.5 3.5 0 0 1 7 0v2"/>',
+  share:'<circle cx="18" cy="5" r="2.4"/><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="19" r="2.4"/><path d="m8.1 10.8 7.8-4.6M8.1 13.2l7.8 4.6"/>',
+  heart:'<path d="M12 20s-7-4.6-9.2-9C1.3 7.6 3 4.5 6.2 4.5c2 0 3.2 1.3 3.8 2.3.6-1 1.8-2.3 3.8-2.3 3.2 0 4.9 3.1 3.4 6.5C19 15.4 12 20 12 20z"/>',
+  wallet:'<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 9.5h18"/><circle cx="16.5" cy="13.5" r="1.1"/>',
+  chat:'<path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/>',
+  star:'<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17.8 6.6 20l1-6.1L3.2 9.5l6.1-.9L12 3z"/>',
+  image:'<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.7"/><path d="m4 17 5-5 4 4 3-3 4 4"/>',
+  bell:'<path d="M18 15.5V11a6 6 0 1 0-12 0v4.5L4 18h16z"/><path d="M10 21h4"/>',
+  cart:'<circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.2 11.2A1.5 1.5 0 0 0 8.7 16.5H18a1.5 1.5 0 0 0 1.5-1.2L21 8H6"/>',
+  user:'<circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  box:'<path d="M3 8l9-5 9 5v8l-9 5-9-5V8z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+  tag:'<path d="M3 12l8-8h7a2 2 0 0 1 2 2v7l-8 8a2 2 0 0 1-2.8 0L3 14.8A2 2 0 0 1 3 12z"/><circle cx="16.5" cy="7.5" r="1.2"/>',
+  users:'<circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5"/><path d="M16 6a3 3 0 0 1 0 6M21 19c0-2.2-1.3-3.9-3.3-4.6"/>',
+  eye:'<path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.7"/>',
+  phone:'<path d="M6 3h3l2 5-2.5 1.5a12 12 0 0 0 6 6L16 13l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 4 5a2 2 0 0 1 2-2z"/>',
+  download:'<path d="M12 3v11M8 10l4 4 4-4"/><path d="M5 20h14"/>',
+  lock:'<rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'
+};
+function svgIcon(name,cls){ const d=_ICON_PATHS[name]; if(!d)return '';
+  return '<svg class="i'+(cls?(' '+cls):'')+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>'; }
 const val=id=>{const e=el(id);return e?e.value.trim():'';};
 const num=id=>{const v=parseFloat(val(id));return isNaN(v)?0:v;};
 function toast(msg){const t=el('toast');t.innerHTML='<div class="toast">'+msg+'</div>';setTimeout(()=>{t.innerHTML='';},2600);}
@@ -247,6 +271,7 @@ function closeMenu(){ setMenu(false); }
 function applyMenu(){ const open=!!ui.menuOpen&&ui.authed; const n=el('tabs');
   if(n)n.classList.toggle('open',open); document.body.classList.toggle('menu-open',open); }
 function render(){
+  document.body.classList.toggle('authed', !!ui.authed);
   const logo=el('brandLogo'); if(logo){ if(state&&state.settings&&state.settings.logo){ logo.src=state.settings.logo; } else if(!logo.dataset.set){ logo.dataset.set='1'; logo.src='logo.png'; logo.onerror=()=>{logo.onerror=null;logo.src='logo.svg';}; } }
   const mb=el('menuBtn'); if(mb)mb.style.display=ui.authed?'':'none';
   if(!ui.authed){ el('whoBar').innerHTML=''; el('tabs').innerHTML=''; ui.menuOpen=false; applyMenu();
@@ -355,18 +380,18 @@ function viewWall(){
   const contacts=(w.contact||[]).filter(c=>c&&c.phone);
   const staff=!!staffSession();
   const cust=wallCustomer;
-  const cartBtn='<button class="custbtn" onclick="openCart()">🛒 Cart (<span id="cartCount">'+cartCount()+'</span>)</button>';
+  const cartBtn='<button class="custbtn" onclick="openCart()">'+svgIcon('cart')+' Cart (<span id="cartCount">'+cartCount()+'</span>)</button>';
   const signedIn = staff || !!cust;
-  const whoLabel = staff ? ('👤 '+esc(staffSession().username)+' · staff') : (cust ? ('👤 '+esc(cust.name||cust.email||'Member')) : '');
-  const bellBtn='<button class="custbtn" onclick="openInbox()" style="position:relative">🔔<span id="notifDot" class="tabbadge" style="display:none"></span></button>';
+  const whoLabel = staff ? (esc(staffSession().username)+' · staff') : (cust ? esc(cust.name||cust.email||'Member') : '');
+  const bellBtn='<button class="custbtn" onclick="openInbox()" style="position:relative">'+svgIcon('bell')+'<span id="notifDot" class="tabbadge" style="display:none"></span></button>';
   const custBar = cloudOn() ? ('<div class="custbar">'+(signedIn
-    ? '<span class="custhi">'+whoLabel+'</span>'+bellBtn+cartBtn+'<button class="custbtn" onclick="openAccount()">Account</button><button class="custbtn" onclick="signOutAll()">Sign out</button>'
-    : '<span class="custhi muted">House of Cards</span>'+cartBtn+'<button class="custbtn gold" onclick="openLogin()">Log in</button><button class="custbtn" onclick="openCustomerSignup()">Create account</button>'
+    ? '<span class="custhi">'+svgIcon('user')+' '+whoLabel+'</span><span class="right"></span>'+bellBtn+cartBtn+'<button class="custbtn" onclick="openAccount()">'+svgIcon('user')+' Account</button><button class="custbtn" onclick="signOutAll()">Sign out</button>'
+    : '<span class="custhi">House of Cards</span><span class="right"></span>'+cartBtn+'<button class="custbtn gold" onclick="openLogin()">Log in</button><button class="custbtn" onclick="openCustomerSignup()">'+svgIcon('plus')+' Create account</button>'
   )+'</div>') : '';
   let active=ui.wallTab||'home'; if(['members','sellers','orders'].indexOf(active)>=0&&!staff) active='home';
-  const TABS=[['home','🏠 Home'],['market','🛒 Marketplace'],['share','Share Us!!'],['social','Follow on Social'],['pay','Pay at Show'],['contact','Contact Us'],['reviews','Reviews'],['photos','Photos & Videos']];
-  if(staff) TABS.push(['orders','📦 Orders'+(_newOrderCount?(' <span class="tabbadge">'+_newOrderCount+'</span>'):'')],['sellers','Sellers'],['members','Members']);
-  const tabbar='<div class="walltabs">'+TABS.map(t=>'<button class="walltab'+(t[0]===active?' on':'')+'" data-k="'+t[0]+'" onclick="setWallTab(\''+t[0]+'\')">'+t[1]+'</button>').join('')+'</div>';
+  const TABS=[['home','home','Home'],['market','bag','Shop'],['share','share','Share'],['social','heart','Social'],['pay','wallet','Pay'],['contact','chat','Contact'],['reviews','star','Reviews'],['photos','image','Media']];
+  if(staff) TABS.push(['orders','box','Orders'+(_newOrderCount?(' <span class="tabbadge">'+_newOrderCount+'</span>'):'')],['sellers','tag','Sellers'],['members','users','Members']);
+  const tabbar='<div class="walltabs">'+TABS.map(t=>'<button class="walltab'+(t[0]===active?' on':'')+'" data-k="'+t[0]+'" onclick="setWallTab(\''+t[0]+'\')">'+svgIcon(t[1])+'<span>'+t[2]+'</span></button>').join('')+'</div>';
   const panel=(k,inner)=>'<div class="wpanel" data-wtab="'+k+'"'+(k===active?'':' style="display:none"')+'>'+inner+'</div>';
 
   const homePanel=
@@ -438,10 +463,10 @@ function viewWall(){
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
       (signedIn
-        ? '<button class="wall-cta" onclick="openAccount()">👋 Welcome'+(cust&&cust.name?' back, '+esc((cust.name||'').split(' ')[0]):'')+'</button>'
-        : '<button class="wall-cta" onclick="openCustomerSignup()">📲 Create your free account</button>')+
+        ? '<button class="wall-cta" onclick="openAccount()">'+svgIcon('user')+' Welcome'+(cust&&cust.name?' back, '+esc((cust.name||'').split(' ')[0]):'')+'</button>'
+        : '<button class="wall-cta" onclick="openCustomerSignup()">'+svgIcon('plus')+' Create your free account</button>')+
       '<div class="wall-cta-sub">First dibs on new singles &amp; show deals</div>'+
-      '<div class="wall-stats"><span>👥 <b id="wMembers">—</b> members</span><span class="dot">•</span><span>👀 <b id="wVisits">—</b> visits</span></div>'+
+      '<div class="wall-stats"><span>'+svgIcon('users')+' <b id="wMembers">—</b> members</span><span class="dot">•</span><span>'+svgIcon('eye')+' <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
     tabbar+
     '<div class="walltabwrap">'+
@@ -466,13 +491,14 @@ function openLogin(){
   if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
   const close=()=>w.remove();
-  const bioBtn=(custBioEnabled()&&bioSupported())?'<div class="row" style="margin-bottom:10px"><button class="gold" id="lg_bio" style="flex:1">🔓 Sign in with Face ID</button></div><div class="muted" style="text-align:center;margin-bottom:6px">— or —</div>':'';
-  w.innerHTML='<div class="card pagecard">'+pageHead('Log in','lg_x2')+bioBtn+
+  const bioBtn=(custBioEnabled()&&bioSupported())?'<div class="row" style="margin-bottom:10px"><button class="gold" id="lg_bio" style="flex:1">'+svgIcon('lock')+' Sign in with Face ID</button></div><div class="muted" style="text-align:center;margin-bottom:6px">— or —</div>':'';
+  w.innerHTML='<div class="card pagecard">'+pageHead('Log in','lg_x2')+
+    '<div class="authwrap">'+authBrand('Welcome back')+bioBtn+
     '<label class="fld"><span>Email (customers) or username (staff)</span><input id="lg_key" autocapitalize="off"/></label>'+
     '<label class="fld"><span>Password</span><input id="lg_pw" type="password"/></label>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="lg_go" style="flex:1">Log in</button></div>'+
-    '<div style="text-align:center;margin-top:10px"><button class="btn-link" id="lg_new">New customer? Create an account</button></div>'+
-    '<div style="text-align:center;margin-top:8px"><button class="btn-link" id="lg_staff">First-time staff / forgot password</button></div></div>';
+    '<div style="text-align:center;margin-top:12px"><button class="btn-link" id="lg_new">New customer? Create an account</button></div>'+
+    '<div style="text-align:center;margin-top:8px"><button class="btn-link" id="lg_staff">First-time staff / forgot password</button></div></div></div>';
   w.querySelector('#lg_x2').onclick=close;
   { const bb=w.querySelector('#lg_bio'); if(bb)bb.onclick=()=>custBioLogin(); }
   w.querySelector('#lg_new').onclick=()=>{ close(); openCustomerSignup(); };
@@ -930,6 +956,9 @@ let _sellerRatings={};
 async function loadSellerRatings(){ try{ const r=await sbRpc('seller_rating_all'); if(Array.isArray(r)){ const m={}; r.forEach(x=>{ m[x.seller_id]=x; }); _sellerRatings=m; if(el('wMarket'))renderMarketGrid(); } }catch(e){} }
 /* full-screen "page" header used by the big views (replaces cramped pop-ups) */
 function pageHead(title,closeId){ return '<div class="pagehead"><h3 style="color:var(--gold);margin:0">'+esc(title)+'</h3><button class="pageclose" id="'+closeId+'">✕ Close</button></div>'; }
+function authBrand(sub){ const src=(state&&state.settings&&state.settings.logo)||'logo.png';
+  return '<div class="authbrand"><img src="'+esc(src)+'" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
+    '<div class="an"><b>HOUSE</b> OF CARDS</div>'+(sub?('<div class="asub">'+esc(sub)+'</div>'):'')+'</div>'; }
 function ratingStr(sid){ const r=sid&&_sellerRatings[sid]; if(!r)return ''; if(!r.cnt)return '100% · New seller'; return '★ '+r.avg+' ('+r.cnt+(r.pos!=null?(' · '+r.pos+'%'):'')+')'; }
 function sellerName(sid){ const r=sid&&_sellerRatings[sid]; return (r&&r.name)||'Seller'; }
 function sellerVerified(sid){ const r=sid&&_sellerRatings[sid]; return !!(r&&r.verified); }
@@ -971,7 +1000,8 @@ function openCustomerSignup(){
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
   const close=()=>w.remove();
   w.innerHTML='<div class="card pagecard">'+pageHead('Create your account','cu_x')+
-    '<div class="muted" style="margin-bottom:8px">One account per phone number.</div>'+
+    '<div class="authwrap">'+authBrand('Free — first dibs on new singles & show deals')+
+    '<div class="muted" style="margin-bottom:10px;text-align:center">One account per phone number.</div>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>First name</span><input id="cu_first" autocomplete="given-name"/></label>'+
     '<label class="fld" style="margin:0"><span>Last name</span><input id="cu_last" autocomplete="family-name"/></label></div>'+
     '<label class="fld"><span>Username</span><input id="cu_u" autocapitalize="off" placeholder="letters & numbers"/></label>'+
@@ -980,7 +1010,7 @@ function openCustomerSignup(){
     '<label class="fld"><span>Password</span><input id="cu_p" type="password" autocomplete="new-password"/></label>'+
     '<label class="chkrow"><input type="checkbox" id="cu_alerts" checked/> <span>Enable order notifications on this device (required)</span></label>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="cu_go" style="flex:1">Create account</button></div>'+
-    '<div style="text-align:center;margin-top:10px"><button class="btn-link" id="cu_have">Already have an account? Log in</button></div></div>';
+    '<div style="text-align:center;margin-top:12px"><button class="btn-link" id="cu_have">Already have an account? Log in</button></div></div></div>';
   w.querySelector('#cu_x').onclick=close;
   w.querySelector('#cu_have').onclick=()=>{ close(); openLogin(); };
   w.querySelector('#cu_go').onclick=async()=>{
@@ -1025,17 +1055,19 @@ function openCustomerAccount(){
   const c=wallCustomer; if(!c){ openCustomerLogin(); return; }
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
   const close=()=>w.remove();
-  w.innerHTML='<div class="card pagecard">'+
-    '<div class="pagehead"><h3 style="color:var(--gold);margin:0">Your account</h3><button class="pageclose" id="ca_x">✕ Close</button></div>'+
-    '<div class="memrow"><div class="memmain"><div class="memname">'+esc(c.name||'(no name)')+(c.username?(' <span class="membadge">@'+esc(c.username)+'</span>'):'')+'</div>'+(c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+'</div></div>'+
-    (c.phone?('<div class="muted" style="margin:8px 2px">📱 '+esc(c.phone)+'</div>'):'')+
-    '<div id="ca_buyerrating" class="muted" style="margin:2px 2px 8px"></div>'+
-    '<div class="row" style="gap:6px;margin:8px 0"><button class="ghost" id="cu_notif" style="flex:1">🔔 Enable notifications</button><button class="ghost" id="cu_test">Test</button></div>'+
-    '<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px"><button class="ghost" id="ca_watch" style="flex:1">♥ Watchlist</button><button class="ghost" id="ca_offers" style="flex:1">💰 My offers</button></div>'+
-    '<div class="row" style="gap:6px;margin-bottom:6px"><button class="ghost" id="ca_bio" style="flex:1">'+(custBioEnabled()?'✅ Face ID login on — turn off':'🔓 Set up Face ID login')+'</button></div>'+
-    '<hr class="sep"><div class="muted" style="margin-bottom:6px">Selling</div><div id="ca_seller"><div class="muted">…</div></div>'+
-    '<hr class="sep"><div class="muted" style="margin-bottom:6px">My orders</div><div id="ca_orders"><div class="muted">Loading…</div></div>'+
-    '<div class="row" style="margin-top:10px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button></div></div>';
+  const initials=((c.name||c.email||'?').trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('')||'?').toUpperCase();
+  w.innerHTML='<div class="card pagecard">'+pageHead('Your account','ca_x')+
+    '<div class="acct-hero"><div class="avatar-lg avatar-ph">'+esc(initials)+'</div>'+
+      '<div class="acct-id"><div class="acct-name">'+esc(c.name||'(no name)')+(c.username?(' <span class="membadge">@'+esc(c.username)+'</span>'):'')+'</div>'+
+      (c.email?('<div class="mememail">'+esc(c.email)+'</div>'):'')+
+      (c.phone?('<div class="mememail" style="display:inline-flex;align-items:center;gap:5px;margin-top:3px">'+svgIcon('phone')+esc(c.phone)+'</div>'):'')+
+      '<div id="ca_buyerrating" class="muted" style="margin-top:4px"></div></div></div>'+
+    '<div class="row" style="gap:8px;margin:12px 0"><button class="ghost" id="cu_notif" style="flex:1">'+svgIcon('bell')+' Notifications</button><button class="ghost" id="cu_test">Test</button></div>'+
+    '<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><button class="ghost" id="ca_watch" style="flex:1">'+svgIcon('heart')+' Watchlist</button><button class="ghost" id="ca_offers" style="flex:1">'+svgIcon('wallet')+' My offers</button></div>'+
+    '<div class="row" style="gap:8px;margin-bottom:6px"><button class="ghost" id="ca_bio" style="flex:1">'+svgIcon('lock')+(custBioEnabled()?' Face ID on — turn off':' Set up Face ID login')+'</button></div>'+
+    '<hr class="sep"><div class="acct-sec">'+svgIcon('tag')+' Selling</div><div id="ca_seller"><div class="muted">…</div></div>'+
+    '<hr class="sep"><div class="acct-sec">'+svgIcon('box')+' My orders</div><div id="ca_orders"><div class="muted">Loading…</div></div>'+
+    '<div class="row" style="margin-top:14px"><button class="ghost" id="ca_out" style="flex:1">Sign out</button></div></div>';
   w.querySelector('#ca_x').onclick=close;
   w.querySelector('#cu_notif').onclick=()=>enableNotifications('customer');
   w.querySelector('#cu_test').onclick=()=>pushTest();
@@ -1884,18 +1916,19 @@ function updateInstallBanner(){
   const standalone=isStandalone(); const push=notifOn();
   if((standalone&&push)||bannerDismissed()){ box.innerHTML=''; return; }
   const ios=/iphone|ipad|ipod/i.test(navigator.userAgent||'');
-  let title, msg, btn='';
+  let icon, title, msg, btn='';
   if(!standalone){
-    title='📲 Add House of Cards to your phone';
-    msg=ios ? 'Tap the Share button, then “Add to Home Screen” — so you stay logged in and get alerts.'
-            : 'Install the app (browser menu → “Add to Home screen” / “Install app”) to stay logged in and get alerts.';
+    icon='download'; title='Add to your phone';
+    msg=ios ? 'Share → “Add to Home Screen” to stay logged in & get alerts.'
+            : 'Install the app to stay logged in and get alerts.';
   } else {
-    title='🔔 Turn on notifications';
-    msg='Get alerts for orders, messages, offers, shows and more.';
-    btn='<button class="sm gold" onclick="enableNotifications(\''+(staffSession()?'staff':'customer')+'\')">Enable notifications</button>';
+    icon='bell'; title='Turn on notifications';
+    msg='Alerts for orders, messages, offers and shows.';
+    btn='<button class="sm gold" onclick="enableNotifications(\''+(staffSession()?'staff':'customer')+'\')">Enable</button>';
   }
-  box.innerHTML='<div class="installbanner"><button class="ibx" onclick="dismissBanner()">✕</button>'+
-    '<div class="ibtitle">'+title+'</div><div class="ibmsg">'+esc(msg)+'</div>'+(btn?('<div style="margin-top:8px">'+btn+'</div>'):'')+'</div>';
+  box.innerHTML='<div class="installbanner"><div class="ibicon">'+svgIcon(icon)+'</div>'+
+    '<div class="ibmain"><div class="ibtitle">'+title+'</div><div class="ibmsg">'+esc(msg)+'</div></div>'+
+    btn+'<button class="ibx" onclick="dismissBanner()">✕</button></div>';
 }
 /* ---- Web Push (app notifications) ---- */
 function urlB64ToUint8(base64){ const pad='='.repeat((4-base64.length%4)%4); const b=(base64+pad).replace(/-/g,'+').replace(/_/g,'/'); const raw=atob(b); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i); return arr; }

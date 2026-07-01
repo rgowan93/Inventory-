@@ -419,46 +419,139 @@ button.ghost{ background:rgba(255,255,255,.04); border-color:var(--glassline); b
 .wall-logo{ box-shadow:0 0 0 6px rgba(244,180,0,.14),0 16px 50px rgba(0,0,0,.6),0 0 60px var(--gold-glow); }
 @media (prefers-reduced-motion: reduce){ body::before{ animation:none; } }
 /* ============================================================
-   🧹 Senior polish — declutter, spacing, hierarchy, typography
+   🎯 Design system v2 — senior redesign (typography, icons, rhythm)
+   The app used weight 600–900 on nearly everything, which reads as
+   shouty/janky. Here we set a real hierarchy: calm body text, weight
+   reserved for headings + prices, a consistent inline-SVG icon system,
+   a slim install strip, one clean tab rail, and refined auth screens.
    ============================================================ */
-body{ font-size:15px; line-height:1.5; letter-spacing:.1px; }
-.muted{ color:#a7adc4; }
-/* tabs: one clean horizontal rail instead of a wrapping cloud */
-.walltabs{ flex-wrap:nowrap!important; overflow-x:auto; justify-content:flex-start; gap:8px;
-  padding:4px 2px 12px; margin:0 -4px 8px; -webkit-overflow-scrolling:touch; scrollbar-width:none;
-  -webkit-mask-image:linear-gradient(90deg,transparent,#000 16px,#000 calc(100% - 16px),transparent);
-          mask-image:linear-gradient(90deg,transparent,#000 16px,#000 calc(100% - 16px),transparent); }
-.walltabs::-webkit-scrollbar{ display:none; }
-.walltab{ padding:9px 16px; font-size:13px; border-radius:12px; flex:0 0 auto; }
-/* calmer wall + hero */
-.wall{ padding:26px 16px 90px; }
-.wall-hero{ margin-bottom:20px; }
-.wall-title{ letter-spacing:1px; }
-.wall-sec{ margin:26px 0 14px; letter-spacing:2.5px; }
-.wall-cta{ margin-top:18px; border-radius:16px; }
-/* section headers inside pages a touch softer */
-.card h3,.pagehead h3{ letter-spacing:.2px; }
-/* consistent, roomier cards + inputs */
-.card{ padding:16px; }
-.fld{ margin-bottom:10px; }
-.fld span{ display:block; font-size:12px; font-weight:800; letter-spacing:.4px; color:#9aa0b5; margin-bottom:5px; text-transform:uppercase; }
-.fld input,.fld textarea,.fld select{ padding:12px 12px; font-size:15px; width:100%; }
-/* market grid: even, breathable */
-.mktgrid{ gap:12px; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
-.mkttitle{ font-weight:800; }
-.mktprice{ color:var(--gold); font-weight:900; }
-/* rows/buttons breathing room; kill the old heavy look on small btns */
-.row{ gap:8px; }
-button.sm{ border-radius:10px; }
-/* the frosted top account/customer bar */
-.custbar{ -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); }
-/* nicer dividers */
-hr.sep{ border-top:1px solid rgba(255,255,255,.08); }
-/* status chips a bit more refined */
-.membadge,.tag,.mkttag{ border-radius:8px; }
-/* smooth everything a hair */
+:root{
+  --ink:#eef1f8;        /* primary text — softer than pure cream */
+  --ink-2:#c3c8db;      /* secondary text */
+  --ink-3:#8b91a8;      /* muted / captions */
+  --s1:6px; --s2:10px; --s3:14px; --s4:20px; --s5:28px;
+  --r-sm:10px; --r-md:14px; --r-lg:18px; --r-xl:22px;
+}
 *{ -webkit-tap-highlight-color:transparent; }
-button,.walltab,.mktsub,.mktcard{ transition:transform .08s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease; }
+body{ color:var(--ink); font-weight:450; font-size:15.5px; line-height:1.5; letter-spacing:.1px;
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,Roboto,Arial,sans-serif;
+  text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased; }
+.muted,.mememail,.memdate,.mmeta,.revby,.wall-cta-sub,.qrsub{ color:var(--ink-3)!important; font-weight:450; }
+
+/* ---- inline SVG icon system ---- */
+svg.i{ width:1.05em; height:1.05em; vertical-align:-.16em; flex:0 0 auto; stroke:currentColor; }
+.walltab svg.i{ width:16px; height:16px; }
+.custbtn svg.i,.wall-stats svg.i{ width:15px; height:15px; }
+.wall-cta svg.i{ width:20px; height:20px; vertical-align:-.22em; }
+
+/* ---- the redundant top brand bar is hidden on the public wall ---- */
+body:not(.authed) header.top{ display:none; }
+
+/* ---- hero: calmer, single brand moment ---- */
+.wall{ padding:22px 16px 96px; }
+.wall-hero{ margin-bottom:18px; }
+.wall-logo{ width:104px; height:104px; margin-bottom:12px; }
+.wall-title{ font-size:clamp(27px,7.4vw,38px); letter-spacing:.5px; font-weight:800; }
+.wall-title b{ font-weight:900; }
+.wall-tag{ opacity:.7; font-weight:600; font-size:12px; letter-spacing:2px; margin-top:8px; }
+.wall-cta{ margin-top:18px; border-radius:var(--r-lg); font-size:17px; padding:15px 24px;
+  display:inline-flex; align-items:center; justify-content:center; gap:9px; }
+.wall-cta-sub{ margin-top:8px; }
+.wall-stats{ margin-top:15px; gap:8px; font-weight:500; color:var(--ink-2); }
+.wall-stats span{ display:inline-flex; align-items:center; gap:6px; }
+.wall-stats b{ font-size:16px; }
+
+/* ---- section labels: refined small-caps ---- */
+.wall-sec{ font-size:11.5px; letter-spacing:2.6px; margin:28px 0 14px; color:var(--ink-3); }
+.wall-sec:before,.wall-sec:after{ background:linear-gradient(90deg,transparent,rgba(255,255,255,.14)); }
+.wall-sec:after{ background:linear-gradient(270deg,transparent,rgba(255,255,255,.14)); }
+
+/* ---- tabs: one clean horizontal rail with edge fade ---- */
+.walltabs{ flex-wrap:nowrap!important; overflow-x:auto; justify-content:flex-start; gap:7px;
+  padding:2px 2px 14px; margin:0 -4px 6px; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent); }
+.walltabs::-webkit-scrollbar{ display:none; }
+.walltab{ display:inline-flex; align-items:center; gap:6px; padding:9px 14px; font-size:13px;
+  font-weight:600; border-radius:999px; flex:0 0 auto; color:var(--ink-2); }
+.walltab.on{ font-weight:800; }
+
+/* ---- slim, elegant install / notify strip (was a giant box) ---- */
+.installbanner{ display:flex; align-items:center; gap:11px; padding:11px 13px; margin:0 0 14px;
+  border-radius:var(--r-md); border:1px solid var(--glassline); background:var(--glass);
+  -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 8px 22px rgba(0,0,0,.32); }
+.installbanner .ibicon{ width:34px; height:34px; border-radius:10px; flex:0 0 auto; display:flex;
+  align-items:center; justify-content:center; background:rgba(244,180,0,.14); color:var(--gold); }
+.installbanner .ibicon svg.i{ width:19px; height:19px; }
+.installbanner .ibmain{ flex:1; min-width:0; }
+.installbanner .ibtitle{ font-weight:700; color:var(--ink); font-size:13.5px; }
+.installbanner .ibmsg{ color:var(--ink-3); font-size:12px; margin-top:1px; font-weight:450; line-height:1.35; }
+.installbanner .ibx{ position:static; align-self:flex-start; color:var(--ink-3); font-size:15px; }
+.installbanner button.sm{ flex:0 0 auto; }
+
+/* ---- customer / account utility bar ---- */
+.custbar{ -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); margin-bottom:14px; }
+.custhi{ font-weight:600; color:var(--ink-2); font-size:13px; }
+.custbtn{ display:inline-flex; align-items:center; gap:6px; padding:8px 13px; font-weight:600;
+  color:var(--ink); background:rgba(255,255,255,.05); border:1px solid var(--glassline); }
+.custbtn.gold{ font-weight:800; }
+
+/* ---- headings & body rhythm ---- */
+h2.page{ font-weight:800; letter-spacing:.2px; }
+h2.page small{ font-weight:450; }
+.card{ padding:16px; }
+.card h3{ font-size:15.5px; letter-spacing:.2px; font-weight:800; }
+.card h3,.pagehead h3{ letter-spacing:.2px; }
+.pagehead h3{ font-weight:800; }
+
+/* ---- forms: quiet labels, roomy inputs ---- */
+.fld{ margin-bottom:11px; }
+label.fld span,.fld span{ display:block; font-size:11.5px; font-weight:700; letter-spacing:.5px;
+  color:var(--ink-3); margin-bottom:5px; text-transform:uppercase; }
+.fld input,.fld textarea,.fld select,input,textarea,select{ padding:12px 13px; font-size:15px;
+  font-weight:500; }
+input::placeholder,textarea::placeholder{ color:#6b7189; font-weight:450; }
+
+/* ---- market grid + cards ---- */
+.mktgrid{ gap:12px; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+.mkttitle{ font-weight:600; }
+.mktprice{ color:var(--gold); font-weight:800; }
+.mktcond{ color:var(--ink-3); font-weight:450; }
+
+/* ---- buttons: refined weight ---- */
+button{ font-weight:700; }
+button.gold,button.blue,button.red,.wall-cta{ font-weight:800; }
+button.sm{ border-radius:var(--r-sm); font-weight:600; }
+.btn-link{ font-weight:600; color:var(--gold); }
+.row{ gap:8px; }
+
+/* ---- auth screens: centered, branded ---- */
+.authwrap{ max-width:400px; margin:0 auto; }
+.authbrand{ text-align:center; margin:6px 0 18px; }
+.authbrand img{ width:76px; height:76px; border-radius:20px; background:#000; border:2px solid var(--gold);
+  box-shadow:0 0 0 5px rgba(244,180,0,.12),0 12px 30px rgba(0,0,0,.5); }
+.authbrand .an{ font-size:22px; font-weight:800; letter-spacing:.5px; margin-top:12px; }
+.authbrand .an b{ color:var(--gold); font-weight:900; }
+.authbrand .asub{ color:var(--ink-3); font-size:13px; margin-top:4px; font-weight:450; }
+
+/* ---- account page header ---- */
+.acct-hero{ display:flex; align-items:center; gap:14px; padding:6px 2px 4px; }
+.acct-hero .avatar-lg{ width:60px; height:60px; }
+.acct-id{ min-width:0; }
+.acct-name{ font-weight:800; font-size:17px; }
+.acct-sec{ display:flex; align-items:center; gap:7px; color:var(--ink-3); font-size:12px; font-weight:700;
+  letter-spacing:1.2px; text-transform:uppercase; margin-bottom:9px; }
+.acct-sec svg.i{ width:15px; height:15px; }
+.ghost{ display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+
+/* ---- misc refinement ---- */
+hr.sep{ border-top:1px solid rgba(255,255,255,.08); }
+.membadge,.tag,.mkttag{ border-radius:8px; font-weight:700; }
+.memname,.showname{ font-weight:700; }
+.notiftitle{ font-weight:700; }
+.ordstatus{ font-weight:800; }
+.tabbadge{ font-weight:800; }
+button,.walltab,.mktsub,.mktcard,.custbtn,.qrtile.tap{ transition:transform .08s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease, color .16s ease; }
 </style>
 </head>
 <body>
@@ -485,9 +578,9 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260623j"></script>
-<script src="social.js?v=20260623j"></script>
-<script src="app.js?v=20260623j"></script>
+<script src="config.js?v=20260623k"></script>
+<script src="social.js?v=20260623k"></script>
+<script src="app.js?v=20260623k"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
