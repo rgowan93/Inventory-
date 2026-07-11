@@ -432,7 +432,7 @@ function viewWall(){
     '</div>';
   const afterpayCard = staff
     ? ('<div class="card apcard"><div class="ap-head"><div class="ap-badge">Afterpay</div><div class="ap-h">Buy now, pay later — in person</div></div>'+
-        '<div class="muted" style="margin:2px 0 12px">Start a sale, then hand your phone to the customer to apply &amp; pay. Afterpay pays House of Cards directly — nothing to key into Square.</div>'+
+        '<div class="muted" style="margin:2px 0 12px">Start a sale, then hand your phone to the customer to pay with Afterpay. It runs through your Square account — the money lands in Square like a card sale.</div>'+
         '<button class="gold" style="width:100%" onclick="openAfterpaySale()">'+svgIcon('wallet')+' Start an Afterpay sale</button></div>')
     : ('<div class="card apcard"><div class="ap-head"><div class="ap-badge">Afterpay</div><div class="ap-h">Buy now, pay later</div></div>'+
         '<div class="muted" style="margin-top:4px">Splitting a purchase with Afterpay? Ask a House of Cards team member to start an Afterpay sale for you at the table.</div></div>');
@@ -2096,7 +2096,7 @@ function openAfterpaySale(){
     '<div id="ap_photoprev"></div>'+
     '<div class="grid2"><label class="fld" style="margin:0"><span>Customer name (optional)</span><input id="ap_cn" autocomplete="off"/></label>'+
     '<label class="fld" style="margin:0"><span>Text receipt to (optional)</span><input id="ap_cc" inputmode="tel" placeholder="mobile or email"/></label></div>'+
-    '<div class="banner" style="margin:12px 0">Afterpay pays House of Cards directly to your bank. There is nothing to enter into Square afterward.</div>'+
+    '<div class="banner" style="margin:12px 0">Runs through Square — the customer chooses Afterpay on the checkout page and the money lands in your Square balance.</div>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="ap_go" style="flex:1">'+svgIcon('wallet')+' Process &amp; hand to customer</button></div></div>';
   w.querySelector('#ap_x').onclick=close;
   w.querySelector('#ap_photo').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
@@ -2157,7 +2157,7 @@ function openAfterpayResult(res){
     '<div class="ap-result good">✓</div>'+
     '<div class="ap-rtitle">Paid '+amt+'</div>'+
     (res.label?('<div class="muted" style="text-align:center">'+esc(res.label)+'</div>'):'')+
-    '<div class="muted" style="text-align:center;margin-top:6px">Afterpay is paying House of Cards directly. Nothing to enter into Square.</div>'+
+    '<div class="muted" style="text-align:center;margin-top:6px">Paid with Afterpay through Square — the money is in your Square balance.</div>'+
     '<div class="row" style="margin-top:16px;gap:8px">'+receiptBtn+'<button class="gold" id="apr_done" style="flex:1">Done</button></div></div>';
   w.querySelector('#apr_x').onclick=close; w.querySelector('#apr_done').onclick=close;
   if(cc){ const rbtn=w.querySelector('#apr_receipt'); if(rbtn){ const isEmail=/^\S+@\S+\.\S+$/.test(cc);
