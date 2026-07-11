@@ -382,7 +382,10 @@ function viewWall(){
   const staff=!!staffSession();
   const cust=wallCustomer;
   const signedIn = staff || !!cust;
-  let active=ui.wallTab||'home'; if(['members','sellers','orders'].indexOf(active)>=0&&!staff) active='home';
+  let active=ui.wallTab||'home';
+  // only real content panels are valid tabs — anything else (e.g. a stale 'account') falls back to Home so the wall never renders blank
+  const VALIDTABS=['home','market','share','social','pay','contact','reviews','photos'].concat(staff?['orders','sellers','members']:[]);
+  if(VALIDTABS.indexOf(active)<0){ active='home'; ui.wallTab='home'; try{ localStorage.setItem('hoc_tab','home'); }catch(e){} }
   // slim top utility strip — icons only, right-aligned (sign in lives on the hero button)
   const cn=cartCount();
   const cartTop='<button class="wtop-ic" onclick="openCart()" aria-label="Cart">'+svgIcon('cart')+'<span class="wtop-badge" id="cartCount"'+(cn?'':' style="display:none"')+'>'+cn+'</span></button>';
@@ -501,7 +504,7 @@ function openWallMore(){
   const staff=!!staffSession(); const signedIn=staff||!!wallCustomer;
   // items that live off the bottom bar. data-act items run an action instead of switching a tab.
   const items=[['market','Shop','bag'],['reviews','Reviews','star'],['contact','Contact','chat'],['photos','Photos & Videos','image']];
-  items.push(['account','Account','user','act']);
+  items.push(['account','Account','user','account']);
   if(staff) items.push(['orders','Orders','box'],['sellers','Sellers','tag'],['members','Members','users']);
   const w=document.createElement('div'); w.className='wsheet-wrap'; document.body.appendChild(w);
   const close=()=>w.remove();
