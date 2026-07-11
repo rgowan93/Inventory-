@@ -6,7 +6,7 @@ function apCfg() {
   const mid = (Deno.env.get("AFTERPAY_MERCHANT_ID") || "").trim();
   const sk = (Deno.env.get("AFTERPAY_SECRET_KEY") || "").trim();
   const env = (Deno.env.get("AFTERPAY_ENV") || "").trim().toLowerCase();
-  const base = env === "production" ? "https://global-api.afterpay.com" : "https://global-api-sandbox.afterpay.com";
+  const base = env === "production" ? "https://api.us.afterpay.com" : "https://api-sandbox.us.afterpay.com";
   return { mid, sk, env: env || "sandbox", base, auth: "Basic " + btoa(mid + ":" + sk) };
 }
 const UA = "HouseOfCards/1.0 (Afterpay Pay-at-Show)";
