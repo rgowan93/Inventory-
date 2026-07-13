@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.houseofcardsftwalton.twa",
+      "sha256_cert_fingerprints": [
+        "35:44:F4:07:DC:B3:50:49:11:1E:36:6C:82:02:C3:1A:8E:45:D6:A6:81:0D:0E:D7:78:53:EC:90:37:24:85:98"
+      ]
+    }
+  }
+]
