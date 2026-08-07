@@ -430,12 +430,10 @@ function viewWall(){
       social('Instagram', w.instagram?igUrl(w.instagram):'', w.instagram?('@'+String(w.instagram).replace(/^@/,'')):'')+
       social('TikTok', w.tiktok?ttUrl(w.tiktok):'', w.tiktok?('@'+String(w.tiktok).replace(/^@/,'')):'')+
     '</div>';
-  const afterpayCard = staff
-    ? ('<div class="card apcard"><div class="ap-head"><div class="ap-badge">Afterpay</div><div class="ap-h">Buy now, pay later — in person</div></div>'+
-        '<div class="muted" style="margin:2px 0 12px">Start a sale, then hand your phone to the customer to pay with Afterpay. It runs through your Square account — the money lands in Square like a card sale.</div>'+
-        '<button class="gold" style="width:100%" onclick="openAfterpaySale()">'+svgIcon('wallet')+' Start an Afterpay sale</button></div>')
-    : ('<div class="card apcard"><div class="ap-head"><div class="ap-badge">Afterpay</div><div class="ap-h">Buy now, pay later</div></div>'+
-        '<div class="muted" style="margin-top:4px">Splitting a purchase with Afterpay? Ask a House of Cards team member to start an Afterpay sale for you at the table.</div></div>');
+  const afterpayCard =
+    '<div class="card apcard"><div class="ap-head"><div class="ap-badge">Afterpay</div><div class="ap-h">Buy now, pay later</div></div>'+
+    '<div class="muted" style="margin:2px 0 12px">Split your purchase into 4 payments. Enter your total and what you\'re buying, add a photo, and pay right here on your own phone.</div>'+
+    '<button class="gold" style="width:100%" onclick="openAfterpaySale()">'+svgIcon('wallet')+' Pay with Afterpay</button></div>';
   const payPanel=
     '<div class="wall-sec">Pay at Show</div>'+
     '<div class="qrgrid">'+
@@ -2084,20 +2082,18 @@ function openStaffLogin(){
 /* ===================== Afterpay — Pay at Show (staff-started, customer applies) ===================== */
 function apOrigin(){ return (location.origin + location.pathname).replace(/\/index\.html$/,'/').replace(/\/$/,'')+'/'; }
 function openAfterpaySale(){
-  if(!staffSession()){ openStaffLogin(); return; }
-  if(!cloudOn()){ toast('Cloud not set up.'); return; }
+  if(!cloudOn()){ toast('Payments are offline right now.'); return; }
   let photo=null;
+  const GO=svgIcon('wallet')+' Continue to payment';
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w); const close=()=>w.remove();
-  w.innerHTML='<div class="card pagecard">'+pageHead('Afterpay sale','ap_x')+
-    '<div class="muted" style="margin-bottom:10px">Enter the amount and what they\'re buying. When you press process, hand your phone to the customer to apply &amp; pay.</div>'+
+  w.innerHTML='<div class="card pagecard">'+pageHead('Pay with Afterpay','ap_x')+
+    '<div class="muted" style="margin-bottom:10px">Enter your total and what you\'re buying, then continue to pay. Afterpay splits it into 4 payments.</div>'+
     '<label class="fld"><span>Amount (USD)</span><input id="ap_amt" type="text" inputmode="decimal" placeholder="e.g. 120.00"/></label>'+
-    '<label class="fld"><span>What are they buying?</span><input id="ap_label" placeholder="e.g. Charizard PSA 10"/></label>'+
+    '<label class="fld"><span>What are you buying?</span><input id="ap_label" placeholder="e.g. Charizard PSA 10"/></label>'+
     '<label class="fld"><span>Photo of the item (optional)</span><div class="row" style="gap:8px"><button class="ghost" id="ap_photo" style="flex:1">'+svgIcon('image')+' Add photo</button></div></label>'+
     '<div id="ap_photoprev"></div>'+
-    '<div class="grid2"><label class="fld" style="margin:0"><span>Customer name (optional)</span><input id="ap_cn" autocomplete="off"/></label>'+
-    '<label class="fld" style="margin:0"><span>Text receipt to (optional)</span><input id="ap_cc" inputmode="tel" placeholder="mobile or email"/></label></div>'+
-    '<div class="banner" style="margin:12px 0">Runs through Square — the customer chooses Afterpay on the checkout page and the money lands in your Square balance.</div>'+
-    '<div class="row" style="margin-top:8px"><button class="gold" id="ap_go" style="flex:1">'+svgIcon('wallet')+' Process &amp; hand to customer</button></div></div>';
+    '<div class="banner" style="margin:12px 0">A House of Cards team member is notified as soon as your payment goes through — show them the confirmation screen and they\'ll hand over your item.</div>'+
+    '<div class="row" style="margin-top:8px"><button class="gold" id="ap_go" style="flex:1">'+GO+'</button></div></div>';
   w.querySelector('#ap_x').onclick=close;
   w.querySelector('#ap_photo').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
     inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading…'); const up=await uploadMedia(f); if(!up)return; photo=up;
@@ -2107,14 +2103,14 @@ function openAfterpaySale(){
     const amt=parseFloat((w.querySelector('#ap_amt').value||'').replace(/[^0-9.]/g,''));
     if(!(amt>0)){ toast('Enter a valid amount.'); return; }
     const cents=Math.round(amt*100);
+    if(cents<100){ toast('Afterpay needs a total of at least $1.'); return; }
+    if(cents>200000){ toast('Afterpay tops out at $2,000 — please ask a team member.'); return; }
     const label=(w.querySelector('#ap_label').value||'').trim()||'In-person sale';
-    const cn=(w.querySelector('#ap_cn').value||'').trim(); const cc=(w.querySelector('#ap_cc').value||'').trim();
     const btn=w.querySelector('#ap_go'); btn.disabled=true; btn.textContent='Starting…';
-    if(!(await ensureStaffPw())){ btn.disabled=false; btn.innerHTML=svgIcon('wallet')+' Process &amp; hand to customer'; return; }
-    const r=await sbFn('afterpay-checkout',{p_user:staffSession().username,p_pass:_staffPw,amount_cents:cents,label:label,photo_url:photo?photo.url:null,customer_name:cn,customer_contact:cc,origin:apOrigin()});
-    if(!r||!r.ok||!r.url){ toast((r&&r.error)||'Could not start Afterpay.'); btn.disabled=false; btn.innerHTML=svgIcon('wallet')+' Process &amp; hand to customer'; return; }
-    try{ localStorage.setItem('hoc_ap_pending', JSON.stringify({token:r.token,cents:cents,label:label,cn:cn,cc:cc,env:r.env,ts:Date.now()})); }catch(e){}
-    location.href=r.url;   // hand the phone to the customer — they apply & approve on Afterpay
+    const r=await sbFn('afterpay-checkout',{amount_cents:cents,label:label,photo_url:photo?photo.url:null,origin:apOrigin()});
+    if(!r||!r.ok||!r.url){ toast((r&&r.error)||'Could not start Afterpay.'); btn.disabled=false; btn.innerHTML=GO; return; }
+    try{ localStorage.setItem('hoc_ap_pending', JSON.stringify({token:r.token,cents:cents,label:label,env:r.env,ts:Date.now()})); }catch(e){}
+    location.href=r.url;   // customer continues on their own phone
   };
   setTimeout(()=>{ const a=w.querySelector('#ap_amt'); if(a)a.focus(); },60);
 }
@@ -2133,7 +2129,7 @@ async function checkAfterpayReturn(){
   toast('Confirming Afterpay payment…');
   const r=await sbFn('afterpay-capture',{token:token});
   clean();
-  if(r&&r.ok){ openAfterpayResult({amount_cents:r.amount_cents,label:r.label,customer_name:r.customer_name||(pending&&pending.cn),customer_contact:r.customer_contact||(pending&&pending.cc)}); }
+  if(r&&r.ok){ openAfterpayResult({amount_cents:r.amount_cents||(pending&&pending.cents),label:r.label||(pending&&pending.label)}); }
   else { openAfterpayResult({error:(r&&(r.reason||r.error))||'Afterpay could not be confirmed.'}); }
 }
 function openAfterpayResult(res){
@@ -2146,24 +2142,13 @@ function openAfterpayResult(res){
     w.querySelector('#apr_x').onclick=close; w.querySelector('#apr_done').onclick=close; return;
   }
   const amt=mUSD(res.amount_cents||0);
-  const cc=(res.customer_contact||'').trim();
-  const receiptBody='House of Cards receipt: '+amt+(res.label?(' — '+res.label):'')+'. Paid with Afterpay. Thank you!';
-  let receiptBtn='';
-  if(cc){ const isEmail=/^\S+@\S+\.\S+$/.test(cc);
-    const href=isEmail?('mailto:'+encodeURIComponent(cc)+'?subject='+encodeURIComponent('House of Cards receipt')+'&body='+encodeURIComponent(receiptBody))
-                      :('sms:'+cc.replace(/[^\d+]/g,'')+(/android/i.test(navigator.userAgent)?'?':'&')+'body='+encodeURIComponent(receiptBody));
-    receiptBtn='<button class="blue" id="apr_receipt" style="flex:1">'+svgIcon(isEmail?'chat':'phone')+' Send receipt to customer</button>'; }
   w.innerHTML='<div class="card pagecard">'+pageHead('Afterpay','apr_x')+
     '<div class="ap-result good">✓</div>'+
     '<div class="ap-rtitle">Paid '+amt+'</div>'+
     (res.label?('<div class="muted" style="text-align:center">'+esc(res.label)+'</div>'):'')+
-    '<div class="muted" style="text-align:center;margin-top:6px">Paid with Afterpay through Square — the money is in your Square balance.</div>'+
-    '<div class="row" style="margin-top:16px;gap:8px">'+receiptBtn+'<button class="gold" id="apr_done" style="flex:1">Done</button></div></div>';
+    '<div class="banner" style="margin-top:14px;text-align:center">Show this screen to a House of Cards team member — they\'ve been notified and can hand over your item.</div>'+
+    '<div class="row" style="margin-top:16px"><button class="gold" id="apr_done" style="flex:1">Done</button></div></div>';
   w.querySelector('#apr_x').onclick=close; w.querySelector('#apr_done').onclick=close;
-  if(cc){ const rbtn=w.querySelector('#apr_receipt'); if(rbtn){ const isEmail=/^\S+@\S+\.\S+$/.test(cc);
-    const href=isEmail?('mailto:'+encodeURIComponent(cc)+'?subject='+encodeURIComponent('House of Cards receipt')+'&body='+encodeURIComponent(receiptBody))
-                      :('sms:'+cc.replace(/[^\d+]/g,'')+(/android/i.test(navigator.userAgent)?'?':'&')+'body='+encodeURIComponent(receiptBody));
-    rbtn.onclick=()=>{ try{ location.href=href; }catch(e){} }; } }
 }
 function isOwner(){ const s=staffSession(); return !!s && String(s.username||'').trim().toLowerCase()==='reggie'; }
 async function openAfterpayDashboard(){
