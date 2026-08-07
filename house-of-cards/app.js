@@ -2161,12 +2161,19 @@ async function openAfterpayDashboard(){
   const body=w.querySelector('#apd_body'); if(!body)return;
   if(!r||!r.ok){ body.innerHTML='<div class="muted">'+esc((r&&r.error)||'Could not load.')+'</div>'; return; }
   const t=r.totals||{};
+  // Hide abandoned checkouts: a sale still "pending" 2h later, with no payment on it,
+  // was never completed. Keeps the dashboard to real activity only.
+  const ABANDON_MS=2*60*60*1000, now=Date.now();
+  const isAbandoned=s=>(s.status==='pending') && !s.afterpay_payment_id && (now-new Date(s.created_at).getTime())>ABANDON_MS;
+  const all=r.sales||[]; const sales=all.filter(s=>!isAbandoned(s)); const dropped=all.length-sales.length;
+  const livePending=sales.filter(s=>s.status==='pending').length;
   const kpis='<div class="kpi" style="margin-bottom:14px">'+
     '<div class="card"><div class="muted">Collected</div><div class="big">'+mUSD(t.captured_cents||0)+'</div></div>'+
     '<div class="card"><div class="muted">Today</div><div class="big">'+mUSD(t.today_cents||0)+'</div></div>'+
     '<div class="card"><div class="muted">Sales</div><div class="big">'+(t.captured_count||0)+'</div></div>'+
-    '<div class="card"><div class="muted">Pending</div><div class="big">'+(t.pending||0)+'</div></div></div>';
-  const rows=(r.sales||[]).map(s=>{ const st=(s.refunded_cents>0&&s.refunded_cents>=s.amount_cents)?'refunded':(s.status||'pending');
+    '<div class="card"><div class="muted">In progress</div><div class="big">'+livePending+'</div></div></div>'+
+    (dropped?('<div class="muted" style="margin:-6px 0 12px;text-align:center">'+dropped+' abandoned checkout'+(dropped===1?'':'s')+' hidden</div>'):'');
+  const rows=sales.map(s=>{ const st=(s.refunded_cents>0&&s.refunded_cents>=s.amount_cents)?'refunded':(s.status||'pending');
     const badge='<span class="ordstatus s_'+(st==='captured'?'complete':(st==='refunded'?'refunded':(st==='declined'?'canceled':'paid')))+'">'+esc(st)+'</span>';
     const who=s.customer_name?(' · '+esc(s.customer_name)):''; const by=s.staff_user?(' · by '+esc(s.staff_user)):'';
     const partRef=(s.refunded_cents>0&&st!=='refunded')?('<div class="muted" style="margin-top:3px">↩︎ Refunded '+mUSD(s.refunded_cents)+'</div>'):'';
