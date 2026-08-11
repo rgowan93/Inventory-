@@ -1,0 +1,7 @@
+-- Documentation copy of the applied migration "show_stats_and_shared_staff".
+-- Tables: live_shows, show_entries, show_tallies, show_reports, staff_devices (all RLS-on,
+-- anon/authenticated revoked; access only via SECURITY DEFINER RPCs gated by staff_ok).
+-- RPCs: staff_device_register/release (10-device cap), show_start, show_live_get,
+-- show_entry_add (photo required), show_entry_void, show_tally_bump (atomic, clamped >=0),
+-- show_end, show_report_set_pdf, show_reports_list, show_report_get.
+-- Seeds shared floor account: staff / (client-hash of the chosen password).
