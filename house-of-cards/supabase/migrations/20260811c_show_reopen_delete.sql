@@ -1,0 +1,13 @@
+-- Documentation copy of the applied migration "show_reopen_and_delete".
+--
+-- show_reopen(p_user, p_pass, p_show):
+--   Reopens an ended show (status back to 'live', ended_at cleared) so last-minute
+--   deals can be logged. Guarded: staff_ok, row lock, only within 18 hours of ending
+--   (the client additionally only offers Resume on the same local calendar day), and
+--   refused while another show is live. The old report row stays; the next show_end
+--   upserts over it, REPLACING the report with the updated numbers.
+--
+-- show_delete(p_user, p_pass, p_show, p_code):
+--   Permanently deletes a show + its entries, tallies and report. Requires the staff
+--   login AND the delete code. The code is validated ONLY inside this server function
+--   (never shipped in the client bundle).

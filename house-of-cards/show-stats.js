@@ -25,7 +25,7 @@ function openShowStats(){
   const ex=document.querySelector('.ssmodal'); if(ex)ex.remove();
   const w=document.createElement('div'); w.className='scanmodal pagewrap ssmodal'; document.body.appendChild(w);
   w.innerHTML='<div class="card pagecard">'+pageHead('Show stats','ss_x')+'<div id="ss_body"><div class="muted">Loading…</div></div></div>';
-  _ss.wrap=w; _ss.tab='sales'; _ss.sel={form:null,person:null,dir:1}; _ss.photo=null; _ss.pending={};
+  _ss.wrap=w; _ss.tab='sales'; _ss.sel={form:null,person:null,dir:1}; _ss.photo=null; _ss.pending={}; _ss.sig=null;
   ssWireTallies(w);
   const close=()=>{ if(_ss.poll){ clearInterval(_ss.poll); _ss.poll=null; } ssHoldStop();
     if(_ss.winUp){ window.removeEventListener('pointerup',_ss.winUp); window.removeEventListener('pointercancel',_ss.winUp); _ss.winUp=null; }
@@ -54,9 +54,12 @@ async function ssRefresh(silent){
   if(!r||r.ok!==true){ if(!silent){ const b=_ss.wrap&&_ss.wrap.querySelector('#ss_body'); if(b)b.innerHTML='<div class="muted">Could not load. <button class="sm ghost" onclick="ssRefresh()">Retry</button></div>'; } return; }
   // overlay tally bumps still in flight, so a refresh can't clobber (or double-revert) them
   if(r.tallies){ const pend=_ss.pending||{}; Object.keys(pend).forEach(b=>{ if(pend[b]) r.tallies[b]=Math.max(0,(r.tallies[b]||0)+pend[b]); }); }
+  const sig=JSON.stringify([r.show,r.entries,r.tallies]);
   // don't repaint over someone mid-entry (photo + chip picks survive a repaint, so they don't block it)
-  if(silent && ssUserBusy()){ _ss.data=r; return; }
-  _ss.data=r; ssPaint();
+  if(silent && ssUserBusy()){ _ss.data=r; _ss.sig=sig; return; }
+  // nothing changed since last paint → leave the screen alone (no 12s flicker)
+  if(silent && sig===_ss.sig){ _ss.data=r; return; }
+  _ss.data=r; _ss.sig=sig; ssPaint();
 }
 
 function ssPaint(){
@@ -83,7 +86,8 @@ function ssStartForm(){
   const box=_ss.wrap&&_ss.wrap.querySelector('#ss_startform'); if(!box)return;
   box.innerHTML='<div class="card">'+
     '<label class="fld"><span>Show name (optional)</span><input id="ssf_name" placeholder="e.g. Fort Walton — Aug show"/></label>'+
-    '<label class="fld"><span>Cash drawer starting amount (USD)</span><input id="ssf_cash" type="text" inputmode="decimal" placeholder="e.g. 200.00"/></label>'+
+    '<label class="fld"><span>Cash drawer starting amount (USD)</span><input id="ssf_cash" type="text" inputmode="decimal" value="200.00" placeholder="e.g. 200.00"/></label>'+
+    '<div class="muted" style="font-size:12px;margin:-4px 0 8px">At the end of the show, $200 stays in the drawer for the next show before the cash is divided.</div>'+
     '<label class="fld"><span>Whose cash is the float? (it goes back to them at the end)</span><select id="ssf_owner">'+SS_PEOPLE.map(p=>'<option value="'+p[0]+'"'+(p[0]==='reggie'?' selected':'')+'>'+p[1]+'</option>').join('')+'</select></label>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="ssf_go" style="flex:1">Start the show</button></div></div>';
   box.querySelector('#ssf_go').onclick=async()=>{
@@ -106,10 +110,14 @@ async function ssLoadHistory(){
   const shows=r.shows||[];
   if(!shows.length){ hist.innerHTML='<div class="muted">No finished shows yet.</div>'; chart.innerHTML='<div class="muted">The tracking graph appears after your first show.</div>'; return; }
   hist.innerHTML=shows.map(s=>{ const dt=s.ended_at?new Date(s.ended_at).toLocaleDateString():'';
+    const sameDay=s.ended_at && (new Date(s.ended_at).toDateString()===new Date().toDateString());
     return '<div class="ordcard"><div class="ordhead"><b>'+esc(s.name||('Show #'+s.show_id))+'</b><span class="ordstatus s_complete">'+mUSD(s.profit_cents||0)+'</span></div>'+
       '<div class="muted">'+dt+'</div>'+
-      '<div class="row" style="gap:6px;margin-top:8px"><button class="sm ghost" onclick="openShowReport('+s.show_id+')">View report</button>'+
-      (s.pdf_url?('<button class="sm ghost" data-url="'+esc(s.pdf_url)+'" onclick="openUrl(this.dataset.url)">PDF</button>'):'')+'</div></div>'; }).join('');
+      '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><button class="sm ghost" onclick="openShowReport('+(+s.show_id)+')">View report</button>'+
+      (s.pdf_url?('<button class="sm ghost" data-url="'+esc(s.pdf_url)+'" onclick="openUrl(this.dataset.url)">PDF</button>'):'')+
+      (sameDay?('<button class="sm ghost" style="color:#F4B400" onclick="ssResume('+(+s.show_id)+')">Resume show</button>'):'')+
+      '<button class="sm ghost" style="color:#ff6a5c" onclick="ssDeleteShow('+(+s.show_id)+')">Delete</button>'+
+      '</div></div>'; }).join('');
   // profit chart — oldest → newest bars
   const seq=shows.slice().reverse();
   const w=Math.max(280, Math.min(520, seq.length*64)), h=170, pad=26;
@@ -124,6 +132,41 @@ async function ssLoadHistory(){
       '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(h-6)+'" text-anchor="middle" font-size="9" fill="#8f96b0">'+(s.ended_at?new Date(s.ended_at).toLocaleDateString(undefined,{month:'numeric',day:'numeric'}):'')+'</text>'; });
   chart.innerHTML='<div class="card" style="overflow-x:auto"><svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" style="display:block;margin:0 auto">'+
     '<defs><linearGradient id="ssg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c084fc"/><stop offset="1" stop-color="#38bdf8"/></linearGradient></defs>'+bars+'</svg></div>';
+}
+
+/* Same-day resume: reopen an ended show for last-minute deals. Ending it again
+   recomputes everything and REPLACES the saved report + PDF. */
+async function ssResume(id){
+  if(!confirm('Resume this show? New sales and tallies will be added to it, and when you End Show again the saved report is REPLACED with the updated numbers.'))return;
+  const c=await ssCreds(); if(!c)return;
+  const r=await sbRpc('show_reopen',Object.assign({p_show:id},c));
+  if(r&&r.ok){ toast('Show resumed — log those last deals! 🎪'); _ss.sig=null; ssRefresh(); }
+  else toast((r&&r.error)||'Could not resume the show.');
+}
+
+/* Permanent delete, gated by the delete code (checked on the server only). */
+function ssDeleteShow(id){
+  if(document.querySelector('.ssdel-sheet'))return;
+  const w=document.createElement('div'); w.className='wsheet-wrap show ssdel-sheet'; document.body.appendChild(w);
+  const close=()=>w.remove();
+  w.innerHTML='<div class="wsheet-back"></div><div class="wsheet"><div class="wsheet-grip"></div>'+
+    '<div class="wsheet-h">Delete show</div>'+
+    '<div style="text-align:center;margin-bottom:12px;line-height:1.5">This <b>permanently deletes</b> the show — its ledger, tallies, report and PDF link. Enter the delete code to continue.</div>'+
+    '<label class="fld"><span>Delete code</span><input id="ssd_code" type="password" inputmode="numeric" autocomplete="off"/></label>'+
+    '<div class="row" style="gap:10px;margin-top:8px"><button class="ghost" id="ssd_no" style="flex:1">Cancel</button><button class="red" id="ssd_yes" style="flex:1">Delete forever</button></div></div>';
+  w.querySelector('.wsheet-back').onclick=close;
+  w.querySelector('#ssd_no').onclick=close;
+  w.querySelector('#ssd_yes').onclick=async()=>{
+    const btn=w.querySelector('#ssd_yes'); if(btn.disabled)return;
+    const code=(w.querySelector('#ssd_code').value||'').trim();
+    if(!code){ toast('Enter the delete code.'); return; }
+    btn.disabled=true; btn.textContent='Deleting…';
+    const c=await ssCreds(); if(!c){ close(); return; }
+    const r=await sbRpc('show_delete',Object.assign({p_show:id,p_code:code},c));
+    if(r&&r.ok){ close(); toast('Show deleted.'); _ss.sig=null; ssRefresh(); }
+    else { btn.disabled=false; btn.textContent='Delete forever'; toast((r&&r.error)||'Could not delete.'); }
+  };
+  setTimeout(()=>{ const n=w.querySelector('#ssd_code'); if(n)n.focus(); },80);
 }
 
 /* ---------- live show ---------- */
@@ -366,8 +409,13 @@ async function openShowReport(showId){
   const close=()=>w.remove();
   const P=SS_PERSON_NAME, F=SS_FORM_NAME;
   const photos=entries.filter(e=>e.photo_url).map(e=>e.photo_url);
-  const cashLine=p=>{ const c2=(rep.cash_out||{})[p]||0; const fl=(p===rep.float_owner&&rep.cash_start_cents)?(' <span class="muted">(includes '+mUSD(rep.cash_start_cents)+' float back)</span>'):'';
+  const cashLine=p=>{ const c2=(rep.cash_out||{})[p]||0; const fl=(p===rep.float_owner&&rep.cash_start_cents&&!rep.kept_cents)?(' <span class="muted">(includes '+mUSD(rep.cash_start_cents)+' float back)</span>'):'';
     return '<div class="ss-payline">'+svgIcon('wallet')+' <b>'+P[p]+'</b> takes <b>'+mUSD(c2)+'</b> cash'+fl+'</div>'; };
+  const keptLine=rep.kept_cents?('<div class="ss-payline" style="color:#F4B400">'+svgIcon('box')+' Leave <b>'+mUSD(rep.kept_cents)+'</b> in the drawer for the next show <span class="muted">(counts as '+esc(P[rep.kept_by]||rep.kept_by||'')+'’s money)</span></div>'):'';
+  const acctRow=k=>{ const a=(rep.accounts||{})[k]; if(!a)return '';
+    if(!a.total_cents&&!a.by_person.reggie&&!a.by_person.manny&&!a.by_person.hailey)return '';
+    return '<tr><td>'+esc(a.label)+'</td><td class="money"><b>'+mUSD(a.total_cents)+'</b></td><td class="money">'+mUSD(a.by_person.reggie)+'</td><td class="money">'+mUSD(a.by_person.manny)+'</td><td class="money">'+mUSD(a.by_person.hailey)+'</td></tr>'; };
+  const acctRows=rep.accounts?Object.keys(rep.accounts).map(acctRow).join(''):'';
   const formRow=f=>{ const d2=(rep.forms||{})[f]||{}; return '<tr><td>'+F[f]+'</td><td class="money">'+mUSD(d2.in_cents||0)+'</td><td class="money">'+mUSD(d2.out_cents||0)+'</td><td class="money">'+mUSD(d2.machine_cents||0)+'</td><td class="money"><b>'+mUSD((d2.net_cents||0)+(d2.machine_cents||0))+'</b></td></tr>'; };
   const personRow=p=>'<tr><td>'+P[p]+'</td><td class="money">'+mUSD((rep.sales_net||{})[p]||0)+'</td><td class="money">'+mUSD((rep.machine_split||{})[p]||0)+'</td><td class="money">'+(p===rep.float_owner?mUSD(rep.cash_start_cents||0):'—')+'</td><td class="money"><b>'+mUSD((rep.entitlement||{})[p]||0)+'</b></td></tr>';
   w.innerHTML='<div class="card pagecard">'+pageHead((s.name||('Show #'+s.id))+' — report','sr_x')+
@@ -380,9 +428,12 @@ async function openShowReport(showId){
       ?'<div class="banner" style="background:rgba(52,199,89,.15);border:1px solid rgba(52,199,89,.4);color:#7ae0a0">✓ Every dollar is accounted for — totals verified to the cent.</div>'
       :'<div class="banner" style="background:rgba(226,59,46,.14);border:1px solid rgba(226,59,46,.4);color:#ff8a80">⚠ Math check failed — review this report manually before splitting money.</div>')+
     '<div class="acct-sec" style="margin-top:14px">'+svgIcon('wallet')+' How to split the money</div>'+
-    '<div class="card">'+SS_PEOPLE.map(p=>cashLine(p[0])).join('')+
+    '<div class="card">'+keptLine+SS_PEOPLE.map(p=>cashLine(p[0])).join('')+
       ((rep.transfers||[]).length?('<hr class="sep">'+rep.transfers.map(t=>'<div class="ss-payline">'+svgIcon('share')+' <b>'+P[t.from]+'</b> sends <b>'+mUSD(t.amount_cents)+'</b> to <b>'+P[t.to]+'</b> <span class="muted">(via '+esc(t.via)+')</span></div>').join('')):'<hr class="sep"><div class="muted" style="text-align:center">No transfers needed — the cash box covers the whole split. 🎉</div>')+
-      '<div class="muted" style="margin-top:8px;font-size:12px">Cash on hand: drawer '+mUSD(rep.drawer_end_cents||0)+' + machine '+mUSD(rep.machine_cash_cents||0)+' = '+mUSD(rep.pot_cents||0)+'</div></div>'+
+      '<div class="muted" style="margin-top:8px;font-size:12px">Cash on hand: drawer '+mUSD(rep.drawer_end_cents||0)+' + machine '+mUSD(rep.machine_cash_cents||0)+' = '+mUSD(rep.pot_cents||0)+(rep.kept_cents?(' · '+mUSD(rep.kept_cents)+' stays in the drawer'):'')+'</div></div>'+
+    (acctRows?('<div class="acct-sec" style="margin-top:14px">'+svgIcon('wallet')+' Each account — total &amp; whose money it is</div>'+
+      '<div class="card" style="overflow-x:auto"><table><tr><th>Account</th><th>Total</th><th>Reggie</th><th>Manny</th><th>Hailey</th></tr>'+acctRows+'</table>'+
+      '<div class="muted" style="font-size:12px;margin-top:6px">The transfers above move each person’s share out of accounts they don’t control.</div></div>'):'')+
     '<div class="acct-sec" style="margin-top:14px">'+svgIcon('grid')+' Payment forms</div>'+
     '<div class="card" style="overflow-x:auto"><table><tr><th>Form</th><th>In</th><th>Out</th><th>Machine</th><th>Ends with</th></tr>'+SS_FORMS.map(f=>formRow(f[0])).join('')+'</table></div>'+
     '<div class="acct-sec" style="margin-top:14px">'+svgIcon('users')+' Per person</div>'+
@@ -465,11 +516,21 @@ async function ssMakePdf(show, entries, rep){
   L(rep.verified?'MATH VERIFIED — every dollar accounted for, to the cent.':'WARNING: math check FAILED — review manually before splitting money.',{bold:true,color:rep.verified?[20,130,60]:[190,30,30]}); y+=3;
 
   H('How to split the money');
+  if(rep.kept_cents) L('LEAVE '+$(rep.kept_cents)+' IN THE DRAWER for the next show  (counts as '+(P[rep.kept_by]||rep.kept_by||'')+"'s money).",{bold:true,color:[180,120,0]});
   SS_PEOPLE.forEach(p=>{ const k=p[0]; const c2=(rep.cash_out||{})[k]||0;
-    L(P[k]+' takes '+$(c2)+' cash'+((k===rep.float_owner&&rep.cash_start_cents)?('  (includes '+$(rep.cash_start_cents)+' float returned)'):''),{bold:true}); });
+    L(P[k]+' takes '+$(c2)+' cash'+((k===rep.float_owner&&rep.cash_start_cents&&!rep.kept_cents)?('  (includes '+$(rep.cash_start_cents)+' float returned)'):''),{bold:true}); });
   (rep.transfers||[]).forEach(t=>L(P[t.from]+' sends '+$(t.amount_cents)+' to '+P[t.to]+'  (via '+t.via+')',{bold:true,color:[120,60,180]}));
   if(!(rep.transfers||[]).length) L('No transfers needed — the cash box covers the split.',{color:[20,130,60]});
-  L('Cash on hand: drawer '+$(rep.drawer_end_cents)+' + machine '+$(rep.machine_cash_cents)+' = '+$(rep.pot_cents)); y+=3;
+  L('Cash on hand: drawer '+$(rep.drawer_end_cents)+' + machine '+$(rep.machine_cash_cents)+' = '+$(rep.pot_cents)+(rep.kept_cents?('   ('+$(rep.kept_cents)+' stays in the drawer)'):'')); y+=3;
+
+  if(rep.accounts){
+    H('Each account — total and whose money it is');
+    L('Account                      Total        Reggie       Manny        Hailey',{bold:true});
+    Object.keys(rep.accounts).forEach(k=>{ const a=rep.accounts[k];
+      if(!a.total_cents&&!a.by_person.reggie&&!a.by_person.manny&&!a.by_person.hailey)return;
+      L((a.label+'                            ').slice(0,26)+'  '+($(a.total_cents)+'          ').slice(0,11)+'  '+($(a.by_person.reggie)+'          ').slice(0,11)+'  '+($(a.by_person.manny)+'          ').slice(0,11)+'  '+$(a.by_person.hailey)); });
+    L('The transfers in the split plan move each person\'s share out of accounts they don\'t control.',{size:8.5,color:[110,110,110]}); y+=3;
+  }
 
   H('Payment forms');
   L('Form           In           Out          Machine      Ends with',{bold:true});
