@@ -213,8 +213,9 @@ function ssPaintSales(box, d){
         '<button class="ss-chip ss-add'+(_ss.sel.dir===1?' on':'')+'" data-dir="1">+ Add (money in)</button>'+
         '<button class="ss-chip ss-sub'+(_ss.sel.dir===-1?' on':'')+'" data-dir="-1">− Subtract (money out)</button></div>'+
       '<label class="fld"><span>Amount (USD)</span><input id="ssc_amt" type="text" inputmode="decimal" placeholder="0.00" value="'+esc(_ss.amt||'')+'"/></label>'+
-      '<div class="row" style="gap:8px"><button class="ghost" id="ssc_photo" style="flex:1">'+svgIcon('camera')+(_ss.photo?' ✓ Photo ready — tap to retake':' Take photo (required)')+'</button></div>'+
-      '<div id="ssc_prev">'+(_ss.photo?('<img class="showflyer" style="max-height:160px" src="'+esc(_ss.photo.url)+'"/><div class="row" style="margin-top:6px"><button class="sm ghost" id="ssc_pclear" style="color:#ff6a5c">✕ Remove photo</button></div>'):'')+'</div>'+
+      '<div class="row" style="gap:8px"><button class="ghost" id="ssc_photo" style="flex:2">'+svgIcon('camera')+(_ss.photo?' ✓ Photo ready — tap to retake':' Take photo (required)')+'</button>'+
+      '<button class="ghost" id="ssc_pick" style="flex:1">'+svgIcon('image')+' Gallery</button></div>'+
+      '<div id="ssc_prev">'+ssPhotoPrevHtml()+'</div>'+
       '<div class="row" style="margin-top:10px"><button class="gold" id="ssc_save" style="flex:1">Save sale</button></div>'+
     '</div>'+
     '<div class="acct-sec" style="margin-top:14px">'+svgIcon('tag')+' This show\'s ledger ('+entries.length+')</div>'+
@@ -224,10 +225,16 @@ function ssPaintSales(box, d){
   box.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{ _ss.sel.form=b.dataset.form; ssPaint(); });
   box.querySelectorAll('[data-person]').forEach(b=>b.onclick=()=>{ _ss.sel.person=b.dataset.person; ssPaint(); });
   box.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{ _ss.sel.dir=+b.dataset.dir; ssPaint(); });
-  box.querySelector('#ssc_photo').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
-    inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading photo…'); const up=await uploadMedia(f); if(!up)return; _ss.photo=up; ssPaint(); };
+  // photo flow updates ONLY the photo button + preview — it never repaints the form,
+  // so the typed amount and selected chips physically cannot be cleared by it
+  const pickPhoto=(useCamera)=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; if(useCamera)inp.capture='environment';
+    inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading photo…'); const up=await uploadMedia(f);
+      if(!up){ toast('Photo upload failed — try again.'); return; }
+      _ss.photo=up; ssPhotoPaint(); };
     inp.click(); };
-  { const pc=box.querySelector('#ssc_pclear'); if(pc)pc.onclick=()=>{ _ss.photo=null; ssPaint(); }; }
+  box.querySelector('#ssc_photo').onclick=()=>pickPhoto(true);
+  box.querySelector('#ssc_pick').onclick=()=>pickPhoto(false);
+  ssPhotoPaint();
   box.querySelector('#ssc_save').onclick=async()=>{
     if(_ss.busy)return;
     const amt=parseFloat((box.querySelector('#ssc_amt').value||'').replace(/[^0-9.]/g,''));
@@ -242,6 +249,18 @@ function ssPaintSales(box, d){
     if(r&&r.ok){ toast('Logged '+(_ss.sel.dir===-1?'−':'+')+mUSD(Math.round(amt*100))+' ✓'); _ss.photo=null; _ss.amt=''; _ss.sel={form:null,person:null,dir:1}; ssRefresh(); }
     else { btn.disabled=false; btn.textContent='Save sale'; toast((r&&r.error)||'Could not save.'); }
   };
+}
+
+function ssPhotoPrevHtml(){
+  return _ss.photo?('<img class="showflyer" style="max-height:160px" src="'+esc(_ss.photo.url)+'"/><div class="row" style="margin-top:6px"><button class="sm ghost" id="ssc_pclear" style="color:#ff6a5c">✕ Remove photo</button></div>'):'';
+}
+/* Surgical update of just the photo button + preview (leaves amount/chips untouched). */
+function ssPhotoPaint(){
+  const w=_ss.wrap; if(!w)return;
+  const btn=w.querySelector('#ssc_photo'), prev=w.querySelector('#ssc_prev');
+  if(btn)btn.innerHTML=svgIcon('camera')+(_ss.photo?' ✓ Photo ready — tap to retake':' Take photo (required)');
+  if(prev){ prev.innerHTML=ssPhotoPrevHtml();
+    const pc=prev.querySelector('#ssc_pclear'); if(pc)pc.onclick=()=>{ _ss.photo=null; ssPhotoPaint(); }; }
 }
 
 function ssEntryRow(e){
