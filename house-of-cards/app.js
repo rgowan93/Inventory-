@@ -130,7 +130,9 @@ const _ICON_PATHS={
   phone:'<path d="M6 3h3l2 5-2.5 1.5a12 12 0 0 0 6 6L16 13l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 4 5a2 2 0 0 1 2-2z"/>',
   download:'<path d="M12 3v11M8 10l4 4 4-4"/><path d="M5 20h14"/>',
   lock:'<rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
-  grid:'<rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/>'
+  grid:'<rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/>',
+  chart:'<path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="11" width="3.4" height="6" rx="1"/><rect x="12.6" y="7" width="3.4" height="10" rx="1"/><rect x="17.7" y="13" width="3.4" height="4" rx="1"/>',
+  camera:'<path d="M4 8h3l1.6-2.4A1.5 1.5 0 0 1 9.9 5h4.2a1.5 1.5 0 0 1 1.3.6L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.4"/>'
 };
 function svgIcon(name,cls){ const d=_ICON_PATHS[name]; if(!d)return '';
   return '<svg class="i'+(cls?(' '+cls):'')+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>'; }
@@ -386,11 +388,12 @@ function viewWall(){
   // only real content panels are valid tabs — anything else (e.g. a stale 'account') falls back to Home so the wall never renders blank
   const VALIDTABS=['home','market','share','social','pay','contact','reviews','photos'].concat(staff?['orders','sellers','members']:[]);
   if(VALIDTABS.indexOf(active)<0){ active='home'; ui.wallTab='home'; try{ localStorage.setItem('hoc_tab','home'); }catch(e){} }
-  // slim top utility strip — icons only, right-aligned (sign in lives on the hero button)
+  // slim top utility strip — normal Sign in button on the LEFT, cart/bell on the right
   const cn=cartCount();
   const cartTop='<button class="wtop-ic" onclick="openCart()" aria-label="Cart">'+svgIcon('cart')+'<span class="wtop-badge" id="cartCount"'+(cn?'':' style="display:none"')+'>'+cn+'</span></button>';
   const bellTop=signedIn?('<button class="wtop-ic" onclick="openInbox()" aria-label="Notifications">'+svgIcon('bell')+'<span id="notifDot" class="wtop-dot" style="display:none"></span></button>'):'';
-  const wtop = cloudOn() ? ('<div class="wtop">'+cartTop+bellTop+'</div>') : '';
+  const signinTop=signedIn?'':('<button class="wtop-btn gold" onclick="openLogin()">'+svgIcon('user')+' Sign in</button>');
+  const wtop = cloudOn() ? ('<div class="wtop">'+signinTop+'<span class="right"></span>'+cartTop+bellTop+'</div>') : '';
   // fixed bottom navigation (thumb reachable) — primary destinations for the show front page
   const moreBadge=(staff&&_newOrderCount)?('<span class="wnav-badge">'+_newOrderCount+'</span>'):'';
   const primary = [['home','Home','home'],['pay','Pay','wallet'],['share','Share','share'],['social','Socials','heart'],['more','More','grid']];
@@ -477,9 +480,6 @@ function viewWall(){
       '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
-      (signedIn ? ''
-        : '<button class="wall-cta" onclick="openLogin()">'+svgIcon('user')+' Sign in</button>'+
-          '<div class="wall-cta-sub">Sign in or create a free account — first dibs on new singles &amp; show deals</div>')+
       '<div class="wall-stats"><span>'+svgIcon('users')+' <b id="wMembers">—</b> members</span><span class="dot">•</span><span>'+svgIcon('eye')+' <b id="wVisits">—</b> visits</span></div>'+
     '</div>'+
     '<div class="walltabwrap">'+
@@ -503,7 +503,7 @@ function openWallMore(){
   // items that live off the bottom bar. data-act items run an action instead of switching a tab.
   const items=[['market','Shop','bag'],['reviews','Reviews','star'],['contact','Contact','chat'],['photos','Photos & Videos','image']];
   items.push(['account','Account','user','account']);
-  if(staff) items.push(['orders','Orders','box'],['sellers','Sellers','tag'],['members','Members','users']);
+  if(staff) items.push(['showstats','Show Stats','chart','showstats'],['orders','Orders','box'],['sellers','Sellers','tag'],['members','Members','users']);
   const w=document.createElement('div'); w.className='wsheet-wrap'; document.body.appendChild(w);
   const close=()=>w.remove();
   requestAnimationFrame(()=>w.classList.add('show'));
@@ -511,33 +511,75 @@ function openWallMore(){
     items.map(it=>'<button class="wsheet-item" data-k="'+it[0]+'"'+(it[3]?' data-act="'+it[3]+'"':'')+'>'+svgIcon(it[2])+'<span>'+esc(it[1])+'</span></button>').join('')+
     '</div>'+(signedIn?'<button class="ghost" style="width:100%;margin-top:12px" onclick="signOutAll()">Sign out</button>':'')+'</div>';
   w.querySelector('.wsheet-back').onclick=close;
-  w.querySelectorAll('.wsheet-item').forEach(b=>b.onclick=()=>{ close(); if(b.dataset.act==='account'){ openAccount(); } else { setWallTab(b.dataset.k); } });
+  w.querySelectorAll('.wsheet-item').forEach(b=>b.onclick=()=>{ close();
+    if(b.dataset.act==='account') openAccount();
+    else if(b.dataset.act==='showstats') openShowStats();
+    else setWallTab(b.dataset.k); });
 }
 function openAccount(){ if(staffSession())openStaffAccount(); else if(wallCustomer)openCustomerAccount(); else openLogin(); }
 function signOutAll(){ if(staffSession())staffLogout(); else if(wallCustomer)customerSignOut(); }
+/* -------- device slots: each staff username may be signed in on up to 10 devices -------- */
+function hocDeviceId(){ let d=null; try{ d=localStorage.getItem('hoc_device'); if(!d){ d='dev-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10); localStorage.setItem('hoc_device',d); } }catch(e){ d='dev-volatile'; } return d; }
+async function staffDeviceRegister(u,pwHash){ try{ const r=await sbRpc('staff_device_register',{p_user:u,p_pass:pwHash,p_device:hocDeviceId(),p_name:(navigator.platform||'')+' '+((navigator.userAgent||'').slice(0,40))}); return r; }catch(e){ return 'ok'; } }
+function savedStaffCred(){ try{ return JSON.parse(localStorage.getItem('hoc_savedstaff')||'null'); }catch(e){ return null; } }
+/* Complete a staff sign-in: enforce the 10-device limit, persist the session + prefill,
+   and offer Face ID on the first login from this device. Stays signed in until Sign out. */
+async function finishStaffLogin(row, pwHash){
+  const dev=await staffDeviceRegister(row.username, pwHash);
+  if(dev==='limit'){ toast('Device limit reached — this account is already signed in on 10 devices. Sign out on one of them first.'); return false; }
+  _staffPw=pwHash; setStaffSession({username:row.username,phone:row.phone,email:row.email});
+  try{ localStorage.setItem('hoc_lastlogin', row.username); localStorage.setItem('hoc_savedstaff', JSON.stringify({u:row.username, pw:pwHash})); }catch(e){}
+  toast('Welcome, '+row.username+'!'); render();
+  if(bioSupported() && !bioEnabledFor(row.username)){
+    setTimeout(async()=>{ if(confirm('Turn on Face ID / fingerprint sign-in on this device?')){ await bioRegister(); } }, 400);
+  }
+  return true;
+}
+async function staffBioLogin(u){
+  const h=await bioUnlock(u); if(!h){ toast('Face ID didn’t verify.'); return false; }
+  const r=await sbRpc('staff_login',{p_user:u,p_pass:h});
+  if(Array.isArray(r)&&r.length){ return await finishStaffLogin(r[0], h); }
+  toast('Saved sign-in no longer works — enter the password once.'); return false;
+}
 function openLogin(){
   if(!cloudOn()){ toast('Accounts are offline right now.'); return; }
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
   const close=()=>w.remove();
-  const bioBtn=(custBioEnabled()&&bioSupported())?'<div class="row" style="margin-bottom:10px"><button class="gold" id="lg_bio" style="flex:1">'+svgIcon('lock')+' Sign in with Face ID</button></div><div class="muted" style="text-align:center;margin-bottom:6px">— or —</div>':'';
+  let last=''; try{ last=localStorage.getItem('hoc_lastlogin')||''; }catch(e){}
+  const saved=savedStaffCred();
+  const savedForLast = saved && saved.u && saved.u===last ? saved : null;
+  const staffBio = last && last.indexOf('@')<0 && bioEnabledFor(last) && bioSupported();
+  const bioBtn=(staffBio||((custBioEnabled()&&bioSupported())))?'<div class="row" style="margin-bottom:10px"><button class="gold" id="lg_bio" style="flex:1">'+svgIcon('lock')+' Sign in with Face ID</button></div><div class="muted" style="text-align:center;margin-bottom:6px">— or —</div>':'';
   w.innerHTML='<div class="card pagecard">'+pageHead('Log in','lg_x2')+
     '<div class="authwrap">'+authBrand('Welcome back')+bioBtn+
-    '<label class="fld"><span>Email (customers) or username (staff)</span><input id="lg_key" autocapitalize="off"/></label>'+
-    '<label class="fld"><span>Password</span><input id="lg_pw" type="password"/></label>'+
+    '<label class="fld"><span>Email (customers) or username (staff)</span><input id="lg_key" autocapitalize="off" value="'+esc(last)+'"/></label>'+
+    '<label class="fld"><span>Password</span><input id="lg_pw" type="password"'+(savedForLast?' placeholder="••••••••  (saved)"':'')+'/></label>'+
     '<div class="row" style="margin-top:8px"><button class="gold" id="lg_go" style="flex:1">Log in</button></div>'+
     '<div style="text-align:center;margin-top:12px"><button class="btn-link" id="lg_new">New customer? Create an account</button></div>'+
     '<div style="text-align:center;margin-top:8px"><button class="btn-link" id="lg_staff">First-time staff / forgot password</button></div></div></div>';
   w.querySelector('#lg_x2').onclick=close;
-  { const bb=w.querySelector('#lg_bio'); if(bb)bb.onclick=()=>custBioLogin(); }
+  { const bb=w.querySelector('#lg_bio'); if(bb)bb.onclick=async()=>{ if(staffBio){ if(await staffBioLogin(last))close(); } else custBioLogin(); }; }
   w.querySelector('#lg_new').onclick=()=>{ close(); openCustomerSignup(); };
   w.querySelector('#lg_staff').onclick=()=>{ close(); openStaffLogin(); };
   w.querySelector('#lg_go').onclick=async()=>{
     const key=(w.querySelector('#lg_key').value||'').trim(); const pass=w.querySelector('#lg_pw').value||'';
-    if(!key||!pass){ toast('Enter your login and password.'); return; }
-    if(key.indexOf('@')>=0){ const r=await customerSignIn(key,pass); if(r.error){ toast(r.error); return; } close(); toast('Welcome back'+(wallCustomer&&wallCustomer.name?', '+wallCustomer.name.split(' ')[0]:'')+'!'); render(); }
-    else { const r=await sbRpc('staff_login',{p_user:key,p_pass:hashPass(pass)}); if(Array.isArray(r)&&r.length){ _staffPw=hashPass(pass); setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); close(); toast('Welcome, '+r[0].username+'!'); render(); } else toast('Wrong login or password. (Staff first time? Use the link below.)'); }
+    if(key.indexOf('@')>=0){
+      if(!key||!pass){ toast('Enter your login and password.'); return; }
+      const r=await customerSignIn(key,pass); if(r.error){ toast(r.error); return; }
+      try{ localStorage.setItem('hoc_lastlogin', key); }catch(e){}
+      close(); toast('Welcome back'+(wallCustomer&&wallCustomer.name?', '+wallCustomer.name.split(' ')[0]:'')+'!'); render();
+    } else {
+      // staff: an empty password field falls back to the saved sign-in for this username
+      let pwHash=null;
+      if(pass) pwHash=hashPass(pass);
+      else if(saved && saved.u===key.toLowerCase() && saved.pw) pwHash=saved.pw;
+      else { toast('Enter your login and password.'); return; }
+      const r=await sbRpc('staff_login',{p_user:key,p_pass:pwHash});
+      if(Array.isArray(r)&&r.length){ if(await finishStaffLogin(r[0], pwHash))close(); }
+      else toast('Wrong login or password. (Staff first time? Use the link below.)');
+    }
   };
-  setTimeout(()=>{ const k=w.querySelector('#lg_key'); if(k)k.focus(); },60);
+  setTimeout(()=>{ const k=w.querySelector(last?'#lg_pw':'#lg_key'); if(k)k.focus(); },60);
 }
 function setWallTab(key){ ui.wallTab=key; try{ localStorage.setItem('hoc_tab',key); }catch(e){}
   const staff=!!staffSession();
@@ -742,7 +784,14 @@ async function custBioLogin(){
     await loadWallCustomer(); document.querySelectorAll('.scanmodal').forEach(m=>m.remove()); toast('Welcome back! 👋'); render();
   }catch(e){ toast('Face ID sign-in didn’t work — use your password.'); }
 }
-function staffLogout(){ setStaffSession(null); _staffPw=null; ui.wallTab='home'; toast('Signed out.'); render(); }
+function staffLogout(){
+  // free this device's slot (best effort) and drop the saved one-tap credential;
+  // the username prefill and Face ID enrollment stay for a quick next sign-in
+  try{ const s=staffSession(); const saved=savedStaffCred(); const pw=_staffPw||(saved&&saved.u===(s&&s.username)?saved.pw:null);
+    if(s&&pw) sbRpc('staff_device_release',{p_user:s.username,p_pass:pw,p_device:hocDeviceId()}); }catch(e){}
+  try{ localStorage.removeItem('hoc_savedstaff'); }catch(e){}
+  setStaffSession(null); _staffPw=null; ui.wallTab='home'; toast('Signed out.'); render();
+}
 // Run a staff-only write RPC (add/delete shows, flyers, media, comments). Requires a real
 // staff sign-in; confirms the password once per session, then caches it in memory.
 async function staffDo(fn,args,okMsg){

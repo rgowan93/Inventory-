@@ -614,6 +614,41 @@ input:focus,textarea:focus,select:focus,.fld input:focus,.fld textarea:focus,.fl
 .wtop-badge{ position:absolute; top:-5px; right:-5px; min-width:17px; height:17px; padding:0 4px; border-radius:999px;
   background:var(--red); color:#fff; font-size:10px; font-weight:900; display:flex; align-items:center; justify-content:center; }
 .wtop-dot{ position:absolute; top:6px; right:7px; width:8px; height:8px; border-radius:50%; background:var(--red); }
+.wtop{ justify-content:flex-start; }
+.wtop-btn.gold{ display:inline-flex; align-items:center; gap:6px; background:linear-gradient(180deg,#FFD64A,#F1A800); color:#1a1300; border-color:rgba(255,215,74,.5); }
+
+/* ---- Show Stats (staff show-day ledger) ---- */
+.ss-kpi{ flex:1; min-width:88px; text-align:center; background:rgba(255,255,255,.05); border:1px solid var(--glassline); border-radius:12px; padding:8px 6px; }
+.ss-kpi span{ display:block; font-size:10.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-3); font-weight:700; }
+.ss-kpi b{ font-size:17px; color:var(--gold); }
+.ss-lbl{ font-size:11.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--ink-3); margin:4px 0 6px; }
+.ss-chips{ display:flex; flex-wrap:wrap; gap:7px; margin-bottom:12px; }
+.ss-chip{ padding:10px 14px; font-size:13.5px; font-weight:700; border-radius:12px; background:rgba(255,255,255,.05);
+  border:1px solid var(--glassline); color:var(--ink-2); box-shadow:none; }
+.ss-chip.on{ background:linear-gradient(135deg,#c084fc,#38bdf8); color:#0a0913; border-color:transparent; box-shadow:0 6px 18px rgba(56,189,248,.4); }
+.ss-chip.ss-add.on{ background:linear-gradient(180deg,#3ddc78,#1f9d52); color:#04160a; }
+.ss-chip.ss-sub.on{ background:linear-gradient(180deg,#ef4a3d,#c5271c); color:#fff; }
+.ss-tallygrid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.ss-tallybox{ background:var(--glass); border:1px solid var(--glassline); border-radius:16px; padding:12px 10px; min-height:112px;
+  text-align:center; cursor:pointer; user-select:none; -webkit-user-select:none; touch-action:manipulation; }
+.ss-tallybox:active{ transform:scale(.985); background:var(--glass-2); }
+.ss-tname{ font-weight:800; font-size:13px; margin-bottom:6px; }
+.ss-tmarks{ min-height:32px; display:flex; flex-wrap:wrap; gap:4px; justify-content:center; align-items:center; color:#F4B400; }
+.ss-tval{ margin-top:6px; font-weight:800; color:var(--ink-2); font-size:12.5px; }
+.ss-payline{ display:flex; align-items:center; gap:8px; padding:7px 0; font-size:14.5px; }
+.ss-gal{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px; }
+.ss-gal img{ width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:12px; border:1px solid var(--glassline); cursor:pointer; background:#000; }
+
+/* ---- fullscreen photo viewer ---- */
+.pv-wrap{ position:fixed; inset:0; z-index:400; background:rgba(4,4,8,.94); display:flex; align-items:center; justify-content:center; }
+.pv-img{ max-width:94vw; max-height:88vh; object-fit:contain; border-radius:10px; }
+.pv-x{ position:absolute; top:calc(10px + env(safe-area-inset-top)); right:12px; z-index:2; width:44px; height:44px; border-radius:50%;
+  background:var(--red); color:#fff; font-size:20px; font-weight:900; border:none; box-shadow:0 6px 18px rgba(0,0,0,.5); }
+.pv-arrow{ position:absolute; top:50%; transform:translateY(-50%); z-index:2; width:46px; height:64px; font-size:34px; font-weight:900;
+  background:rgba(255,255,255,.08); color:#fff; border:1px solid var(--glassline); border-radius:14px; display:flex; align-items:center; justify-content:center; padding-bottom:6px; }
+.pv-prev{ left:8px; } .pv-next{ right:8px; }
+.pv-count{ position:absolute; bottom:calc(14px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%);
+  color:var(--ink-2); font-weight:700; font-size:13px; background:rgba(0,0,0,.5); padding:4px 12px; border-radius:999px; }
 
 /* ---- fixed bottom tab bar (thumb reachable) — replaces the slider ---- */
 .wall{ padding-bottom:118px!important; }
@@ -676,9 +711,11 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260623t"></script>
-<script src="social.js?v=20260623t"></script>
-<script src="app.js?v=20260623t"></script>
+<script src="config.js?v=20260623u"></script>
+<script src="social.js?v=20260623u"></script>
+<script src="app.js?v=20260623u"></script>
+<script src="show-math.js?v=20260623u"></script>
+<script src="show-stats.js?v=20260623u"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
