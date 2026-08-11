@@ -138,7 +138,7 @@ function svgIcon(name,cls){ const d=_ICON_PATHS[name]; if(!d)return '';
   return '<svg class="i'+(cls?(' '+cls):'')+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>'; }
 const val=id=>{const e=el(id);return e?e.value.trim():'';};
 const num=id=>{const v=parseFloat(val(id));return isNaN(v)?0:v;};
-function toast(msg){const t=el('toast');t.innerHTML='<div class="toast">'+msg+'</div>';setTimeout(()=>{t.innerHTML='';},2600);}
+function toast(msg){const t=el('toast');const d=document.createElement('div');d.className='toast';d.textContent=String(msg==null?'':msg);t.innerHTML='';t.appendChild(d);setTimeout(()=>{t.innerHTML='';},2600);}
 function genBarcodeId(){ const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<5;i++)s+=a[Math.floor(Math.random()*a.length)];return 'HOC-'+s; }
 const currentShow=()=>state.shows.find(s=>s.id===state.currentShowId)||null;
 const openShow=()=>{const s=currentShow();return (s&&s.status==='open')?s:null;};
@@ -477,7 +477,7 @@ function viewWall(){
     wtop+
     '<div id="installBanner"></div>'+
     '<div class="wall-hero">'+
-      '<img class="wall-logo" src="logo.png?v=2" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
+      '<img class="wall-logo" src="logo.png?v=3" onerror="this.onerror=null;this.src=\'logo.svg\'" alt="House of Cards"/>'+
       '<div class="wall-title" onclick="wallSecretTap()"><b>HOUSE</b> OF CARDS</div>'+
       '<div class="wall-tag">'+esc(w.tagline||'')+'</div>'+
       '<div class="wall-stats"><span>'+svgIcon('users')+' <b id="wMembers">—</b> members</span><span class="dot">•</span><span>'+svgIcon('eye')+' <b id="wVisits">—</b> visits</span></div>'+
@@ -522,13 +522,20 @@ function signOutAll(){ if(staffSession())staffLogout(); else if(wallCustomer)cus
 function hocDeviceId(){ let d=null; try{ d=localStorage.getItem('hoc_device'); if(!d){ d='dev-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10); localStorage.setItem('hoc_device',d); } }catch(e){ d='dev-volatile'; } return d; }
 async function staffDeviceRegister(u,pwHash){ try{ const r=await sbRpc('staff_device_register',{p_user:u,p_pass:pwHash,p_device:hocDeviceId(),p_name:(navigator.platform||'')+' '+((navigator.userAgent||'').slice(0,40))}); return r; }catch(e){ return 'ok'; } }
 function savedStaffCred(){ try{ return JSON.parse(localStorage.getItem('hoc_savedstaff')||'null'); }catch(e){ return null; } }
+/* Keep every stored copy of the staff credential in sync with the CURRENT password hash —
+   the saved one-tap sign-in and the Face ID vault both break after a password change/reset
+   if they still hold the old hash. */
+function persistStaffCred(u, pwHash){
+  try{ localStorage.setItem('hoc_lastlogin', u); localStorage.setItem('hoc_savedstaff', JSON.stringify({u:u, pw:pwHash})); }catch(e){}
+  try{ const raw=localStorage.getItem('hoc_bio_'+u); if(raw){ const d=JSON.parse(raw); if(d&&d.pw!==pwHash){ d.pw=pwHash; localStorage.setItem('hoc_bio_'+u, JSON.stringify(d)); } } }catch(e){}
+}
 /* Complete a staff sign-in: enforce the 10-device limit, persist the session + prefill,
    and offer Face ID on the first login from this device. Stays signed in until Sign out. */
 async function finishStaffLogin(row, pwHash){
   const dev=await staffDeviceRegister(row.username, pwHash);
   if(dev==='limit'){ toast('Device limit reached — this account is already signed in on 10 devices. Sign out on one of them first.'); return false; }
   _staffPw=pwHash; setStaffSession({username:row.username,phone:row.phone,email:row.email});
-  try{ localStorage.setItem('hoc_lastlogin', row.username); localStorage.setItem('hoc_savedstaff', JSON.stringify({u:row.username, pw:pwHash})); }catch(e){}
+  persistStaffCred(row.username, pwHash);
   toast('Welcome, '+row.username+'!'); render();
   if(bioSupported() && !bioEnabledFor(row.username)){
     setTimeout(async()=>{ if(confirm('Turn on Face ID / fingerprint sign-in on this device?')){ await bioRegister(); } }, 400);
@@ -574,7 +581,7 @@ function openLogin(){
       if(pass) pwHash=hashPass(pass);
       else if(saved && saved.u===key.toLowerCase() && saved.pw) pwHash=saved.pw;
       else { toast('Enter your login and password.'); return; }
-      const r=await sbRpc('staff_login',{p_user:key,p_pass:pwHash});
+      const r=await sbRpc('staff_login',{p_user:key.toLowerCase(),p_pass:pwHash});
       if(Array.isArray(r)&&r.length){ if(await finishStaffLogin(r[0], pwHash))close(); }
       else toast('Wrong login or password. (Staff first time? Use the link below.)');
     }
@@ -2092,8 +2099,8 @@ function openStaffLogin(){
     w.querySelector('#st_x').onclick=close;
     w.querySelector('#st_go').onclick=async()=>{ const u=(w.querySelector('#st_u').value||'').trim(); const p=w.querySelector('#st_p').value||'';
       if(!u||!p){ toast('Enter username and password.'); return; }
-      const r=await sbRpc('staff_login',{p_user:u,p_pass:hashPass(p)});
-      if(Array.isArray(r)&&r.length){ _staffPw=hashPass(p); setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); close(); toast('Welcome, '+r[0].username+'!'); render(); }
+      const r=await sbRpc('staff_login',{p_user:u.toLowerCase(),p_pass:hashPass(p)});
+      if(Array.isArray(r)&&r.length){ if(await finishStaffLogin(r[0], hashPass(p)))close(); }
       else toast('Wrong username or password.'); };
     w.querySelector('#st_first').onclick=async()=>{ const u=(w.querySelector('#st_u').value||'').trim(); if(!u){ toast('Type your username first.'); return; }
       const st=await sbRpc('staff_status',{p_user:u});
@@ -2111,7 +2118,7 @@ function openStaffLogin(){
     w.querySelector('#c_go').onclick=async()=>{ const p=w.querySelector('#c_p').value||''; const e=(w.querySelector('#c_e').value||'').trim(); const q=(w.querySelector('#c_q').value||'').trim(); const a=(w.querySelector('#c_a').value||'').trim();
       if(p.length<4){ toast('Password must be at least 4 characters.'); return; } if(!q||!a){ toast('Set a security question and answer.'); return; }
       const ok=await sbRpc('staff_claim',{p_user:u,p_pass:hashPass(p),p_email:e||null,p_q:q,p_a:hashPass(a.toLowerCase())});
-      if(ok===true){ _staffPw=hashPass(p); setStaffSession({username:u,email:e}); close(); toast('Account created — you\'re signed in!'); render(); }
+      if(ok===true){ if(await finishStaffLogin({username:u.toLowerCase(),email:e}, hashPass(p))){ close(); toast('Account created — you\'re signed in!'); } }
       else toast('That account is already set up — try signing in.'); };
   }
   function forgotStep(u,q){
@@ -2123,7 +2130,9 @@ function openStaffLogin(){
     w.querySelector('#f_go').onclick=async()=>{ const a=(w.querySelector('#f_a').value||'').trim(); const p=w.querySelector('#f_p').value||'';
       if(!a||p.length<4){ toast('Enter your answer and a new password (4+ chars).'); return; }
       const ok=await sbRpc('staff_reset',{p_user:u,p_ans:hashPass(a.toLowerCase()),p_newpass:hashPass(p)});
-      if(ok===true){ _staffPw=hashPass(p); const r=await sbRpc('staff_login',{p_user:u,p_pass:hashPass(p)}); if(Array.isArray(r)&&r.length){ setStaffSession({username:r[0].username,phone:r[0].phone,email:r[0].email}); } close(); toast('Password reset — signed in!'); render(); }
+      if(ok===true){ const r=await sbRpc('staff_login',{p_user:u.toLowerCase(),p_pass:hashPass(p)});
+        if(Array.isArray(r)&&r.length){ if(await finishStaffLogin(r[0], hashPass(p))){ close(); toast('Password reset — signed in!'); } }
+        else { close(); toast('Password reset — sign in with your new password.'); } }
       else toast('That answer doesn\'t match.'); };
   }
   loginStep();
@@ -2306,7 +2315,7 @@ function openStaffAccount(){ const s=staffSession(); if(!s)return;
   w.querySelector('#a_save').onclick=async()=>{ const email=(w.querySelector('#a_e').value||'').trim(); const oldp=w.querySelector('#a_old').value||''; const newp=w.querySelector('#a_new').value||'';
     if(!oldp){ toast('Enter your current password to save changes.'); return; } if(newp&&newp.length<4){ toast('New password must be 4+ characters.'); return; }
     const ok=await sbRpc('staff_update',{p_user:s.username,p_old:hashPass(oldp),p_newpass:newp?hashPass(newp):'',p_email:email});
-    if(ok===true){ _staffPw=hashPass(newp||oldp); s.email=email; setStaffSession(s); close(); toast('Saved.'); render(); }
+    if(ok===true){ _staffPw=hashPass(newp||oldp); persistStaffCred(s.username, _staffPw); s.email=email; setStaffSession(s); close(); toast('Saved.'); render(); }
     else toast('Current password is incorrect.'); };
   w.querySelector('#ns_go').onclick=async()=>{ const nu=(w.querySelector('#ns_u').value||'').trim(); const nph=(w.querySelector('#ns_ph').value||'').replace(/\D/g,''); const pw=w.querySelector('#ns_pw').value||'';
     if(!/^[a-z0-9_]{2,}$/.test(nu.toLowerCase())){ toast('Username: 2+ letters/numbers, no spaces.'); return; }

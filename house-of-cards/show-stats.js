@@ -10,29 +10,52 @@ const SS_FORM_NAME={}; SS_FORMS.forEach(f=>SS_FORM_NAME[f[0]]=f[1]);
 const SS_PERSON_NAME={}; SS_PEOPLE.forEach(p=>SS_PERSON_NAME[p[0]]=p[1]);
 function ssCap(s){ s=String(s||''); return s.charAt(0).toUpperCase()+s.slice(1); }
 
-let _ss={ wrap:null, data:null, tab:'sales', sel:{form:null,person:null,dir:1}, photo:null, busy:false, poll:null };
+let _ss={ wrap:null, data:null, tab:'sales', sel:{form:null,person:null,dir:1}, photo:null, busy:false, poll:null, hold:null, winUp:null, pending:{} };
 
 async function ssCreds(){ const c=await _staffCreds(); return c; }
+/* Cached-creds-only variant for the background poll: never opens a login modal,
+   Face ID sheet, or password prompt from a timer. */
+function ssCredsCached(){ const s=staffSession(); if(!s||!_staffPw)return null; return {p_user:s.username,p_pass:_staffPw}; }
 
 function openShowStats(){
   if(!staffSession()){ openLogin(); return; }
+  if(_ss.poll){ clearInterval(_ss.poll); _ss.poll=null; }
+  ssHoldStop();
+  if(_ss.winUp){ window.removeEventListener('pointerup',_ss.winUp); window.removeEventListener('pointercancel',_ss.winUp); _ss.winUp=null; }
   const ex=document.querySelector('.ssmodal'); if(ex)ex.remove();
   const w=document.createElement('div'); w.className='scanmodal pagewrap ssmodal'; document.body.appendChild(w);
   w.innerHTML='<div class="card pagecard">'+pageHead('Show stats','ss_x')+'<div id="ss_body"><div class="muted">Loading…</div></div></div>';
-  _ss.wrap=w; _ss.tab='sales'; _ss.sel={form:null,person:null,dir:1}; _ss.photo=null;
-  const close=()=>{ if(_ss.poll){ clearInterval(_ss.poll); _ss.poll=null; } _ss.wrap=null; w.remove(); };
+  _ss.wrap=w; _ss.tab='sales'; _ss.sel={form:null,person:null,dir:1}; _ss.photo=null; _ss.pending={};
+  ssWireTallies(w);
+  const close=()=>{ if(_ss.poll){ clearInterval(_ss.poll); _ss.poll=null; } ssHoldStop();
+    if(_ss.winUp){ window.removeEventListener('pointerup',_ss.winUp); window.removeEventListener('pointercancel',_ss.winUp); _ss.winUp=null; }
+    _ss.wrap=null; w.remove(); };
   w.querySelector('#ss_x').onclick=close;
   ssRefresh();
   _ss.poll=setInterval(()=>ssRefresh(true), 12000);
 }
 
+/* true while the staffer is mid-something a repaint would destroy */
+function ssUserBusy(){
+  if(_ss.hold)return true;                                        // finger down on a tally box
+  const w=_ss.wrap; if(!w)return false;
+  const amt=w.querySelector('#ssc_amt'); if(amt&&amt.value)return true;   // typing a sale amount
+  const sf=w.querySelector('#ss_startform'); if(sf&&sf.children.length)return true; // start-show form open
+  const a=document.activeElement;
+  if(a&&w.contains(a)&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))return true;     // focused in any field
+  return false;
+}
+
 async function ssRefresh(silent){
   if(!_ss.wrap)return;
-  const c=await ssCreds(); if(!c){ if(!silent)toast('Unlock to view.'); return; }
+  const c = silent ? ssCredsCached() : await ssCreds();
+  if(!c){ if(!silent)toast('Unlock to view.'); return; }
   const r=await sbRpc('show_live_get',c);
   if(!r||r.ok!==true){ if(!silent){ const b=_ss.wrap&&_ss.wrap.querySelector('#ss_body'); if(b)b.innerHTML='<div class="muted">Could not load. <button class="sm ghost" onclick="ssRefresh()">Retry</button></div>'; } return; }
-  // don't repaint over someone mid-entry
-  if(silent && _ss.wrap){ const amt=_ss.wrap.querySelector('#ssc_amt'); if((amt&&amt.value)||_ss.photo){ _ss.data=r; return; } }
+  // overlay tally bumps still in flight, so a refresh can't clobber (or double-revert) them
+  if(r.tallies){ const pend=_ss.pending||{}; Object.keys(pend).forEach(b=>{ if(pend[b]) r.tallies[b]=Math.max(0,(r.tallies[b]||0)+pend[b]); }); }
+  // don't repaint over someone mid-entry (photo + chip picks survive a repaint, so they don't block it)
+  if(silent && ssUserBusy()){ _ss.data=r; return; }
   _ss.data=r; ssPaint();
 }
 
@@ -86,7 +109,7 @@ async function ssLoadHistory(){
     return '<div class="ordcard"><div class="ordhead"><b>'+esc(s.name||('Show #'+s.show_id))+'</b><span class="ordstatus s_complete">'+mUSD(s.profit_cents||0)+'</span></div>'+
       '<div class="muted">'+dt+'</div>'+
       '<div class="row" style="gap:6px;margin-top:8px"><button class="sm ghost" onclick="openShowReport('+s.show_id+')">View report</button>'+
-      (s.pdf_url?('<button class="sm ghost" onclick="openUrl(\''+esc(s.pdf_url)+'\')">PDF</button>'):'')+'</div></div>'; }).join('');
+      (s.pdf_url?('<button class="sm ghost" data-url="'+esc(s.pdf_url)+'" onclick="openUrl(this.dataset.url)">PDF</button>'):'')+'</div></div>'; }).join('');
   // profit chart — oldest → newest bars
   const seq=shows.slice().reverse();
   const w=Math.max(280, Math.min(520, seq.length*64)), h=170, pad=26;
@@ -147,7 +170,7 @@ function ssPaintSales(box, d){
         '<button class="ss-chip ss-sub'+(_ss.sel.dir===-1?' on':'')+'" data-dir="-1">− Subtract (money out)</button></div>'+
       '<label class="fld"><span>Amount (USD)</span><input id="ssc_amt" type="text" inputmode="decimal" placeholder="0.00"/></label>'+
       '<div class="row" style="gap:8px"><button class="ghost" id="ssc_photo" style="flex:1">'+svgIcon('camera')+(_ss.photo?' ✓ Photo ready — tap to retake':' Take photo (required)')+'</button></div>'+
-      '<div id="ssc_prev">'+(_ss.photo?('<img class="showflyer" style="max-height:160px" src="'+esc(_ss.photo.url)+'"/>'):'')+'</div>'+
+      '<div id="ssc_prev">'+(_ss.photo?('<img class="showflyer" style="max-height:160px" src="'+esc(_ss.photo.url)+'"/><div class="row" style="margin-top:6px"><button class="sm ghost" id="ssc_pclear" style="color:#ff6a5c">✕ Remove photo</button></div>'):'')+'</div>'+
       '<div class="row" style="margin-top:10px"><button class="gold" id="ssc_save" style="flex:1">Save sale</button></div>'+
     '</div>'+
     '<div class="acct-sec" style="margin-top:14px">'+svgIcon('tag')+' This show\'s ledger ('+entries.length+')</div>'+
@@ -158,6 +181,7 @@ function ssPaintSales(box, d){
   box.querySelector('#ssc_photo').onclick=()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
     inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading photo…'); const up=await uploadMedia(f); if(!up)return; _ss.photo=up; ssPaint(); };
     inp.click(); };
+  { const pc=box.querySelector('#ssc_pclear'); if(pc)pc.onclick=()=>{ _ss.photo=null; ssPaint(); }; }
   box.querySelector('#ssc_save').onclick=async()=>{
     if(_ss.busy)return;
     const amt=parseFloat((box.querySelector('#ssc_amt').value||'').replace(/[^0-9.]/g,''));
@@ -181,8 +205,8 @@ function ssEntryRow(e){
       '<span class="ordstatus '+(neg?'s_canceled':'s_complete')+'">'+esc(SS_FORM_NAME[e.pay_form]||e.pay_form)+'</span></div>'+
     '<div class="muted">'+esc(SS_PERSON_NAME[e.person]||e.person)+' · '+new Date(e.created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})+(e.created_by?(' · by '+esc(e.created_by)):'')+'</div>'+
     '<div class="row" style="gap:6px;margin-top:8px">'+
-      (e.photo_url?('<button class="sm ghost" onclick="openPhotoViewer([\''+esc(e.photo_url)+'\'],0)">View photo</button>'):'')+
-      '<button class="sm ghost" style="color:#ff6a5c" onclick="ssVoid('+e.id+')">Void</button></div></div>';
+      (e.photo_url?('<button class="sm ghost" data-url="'+esc(e.photo_url)+'" onclick="openPhotoViewer([this.dataset.url],0)">View photo</button>'):'')+
+      '<button class="sm ghost" style="color:#ff6a5c" onclick="ssVoid('+(+e.id)+')">Void</button></div></div>';
 }
 
 async function ssVoid(id){
@@ -210,45 +234,80 @@ function ssPaintGame(box, d){
       return '<div class="ss-tallybox" data-box="'+b[0]+'"><div class="ss-tname">'+b[1]+'</div><div class="ss-tmarks" id="ssm_'+b[0]+'">'+ssTallySvg(n)+'</div><div class="ss-tval" id="ssv_'+b[0]+'">'+n+' · '+mUSD(n*1000)+'</div></div>'; }).join('')+'</div>'+
     '<div class="card" style="margin-top:12px;text-align:center"><div class="muted">Machine total (splits 50/50 Reggie &amp; Manny)</div>'+
     '<div class="big" id="ss_machtotal">'+mUSD(SS_BOXES.reduce((a,b)=>a+(t[b[0]]||0),0)*1000)+'</div></div>';
-  box.querySelectorAll('.ss-tallybox').forEach(el=>ssTallyWire(el, d.show.id));
 }
 
-function ssTallyWire(el, showId){
-  const boxKey=el.dataset.box;
-  let holdT=null, rep=null, erased=false, downAt=0;
-  const start=e=>{ if(e.pointerType==='mouse'&&e.button!==0)return; e.preventDefault(); downAt=Date.now(); erased=false;
-    holdT=setTimeout(()=>{ erase(); rep=setInterval(erase, 650); }, 600); };
-  const erase=()=>{ erased=true; if((_ss.data.tallies[boxKey]||0)>0) ssBump(showId, boxKey, -1); else { clearInterval(rep); rep=null; } };
-  const end=e=>{ clearTimeout(holdT); clearInterval(rep); holdT=rep=null;
-    if(e.type==='pointerup' && !erased && Date.now()-downAt<600) ssBump(showId, boxKey, 1);
-    erased=false; };
-  el.addEventListener('pointerdown', start);
-  el.addEventListener('pointerup', end);
-  el.addEventListener('pointercancel', end);
-  el.addEventListener('pointerleave', end);
-  el.addEventListener('contextmenu', e=>e.preventDefault());
+/* Tally taps and press-and-hold use ONE delegated listener on the modal wrap plus a single
+   global hold state (_ss.hold). The tally boxes get rebuilt by repaints; per-element
+   listeners could leak a running erase interval when their element was detached mid-hold.
+   With delegation + global state, a repaint can never orphan a hold. */
+function ssWireTallies(w){
+  const findBox=e=>{ const el=e.target&&e.target.closest&&e.target.closest('.ss-tallybox'); return el?el.dataset.box:null; };
+  w.addEventListener('pointerdown', e=>{
+    const box=findBox(e); if(!box)return;
+    if(e.pointerType==='mouse'&&e.button!==0)return;
+    e.preventDefault();
+    ssHoldStop();
+    const showId=_ss.data&&_ss.data.show&&_ss.data.show.id; if(!showId)return;
+    const h={ box:box, showId:showId, downAt:Date.now(), erased:false, timer:null, rep:null };
+    _ss.hold=h;
+    h.timer=setTimeout(()=>{ if(_ss.hold!==h)return; ssHoldErase(h); h.rep=setInterval(()=>{ if(_ss.hold!==h){ clearInterval(h.rep); return; } ssHoldErase(h); }, 650); }, 600);
+  });
+  // pointerup/cancel live on window so the hold ALWAYS ends, even if the finger drifts
+  // off the box or the element under it was swapped out
+  const up=e=>{ const h=_ss.hold; if(!h)return;
+    const at=e.target&&e.target.closest&&e.target.closest('.ss-tallybox');
+    const tap = e.type==='pointerup' && !h.erased && (Date.now()-h.downAt)<600 && at && at.dataset.box===h.box;
+    ssHoldStop();
+    if(tap) ssBump(h.showId, h.box, 1); };
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+  _ss.winUp=up;
+  w.addEventListener('contextmenu', e=>{ if(findBox(e))e.preventDefault(); });
+}
+function ssHoldStop(){ const h=_ss.hold; if(!h)return; clearTimeout(h.timer); clearInterval(h.rep); h.timer=h.rep=null; _ss.hold=null; }
+function ssHoldErase(h){ h.erased=true;
+  const t=_ss.data&&_ss.data.tallies;
+  if(t&&(t[h.box]||0)>0) ssBump(h.showId, h.box, -1);
+  else ssHoldStop(); }
+
+function ssTallyPaintBox(box){
+  const t=(_ss.data&&_ss.data.tallies)||{};
+  const m=document.getElementById('ssm_'+box), v=document.getElementById('ssv_'+box), tot=document.getElementById('ss_machtotal');
+  const machTotal=SS_BOXES.reduce((a,b)=>a+(t[b[0]]||0),0)*1000;
+  if(m)m.innerHTML=ssTallySvg(t[box]||0); if(v)v.textContent=(t[box]||0)+' · '+mUSD((t[box]||0)*1000);
+  if(tot)tot.textContent=mUSD(machTotal);
+  const kpis=_ss.wrap&&_ss.wrap.querySelectorAll('.ss-kpi b'); if(kpis&&kpis[1])kpis[1].textContent=mUSD(machTotal);
 }
 
 let _ssBumpChain=Promise.resolve();
 function ssBump(showId, box, delta){
   const t=_ss.data.tallies; t[box]=Math.max(0,(t[box]||0)+delta);
-  const m=document.getElementById('ssm_'+box), v=document.getElementById('ssv_'+box), tot=document.getElementById('ss_machtotal');
-  const machTotal=SS_BOXES.reduce((a,b)=>a+(t[b[0]]||0),0)*1000;
-  if(m)m.innerHTML=ssTallySvg(t[box]); if(v)v.textContent=t[box]+' · '+mUSD(t[box]*1000);
-  if(tot)tot.textContent=mUSD(machTotal);
-  const kpis=_ss.wrap&&_ss.wrap.querySelectorAll('.ss-kpi b'); if(kpis&&kpis[1])kpis[1].textContent=mUSD(machTotal);
-  // serialize server bumps so rapid taps all land, in order
+  _ss.pending[box]=(_ss.pending[box]||0)+delta;   // in flight until the server confirms
+  ssTallyPaintBox(box);
+  // serialize server bumps so rapid taps all land, in order; a failed bump is rolled
+  // back on screen and announced — a tally mark must never silently differ from the server
   _ssBumpChain=_ssBumpChain.then(async()=>{
-    const c=await ssCreds(); if(!c)return;
-    const r=await sbRpc('show_tally_bump',Object.assign({p_show:showId,p_box:box,p_delta:delta},c));
+    const settle=()=>{ _ss.pending[box]=(_ss.pending[box]||0)-delta; };
+    const c=ssCredsCached();
+    if(!c){ settle(); ssBumpRevert(box, delta); toast('Sign in again — that tally didn\'t save.'); return; }
+    const args=Object.assign({p_show:showId,p_box:box,p_delta:delta},c);
+    let r=await sbRpc('show_tally_bump',args);
+    if(!r){ await new Promise(res=>setTimeout(res,1200)); r=await sbRpc('show_tally_bump',args); }
+    settle();
     if(r&&r.ok&&typeof r.count==='number'){ /* server is source of truth on next poll */ }
-    else if(r&&r.ok===false){ toast(r.error||'Tally didn\'t save'); }
+    else { ssBumpRevert(box, delta); toast((r&&r.error)||'No connection — that tally didn\'t save. Tap it again.'); }
   }).catch(()=>{});
+}
+function ssBumpRevert(box, delta){
+  const t=_ss.data&&_ss.data.tallies; if(!t)return;
+  t[box]=Math.max(0,(t[box]||0)-delta);
+  ssTallyPaintBox(box);
 }
 
 /* ---------- end show + report ---------- */
 function ssEndShow(){
-  const w=document.createElement('div'); w.className='wsheet-wrap show'; document.body.appendChild(w);
+  if(document.querySelector('.sse-sheet'))return;   // one confirmation sheet at a time
+  const w=document.createElement('div'); w.className='wsheet-wrap show sse-sheet'; document.body.appendChild(w);
   const close=()=>w.remove();
   w.innerHTML='<div class="wsheet-back"></div><div class="wsheet"><div class="wsheet-grip"></div>'+
     '<div class="wsheet-h">End show</div>'+
@@ -257,23 +316,44 @@ function ssEndShow(){
   w.querySelector('.wsheet-back').onclick=close;
   w.querySelector('#sse_no').onclick=close;
   w.querySelector('#sse_yes').onclick=async()=>{
-    const btn=w.querySelector('#sse_yes'); btn.disabled=true; btn.textContent='Finalizing…';
+    const btn=w.querySelector('#sse_yes'); if(btn.disabled)return;
+    btn.disabled=true; btn.textContent='Finalizing…';
     const c=await ssCreds(); if(!c){ close(); return; }
-    const fresh=await sbRpc('show_live_get',c);
-    if(!fresh||fresh.ok!==true||!fresh.show){ toast('Show already ended.'); close(); ssRefresh(); return; }
-    const s=fresh.show, entries=fresh.entries||[], tallies=fresh.tallies||{};
-    const rep=HOC_SHOW_MATH.computeShowReport({cash_start_cents:s.cash_start_cents,float_owner:s.float_owner,entries:entries,tallies:tallies});
-    rep.name=s.name||null; rep.started_at=s.started_at; rep.ended_at=new Date().toISOString();
-    const er=await sbRpc('show_end',Object.assign({p_show:s.id,p_report:rep,p_pdf:null},c));
-    if(!er||er.ok!==true){ toast((er&&er.error)||'Could not finalize.'); btn.disabled=false; btn.textContent='Yes — finalize'; return; }
-    close(); toast(rep.verified?'Show finalized — math verified ✓':'Show finalized — ⚠ check the report math');
-    try{
-      const blob=await ssMakePdf(s, entries, rep);
-      const up=await uploadMedia(new File([blob],'show-'+s.id+'-report.pdf',{type:'application/pdf'}));
-      if(up&&up.url) await sbRpc('show_report_set_pdf',Object.assign({p_show:s.id,p_pdf:up.url},c));
-    }catch(e){ toast('PDF will be available from the report page.'); }
-    ssRefresh();
-    openShowReport(s.id);
+    try{ await _ssBumpChain; }catch(e){}   // let any in-flight tally bumps land before snapshotting
+    const unlock=()=>{ btn.disabled=false; btn.textContent='Yes — finalize'; };
+    // Snapshot → compute → finalize. The server compares our snapshot's fingerprint
+    // (entry count, amount sum, newest entry id, exact tallies) against live data under a
+    // row lock, and refuses with 'changed' if any device logged anything in between —
+    // then we just re-snapshot and recompute, so the saved split always matches reality.
+    for(let attempt=0; attempt<4; attempt++){
+      const fresh=await sbRpc('show_live_get',c);
+      if(!fresh||fresh.ok!==true){ toast('Could not reach the server — nothing was finalized. Try again.'); unlock(); return; }
+      if(!fresh.show){ toast('Show was already ended.'); close(); ssRefresh(); return; }
+      const s=fresh.show, entries=fresh.entries||[], tallies=fresh.tallies||{};
+      const rep=HOC_SHOW_MATH.computeShowReport({cash_start_cents:s.cash_start_cents,float_owner:s.float_owner,entries:entries,tallies:tallies});
+      rep.name=s.name||null; rep.started_at=s.started_at; rep.ended_at=new Date().toISOString();
+      const fp={ p_entry_count:entries.length,
+                 p_amount_sum:entries.reduce((a,e)=>a+(e.amount_cents||0),0),
+                 p_max_id:entries.reduce((a,e)=>Math.max(a,e.id||0),0),
+                 p_tallies:tallies };
+      const er=await sbRpc('show_end',Object.assign({p_show:s.id,p_report:rep,p_pdf:null},fp,c));
+      if(er&&er.ok===true){
+        close(); toast(rep.verified?'Show finalized — math verified ✓':'Show finalized — ⚠ check the report math');
+        try{
+          const blob=await ssMakePdf(s, entries, rep);
+          const up=await uploadMedia(new File([blob],'show-'+s.id+'-report.pdf',{type:'application/pdf'}));
+          if(up&&up.url) await sbRpc('show_report_set_pdf',Object.assign({p_show:s.id,p_pdf:up.url},c));
+        }catch(e){ toast('PDF will be available from the report page.'); }
+        ssRefresh();
+        openShowReport(s.id);
+        return;
+      }
+      if(er&&er.error==='changed'){ continue; }   // a sale/tally landed mid-finalize — recompute with fresh numbers
+      if(er&&er.error==='ended'){ toast('Another device already finalized this show.'); close(); ssRefresh(); openShowReport(s.id); return; }
+      toast((er&&er.error)||'Could not finalize.'); unlock(); return;
+    }
+    toast('Sales kept coming in while finalizing — wait for everyone to stop, then tap End show again.');
+    unlock();
   };
 }
 
@@ -290,7 +370,7 @@ async function openShowReport(showId){
     return '<div class="ss-payline">'+svgIcon('wallet')+' <b>'+P[p]+'</b> takes <b>'+mUSD(c2)+'</b> cash'+fl+'</div>'; };
   const formRow=f=>{ const d2=(rep.forms||{})[f]||{}; return '<tr><td>'+F[f]+'</td><td class="money">'+mUSD(d2.in_cents||0)+'</td><td class="money">'+mUSD(d2.out_cents||0)+'</td><td class="money">'+mUSD(d2.machine_cents||0)+'</td><td class="money"><b>'+mUSD((d2.net_cents||0)+(d2.machine_cents||0))+'</b></td></tr>'; };
   const personRow=p=>'<tr><td>'+P[p]+'</td><td class="money">'+mUSD((rep.sales_net||{})[p]||0)+'</td><td class="money">'+mUSD((rep.machine_split||{})[p]||0)+'</td><td class="money">'+(p===rep.float_owner?mUSD(rep.cash_start_cents||0):'—')+'</td><td class="money"><b>'+mUSD((rep.entitlement||{})[p]||0)+'</b></td></tr>';
-  w.innerHTML='<div class="card pagecard">'+pageHead(esc(s.name||('Show #'+s.id))+' — report','sr_x')+
+  w.innerHTML='<div class="card pagecard">'+pageHead((s.name||('Show #'+s.id))+' — report','sr_x')+
     '<div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:6px">'+
       '<div class="ss-kpi"><span>Profit</span><b>'+mUSD(rep.profit_cents||0)+'</b></div>'+
       '<div class="ss-kpi"><span>Machine</span><b>'+mUSD(rep.machine_total_cents||0)+'</b></div>'+
@@ -314,19 +394,32 @@ async function openShowReport(showId){
     (entries.length?entries.map(e=>{ const neg=e.direction===-1;
       return '<div class="ordcard"><div class="ordhead"><b style="color:'+(neg?'#ff6a5c':'#34c759')+'">'+(neg?'−':'+')+mUSD(e.amount_cents)+'</b><span class="ordstatus '+(neg?'s_canceled':'s_complete')+'">'+esc(F[e.pay_form]||e.pay_form)+'</span></div>'+
       '<div class="muted">'+esc(P[e.person]||e.person)+' · '+new Date(e.created_at).toLocaleString()+'</div>'+
-      (e.photo_url?('<div class="row" style="margin-top:8px"><button class="sm ghost" onclick="openPhotoViewer('+esc(JSON.stringify(photos)).replace(/"/g,'&quot;')+','+photos.indexOf(e.photo_url)+')">View photo</button></div>'):'')+'</div>'; }).join(''):'<div class="muted">No entries.</div>')+
+      (e.photo_url?('<div class="row" style="margin-top:8px"><button class="sm ghost sr-view" data-pv="'+photos.indexOf(e.photo_url)+'">View photo</button></div>'):'')+'</div>'; }).join(''):'<div class="muted">No entries.</div>')+
     (photos.length?('<div class="acct-sec" style="margin-top:14px">'+svgIcon('image')+' All item photos</div><div class="ss-gal">'+photos.map((u,i)=>'<img loading="lazy" src="'+esc(u)+'" data-pv="'+i+'"/>').join('')+'</div>'):'')+
     '</div>';
   w.querySelector('#sr_x').onclick=close;
   const gal=w.querySelector('#sr_gal'); if(gal)gal.onclick=()=>openPhotoViewer(photos,0);
+  w.querySelectorAll('.sr-view').forEach(b=>b.onclick=()=>openPhotoViewer(photos,+b.dataset.pv));
   w.querySelectorAll('.ss-gal img').forEach(img=>img.onclick=()=>openPhotoViewer(photos,+img.dataset.pv));
-  w.querySelector('#sr_pdf').onclick=async()=>{
+  // "Open PDF" fires straight from the tap (popup blockers allow it). Building happens on a
+  // first tap, saves the link in place, then asks for one more tap to open — never a
+  // window.open after long awaits, never a duplicate upload on a double-tap.
+  const pb=w.querySelector('#sr_pdf');
+  let pdfBusy=false;
+  pb.onclick=async()=>{
     if(r.pdf_url){ openUrl(r.pdf_url); return; }
-    toast('Building PDF…');
-    try{ const blob=await ssMakePdf(s, entries, rep);
+    if(pdfBusy)return; pdfBusy=true; pb.disabled=true; pb.textContent='Building PDF…';
+    try{
+      const blob=await ssMakePdf(s, entries, rep);
       const up=await uploadMedia(new File([blob],'show-'+s.id+'-report.pdf',{type:'application/pdf'}));
-      if(up&&up.url){ const c2=await ssCreds(); if(c2)await sbRpc('show_report_set_pdf',Object.assign({p_show:s.id,p_pdf:up.url},c2)); openUrl(up.url); }
-    }catch(e){ toast('Could not build the PDF on this device.'); }
+      if(up&&up.url){
+        const c2=await ssCreds(); if(c2)await sbRpc('show_report_set_pdf',Object.assign({p_show:s.id,p_pdf:up.url},c2));
+        r.pdf_url=up.url;
+        pb.disabled=false; pb.innerHTML=svgIcon('download')+' Open PDF';
+        toast('PDF is ready — tap Open PDF.');
+      } else { pb.disabled=false; pb.innerHTML=svgIcon('download')+' Make PDF'; toast('Could not upload the PDF — try again.'); }
+    }catch(e){ pb.disabled=false; pb.innerHTML=svgIcon('download')+' Make PDF'; toast('Could not build the PDF on this device.'); }
+    pdfBusy=false;
   };
 }
 

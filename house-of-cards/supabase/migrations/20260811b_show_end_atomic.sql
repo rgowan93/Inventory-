@@ -1,0 +1,14 @@
+-- Documentation copy of the applied migration "show_end_atomic_and_device_pruning".
+--
+-- Concurrency hardening for Show Stats (found by adversarial audit):
+-- 1) show_entry_add / show_entry_void / show_tally_bump take a FOR SHARE row lock on the
+--    live show and re-check status under it, so writes serialize against show_end.
+-- 2) show_end takes FOR UPDATE, returns 'ended' if already finalized (two devices can no
+--    longer both finalize), and verifies an optional client fingerprint of the snapshot the
+--    report was computed from — p_entry_count, p_amount_sum, p_max_id (newest entry id) and
+--    p_tallies (exact jsonb) — against live data under the lock. Any mismatch returns
+--    'changed' so the client re-snapshots and recomputes; a stale money split can never be
+--    stored. Old param shape still works (fingerprint params default to null = skip check).
+-- 3) staff_device_register prunes device slots unseen for 60+ days before counting the
+--    10-device cap, so browsers that reset localStorage can't permanently brick a phone.
+--    staff_devices.last_seen now defaults to now().

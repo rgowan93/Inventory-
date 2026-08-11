@@ -20,6 +20,6 @@
   ],
   "screenshots": [
     { "src": "screenshot-home.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Shows, collection & marketplace" },
-    { "src": "screenshot-pay.png", "sizes": "780x3016", "type": "image/png", "form_factor": "narrow", "label": "Pay at the show" }
+    { "src": "screenshot-pay.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Pay at the show" }
   ]
 }

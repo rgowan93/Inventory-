@@ -64,7 +64,7 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .wall{min-height:100%;padding:30px 18px 60px;max-width:760px;margin:0 auto;
   background:radial-gradient(1200px 500px at 50% -120px,rgba(244,180,0,.16),transparent 70%),linear-gradient(180deg,#0d0e14,#15121d 60%,#0d0e14)}
 .wall-hero{text-align:center;margin-bottom:26px}
-.wall-logo{width:118px;height:118px;object-fit:contain;border-radius:22px;background:#000;border:3px solid var(--gold);
+.wall-logo{width:118px;height:118px;object-fit:contain;border-radius:22px;background:#fff;padding:6px;border:3px solid var(--gold);
   box-shadow:0 0 0 6px rgba(244,180,0,.12),0 14px 40px rgba(0,0,0,.6);margin-bottom:14px}
 .wall-title{font-size:clamp(30px,8vw,44px);font-weight:900;letter-spacing:2px;line-height:1;cursor:pointer;user-select:none;
   text-shadow:0 3px 18px rgba(0,0,0,.6)}
@@ -217,7 +217,7 @@ a{color:var(--gold)}
 .app{max-width:1100px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;transition:margin-left .22s ease}
 header.top{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg2);
   border-bottom:4px solid #000;position:sticky;top:0;z-index:30}
-header.top img{height:46px;width:46px;object-fit:contain;border-radius:10px;background:#000;border:2px solid var(--gold)}
+header.top img{height:46px;width:46px;object-fit:contain;border-radius:10px;background:#fff;padding:2px;border:2px solid var(--gold)}
 header.top .ttl{font-size:20px;font-weight:900;letter-spacing:.5px}
 header.top .ttl b{color:var(--gold)}
 header.top .who{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px}
@@ -528,7 +528,7 @@ button.sm{ border-radius:var(--r-sm); font-weight:600; }
 /* ---- auth screens: centered, branded ---- */
 .authwrap{ max-width:400px; margin:0 auto; }
 .authbrand{ text-align:center; margin:6px 0 18px; }
-.authbrand img{ width:76px; height:76px; border-radius:20px; background:#000; border:2px solid var(--gold);
+.authbrand img{ width:76px; height:76px; border-radius:20px; background:#fff; padding:4px; border:2px solid var(--gold);
   box-shadow:0 0 0 5px rgba(244,180,0,.12),0 12px 30px rgba(0,0,0,.5); }
 .authbrand .an{ font-size:22px; font-weight:800; letter-spacing:.5px; margin-top:12px; }
 .authbrand .an b{ color:var(--gold); font-weight:900; }
@@ -711,11 +711,11 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260623u"></script>
-<script src="social.js?v=20260623u"></script>
-<script src="app.js?v=20260623u"></script>
-<script src="show-math.js?v=20260623u"></script>
-<script src="show-stats.js?v=20260623u"></script>
+<script src="config.js?v=20260811a"></script>
+<script src="social.js?v=20260811a"></script>
+<script src="app.js?v=20260811a"></script>
+<script src="show-math.js?v=20260811a"></script>
+<script src="show-stats.js?v=20260811a"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */
