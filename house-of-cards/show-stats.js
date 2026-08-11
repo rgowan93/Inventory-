@@ -10,7 +10,7 @@ const SS_FORM_NAME={}; SS_FORMS.forEach(f=>SS_FORM_NAME[f[0]]=f[1]);
 const SS_PERSON_NAME={}; SS_PEOPLE.forEach(p=>SS_PERSON_NAME[p[0]]=p[1]);
 function ssCap(s){ s=String(s||''); return s.charAt(0).toUpperCase()+s.slice(1); }
 
-let _ss={ wrap:null, data:null, tab:'sales', sel:{form:null,person:null,dir:1}, photo:null, busy:false, poll:null, hold:null, winUp:null, pending:{} };
+let _ss={ wrap:null, data:null, tab:'sales', sel:{form:null,person:null,dir:1}, photo:null, amt:'', busy:false, poll:null, hold:null, winUp:null, pending:{} };
 
 async function ssCreds(){ const c=await _staffCreds(); return c; }
 /* Cached-creds-only variant for the background poll: never opens a login modal,
@@ -25,14 +25,14 @@ function openShowStats(){
   const ex=document.querySelector('.ssmodal'); if(ex)ex.remove();
   const w=document.createElement('div'); w.className='scanmodal pagewrap ssmodal'; document.body.appendChild(w);
   w.innerHTML='<div class="card pagecard">'+pageHead('Show stats','ss_x')+'<div id="ss_body"><div class="muted">Loading…</div></div></div>';
-  _ss.wrap=w; _ss.tab='sales'; _ss.sel={form:null,person:null,dir:1}; _ss.photo=null; _ss.pending={}; _ss.sig=null;
+  _ss.wrap=w; _ss.tab='sales'; _ss.sel={form:null,person:null,dir:1}; _ss.photo=null; _ss.amt=''; _ss.pending={}; _ss.sig=null;
   ssWireTallies(w);
   const close=()=>{ if(_ss.poll){ clearInterval(_ss.poll); _ss.poll=null; } ssHoldStop();
     if(_ss.winUp){ window.removeEventListener('pointerup',_ss.winUp); window.removeEventListener('pointercancel',_ss.winUp); _ss.winUp=null; }
     _ss.wrap=null; w.remove(); };
   w.querySelector('#ss_x').onclick=close;
   ssRefresh();
-  _ss.poll=setInterval(()=>ssRefresh(true), 12000);
+  _ss.poll=setInterval(()=>ssRefresh(true), 8000);   // live sync; repaints only when something changed
 }
 
 /* true while the staffer is mid-something a repaint would destroy */
@@ -55,9 +55,10 @@ async function ssRefresh(silent){
   // overlay tally bumps still in flight, so a refresh can't clobber (or double-revert) them
   if(r.tallies){ const pend=_ss.pending||{}; Object.keys(pend).forEach(b=>{ if(pend[b]) r.tallies[b]=Math.max(0,(r.tallies[b]||0)+pend[b]); }); }
   const sig=JSON.stringify([r.show,r.entries,r.tallies]);
-  // don't repaint over someone mid-entry (photo + chip picks survive a repaint, so they don't block it)
-  if(silent && ssUserBusy()){ _ss.data=r; _ss.sig=sig; return; }
-  // nothing changed since last paint → leave the screen alone (no 12s flicker)
+  // don't repaint over someone mid-entry — and do NOT record the signature, so the
+  // screen catches up on the next quiet poll (_ss.sig always describes what's painted)
+  if(silent && ssUserBusy()){ _ss.data=r; return; }
+  // nothing changed since last paint → leave the screen alone (no flicker)
   if(silent && sig===_ss.sig){ _ss.data=r; return; }
   _ss.data=r; _ss.sig=sig; ssPaint();
 }
@@ -211,13 +212,15 @@ function ssPaintSales(box, d){
       '<div class="ss-lbl">Direction</div><div class="ss-chips">'+
         '<button class="ss-chip ss-add'+(_ss.sel.dir===1?' on':'')+'" data-dir="1">+ Add (money in)</button>'+
         '<button class="ss-chip ss-sub'+(_ss.sel.dir===-1?' on':'')+'" data-dir="-1">− Subtract (money out)</button></div>'+
-      '<label class="fld"><span>Amount (USD)</span><input id="ssc_amt" type="text" inputmode="decimal" placeholder="0.00"/></label>'+
+      '<label class="fld"><span>Amount (USD)</span><input id="ssc_amt" type="text" inputmode="decimal" placeholder="0.00" value="'+esc(_ss.amt||'')+'"/></label>'+
       '<div class="row" style="gap:8px"><button class="ghost" id="ssc_photo" style="flex:1">'+svgIcon('camera')+(_ss.photo?' ✓ Photo ready — tap to retake':' Take photo (required)')+'</button></div>'+
       '<div id="ssc_prev">'+(_ss.photo?('<img class="showflyer" style="max-height:160px" src="'+esc(_ss.photo.url)+'"/><div class="row" style="margin-top:6px"><button class="sm ghost" id="ssc_pclear" style="color:#ff6a5c">✕ Remove photo</button></div>'):'')+'</div>'+
       '<div class="row" style="margin-top:10px"><button class="gold" id="ssc_save" style="flex:1">Save sale</button></div>'+
     '</div>'+
     '<div class="acct-sec" style="margin-top:14px">'+svgIcon('tag')+' This show\'s ledger ('+entries.length+')</div>'+
     '<div id="ssc_ledger">'+(entries.length?entries.map(ssEntryRow).join(''):'<div class="muted">Nothing logged yet.</div>')+'</div>';
+  // the typed amount lives in _ss.amt so chip taps, photo uploads and repaints never wipe it
+  box.querySelector('#ssc_amt').oninput=e=>{ _ss.amt=e.target.value; };
   box.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{ _ss.sel.form=b.dataset.form; ssPaint(); });
   box.querySelectorAll('[data-person]').forEach(b=>b.onclick=()=>{ _ss.sel.person=b.dataset.person; ssPaint(); });
   box.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{ _ss.sel.dir=+b.dataset.dir; ssPaint(); });
@@ -236,7 +239,7 @@ function ssPaintSales(box, d){
     const c=await ssCreds(); if(!c){ _ss.busy=false; btn.disabled=false; btn.textContent='Save sale'; return; }
     const r=await sbRpc('show_entry_add',Object.assign({p_show:d.show.id,p_form:_ss.sel.form,p_person:_ss.sel.person,p_dir:_ss.sel.dir,p_amount_cents:Math.round(amt*100),p_photo:_ss.photo.url},c));
     _ss.busy=false;
-    if(r&&r.ok){ toast('Logged '+(_ss.sel.dir===-1?'−':'+')+mUSD(Math.round(amt*100))+' ✓'); _ss.photo=null; _ss.sel={form:null,person:null,dir:1}; ssRefresh(); }
+    if(r&&r.ok){ toast('Logged '+(_ss.sel.dir===-1?'−':'+')+mUSD(Math.round(amt*100))+' ✓'); _ss.photo=null; _ss.amt=''; _ss.sel={form:null,person:null,dir:1}; ssRefresh(); }
     else { btn.disabled=false; btn.textContent='Save sale'; toast((r&&r.error)||'Could not save.'); }
   };
 }

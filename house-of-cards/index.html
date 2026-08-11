@@ -142,7 +142,7 @@ button.sm{padding:7px 10px;font-size:13px;border-radius:9px}
 .vbadge{display:inline-block;background:#2160B0;color:#fff;font-size:10px;font-weight:800;border-radius:6px;padding:0 5px;margin-left:2px}
 .sellerlink{color:var(--gold);font-weight:800;text-decoration:underline;cursor:pointer}
 .pagewrap{align-items:stretch!important;justify-content:center;padding:0!important}
-.pagecard{max-width:560px;width:100%;min-height:100dvh;border-radius:0!important;overflow:auto;padding-top:calc(env(safe-area-inset-top) + 12px)!important}
+.pagecard{max-width:560px;width:100%;min-height:100dvh;border-radius:0!important;overflow:auto;overscroll-behavior:contain;padding-top:calc(env(safe-area-inset-top) + 12px)!important}
 .pagehead{position:sticky;top:0;background:linear-gradient(180deg,#1c1e2b,#15161f);display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;margin:0 0 10px;z-index:6;border-bottom:1px solid #2c2f42}
 .pageclose{background:var(--red);color:#fff;border:none;box-shadow:none;border-radius:10px;padding:9px 16px;font-weight:900;font-size:14px}
 .qtystep{display:flex;align-items:center;gap:6px;margin-right:6px}
@@ -288,7 +288,7 @@ tr:hover td{background:#1c1f2b}
 .barcode-label .nm{font-size:9px;font-weight:800;line-height:1.12;margin-bottom:2px;font-family:Arial;height:34px;overflow:hidden}
 .barcode-label .id{font-size:9px;letter-spacing:1px;font-family:monospace}
 .banner{background:var(--blue-d);border:2px solid #000;border-radius:10px;padding:10px 12px;color:var(--cream);font-size:13px}
-.scanmodal{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px}
+.scanmodal{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;overscroll-behavior:contain}
 .scanmodal video{width:min(92vw,520px);border:3px solid var(--gold);border-radius:14px;background:#000}
 .scanmodal .hint{color:var(--cream);margin:12px;font-weight:800;text-align:center;max-width:520px}
 .pickrow{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #2a2e40}
@@ -711,11 +711,11 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260811b"></script>
-<script src="social.js?v=20260811b"></script>
-<script src="app.js?v=20260811b"></script>
-<script src="show-math.js?v=20260811b"></script>
-<script src="show-stats.js?v=20260811b"></script>
+<script src="config.js?v=20260811c"></script>
+<script src="social.js?v=20260811c"></script>
+<script src="app.js?v=20260811c"></script>
+<script src="show-math.js?v=20260811c"></script>
+<script src="show-stats.js?v=20260811c"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */

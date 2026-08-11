@@ -2,7 +2,7 @@
    Network-first for our own files (so the newest code always wins when online),
    with a cache fallback for offline. Cross-origin requests (Supabase, Square,
    card images) are left untouched so auth/payments/data are never cached. */
-const CACHE = 'hoc-v4';
+const CACHE = 'hoc-v5';
 
 self.addEventListener('install', () => { self.skipWaiting(); });
 
