@@ -27,12 +27,27 @@ function openShowStats(){
   w.innerHTML='<div class="card pagecard">'+pageHead('Show stats','ss_x')+'<div id="ss_body"><div class="muted">Loading…</div></div></div>';
   _ss.wrap=w; _ss.tab='sales'; _ss.sel={form:null,person:null,dir:1}; _ss.photo=null; _ss.amt=''; _ss.pending={}; _ss.sig=null;
   ssWireTallies(w);
+  ssNoPull(w);
   const close=()=>{ if(_ss.poll){ clearInterval(_ss.poll); _ss.poll=null; } ssHoldStop();
     if(_ss.winUp){ window.removeEventListener('pointerup',_ss.winUp); window.removeEventListener('pointercancel',_ss.winUp); _ss.winUp=null; }
     _ss.wrap=null; w.remove(); };
   w.querySelector('#ss_x').onclick=close;
   ssRefresh();
   _ss.poll=setInterval(()=>ssRefresh(true), 8000);   // live sync; repaints only when something changed
+}
+
+/* Hard-block pull-to-refresh while Show Stats is open: when the page is already at the
+   top, a further downward drag is only the browser's refresh gesture — swallow it.
+   (Some phones ignore the CSS overscroll rules, so this is enforced in JS too.) */
+function ssNoPull(w){
+  let y0=0;
+  w.addEventListener('touchstart',e=>{ if(e.touches&&e.touches.length)y0=e.touches[0].clientY; },{passive:true});
+  w.addEventListener('touchmove',e=>{
+    if(!e.touches||!e.touches.length)return;
+    const card=w.querySelector('.pagecard');
+    const atTop=!card||card.scrollTop<=0;
+    if(atTop && (e.touches[0].clientY-y0)>0){ try{ e.preventDefault(); }catch(_){} }
+  },{passive:false});
 }
 
 /* true while the staffer is mid-something a repaint would destroy */
@@ -522,8 +537,36 @@ function ssLoadJsPdf(){ return new Promise((res,rej)=>{ if(window.jspdf&&window.
   const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
   s.onload=()=>res(); s.onerror=()=>rej(new Error('Could not load the PDF library.')); document.head.appendChild(s); }); }
 
+/* Download a sale photo and re-encode it as a reasonably-sized JPEG for the PDF. */
+function ssFetchPhoto(url){
+  return new Promise(resolve=>{
+    const done=v=>resolve(v);
+    try{
+      const i=new Image(); i.crossOrigin='anonymous';
+      const timer=setTimeout(()=>done(null),15000);
+      i.onload=()=>{ clearTimeout(timer);
+        try{
+          const maxW=1100, sc=Math.min(1, maxW/i.naturalWidth);
+          const c=document.createElement('canvas');
+          c.width=Math.max(1,Math.round(i.naturalWidth*sc)); c.height=Math.max(1,Math.round(i.naturalHeight*sc));
+          c.getContext('2d').drawImage(i,0,0,c.width,c.height);
+          done({ data:c.toDataURL('image/jpeg',0.82), w:c.width, h:c.height });
+        }catch(e){ done(null); } };
+      i.onerror=()=>{ clearTimeout(timer); done(null); };
+      i.src=url;
+    }catch(e){ done(null); }
+  });
+}
+
 async function ssMakePdf(show, entries, rep){
   await ssLoadJsPdf();
+  // pull the sale photos down first so the appendix can embed them
+  const withPhotos=entries.filter(e=>e.photo_url);
+  let photoImgs=[];
+  if(withPhotos.length){
+    toast('Adding '+withPhotos.length+' photo'+(withPhotos.length>1?'s':'')+' to the PDF…');
+    photoImgs=await Promise.all(withPhotos.map(e=>ssFetchPhoto(e.photo_url)));
+  }
   const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'});
   const P=SS_PERSON_NAME, F=SS_FORM_NAME;
   const $=c=>'$'+((c||0)/100).toFixed(2);
@@ -575,6 +618,32 @@ async function ssMakePdf(show, entries, rep){
     doc.text((ix+1)+'. '+t,14,y);
     if(e.photo_url){ doc.setTextColor(30,80,200); doc.textWithLink('[View photo]',168,y,{url:e.photo_url}); }
     y+=5.2; });
+
+  // ---- photo appendix: every sale image, labeled for printing ----
+  if(withPhotos.length){
+    H('Item photos');
+    withPhotos.forEach((e,ix)=>{
+      const label=(P[e.person]||e.person)+'   ·   '+new Date(e.created_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'   ·   '+(e.direction===-1?'-':'+')+$(e.amount_cents)+'   ·   '+(F[e.pay_form]||e.pay_form);
+      const im=photoImgs[ix];
+      if(!im){ room(7); doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(170,40,40);
+        doc.text(label+'   (photo could not be loaded — use the ledger link)',14,y); y+=7; return; }
+      const maxWmm=130, maxHmm=95;
+      const s=Math.min(maxWmm/im.w, maxHmm/im.h);
+      const wmm=im.w*s, hmm=im.h*s;
+      if(y+hmm+18>282){ doc.addPage(); y=16; }
+      const ix0=(210-wmm)/2, iy0=y+6;
+      doc.addImage(im.data,'JPEG',ix0,iy0,wmm,hmm);
+      doc.setDrawColor(0,0,0); doc.setLineWidth(0.35); doc.rect(ix0,iy0,wmm,hmm);   // image border
+      // white label box sitting on the image's top border, bold black text
+      doc.setFont('helvetica','bold'); doc.setFontSize(10.5);
+      const tw=Math.min(182, doc.getTextWidth(label)+8), bh=8, bx=(210-tw)/2, by=iy0-bh/2;
+      doc.setFillColor(255,255,255); doc.rect(bx,by,tw,bh,'FD');
+      doc.setTextColor(0,0,0);
+      doc.text(label,105,by+bh/2+1.4,{align:'center',maxWidth:tw-6});
+      y=iy0+hmm+9;
+    });
+  }
+
   y+=3; L('Generated '+new Date().toLocaleString()+' · houseofcardsftwalton.com',{size:8,color:[130,130,130]});
   return doc.output('blob');
 }
