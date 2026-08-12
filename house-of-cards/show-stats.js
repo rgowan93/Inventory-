@@ -6,11 +6,13 @@
 const SS_FORMS=[['cash','Cash'],['cashapp','Cash App'],['venmo','Venmo'],['paypal','PayPal'],['zelle','Zelle'],['square','Square']];
 const SS_PEOPLE=[['reggie','Reggie'],['manny','Manny'],['hailey','Hailey']];
 const SS_BOXES=[['cash','Cash'],['cashapp','Cash App'],['venmo','Venmo'],['paypal','PayPal'],['square','Square'],['zelle_reggie','Zelle — Reggie'],['zelle_manny','Zelle — Manny'],['zelle_hailey','Zelle — Hailey']];
-const SS_FORM_NAME={}; SS_FORMS.forEach(f=>SS_FORM_NAME[f[0]]=f[1]);
+const SS_FORM_NAME={}; SS_FORMS.forEach(f=>SS_FORM_NAME[f[0]]=f[1]); SS_FORM_NAME.trade='Trade';
 const SS_PERSON_NAME={}; SS_PEOPLE.forEach(p=>SS_PERSON_NAME[p[0]]=p[1]);
 function ssCap(s){ s=String(s||''); return s.charAt(0).toUpperCase()+s.slice(1); }
 
-let _ss={ wrap:null, data:null, tab:'sales', sel:{form:null,person:null,dir:1}, photo:null, amt:'', busy:false, poll:null, hold:null, winUp:null, pending:{} };
+let _ss={ wrap:null, data:null, tab:'sales', sel:{form:null,person:null,dir:1}, photo:null, amt:'', busy:false, poll:null, hold:null, winUp:null, pending:{},
+  comp:{ forms:[], lines:{}, tradePersons:[], tradeVals:{} } };
+function ssCompReset(){ _ss.comp={ forms:[], lines:{}, tradePersons:[], tradeVals:{} }; _ss.amt=''; _ss.sel={form:null,person:null,dir:1}; }
 
 async function ssCreds(){ const c=await _staffCreds(); return c; }
 /* Cached-creds-only variant for the background poll: never opens a login modal,
@@ -25,7 +27,7 @@ function openShowStats(){
   const ex=document.querySelector('.ssmodal'); if(ex)ex.remove();
   const w=document.createElement('div'); w.className='scanmodal pagewrap ssmodal'; document.body.appendChild(w);
   w.innerHTML='<div class="card pagecard">'+pageHead('Show stats','ss_x')+'<div id="ss_body"><div class="muted">Loading…</div></div></div>';
-  _ss.wrap=w; _ss.tab='sales'; _ss.sel={form:null,person:null,dir:1}; _ss.photo=null; _ss.amt=''; _ss.pending={}; _ss.sig=null;
+  _ss.wrap=w; _ss.tab='sales'; _ss.photo=null; _ss.pending={}; _ss.sig=null; ssCompReset();
   ssWireTallies(w);
   ssNoPull(w);
   const close=()=>{ if(_ss.poll){ clearInterval(_ss.poll); _ss.poll=null; } ssHoldStop();
@@ -54,8 +56,10 @@ function ssNoPull(w){
 function ssUserBusy(){
   if(_ss.hold)return true;                                        // finger down on a tally box
   const w=_ss.wrap; if(!w)return false;
-  const amt=w.querySelector('#ssc_amt'); if(amt&&amt.value)return true;   // typing a sale amount
+  const inputs=w.querySelectorAll('input');                       // anything typed anywhere (sale amount, split lines, trade values, start form)
+  for(let i=0;i<inputs.length;i++){ if(inputs[i].value)return true; }
   const sf=w.querySelector('#ss_startform'); if(sf&&sf.children.length)return true; // start-show form open
+  if(_ss.comp&&(_ss.comp.forms.length>1||_ss.comp.tradePersons.length))return true; // building a split/trade
   const a=document.activeElement;
   if(a&&w.contains(a)&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))return true;     // focused in any field
   return false;
@@ -190,10 +194,13 @@ function ssPaintLive(body, d){
   const s=d.show, entries=d.entries||[], tallies=d.tallies||{};
   const started=new Date(s.started_at);
   const net={}; SS_FORMS.forEach(f=>net[f[0]]=0);
-  entries.forEach(e=>{ net[e.pay_form]+= (e.direction===-1?-1:1)*e.amount_cents; });
+  let tradeTotal=0;
+  entries.forEach(e=>{ const sg=(e.direction===-1?-1:1)*e.amount_cents;
+    if(e.pay_form==='trade'){ tradeTotal+=sg; return; }               // trades are goods, not money
+    if(net[e.pay_form]!=null)net[e.pay_form]+=sg; });
   const drawer=(s.cash_start_cents||0)+net.cash;
   const tallyTotal=SS_BOXES.reduce((a,b)=>a+(tallies[b[0]]||0),0)*1000;
-  const salesTotal=entries.reduce((a,e)=>a+(e.direction===-1?-1:1)*e.amount_cents,0);
+  const salesTotal=SS_FORMS.reduce((a,f)=>a+net[f[0]],0);
 
   body.innerHTML=
     '<div class="card"><div class="ordhead"><b>'+esc(s.name||'Live show')+'</b><span class="ordstatus s_paid">LIVE</span></div>'+
@@ -202,6 +209,7 @@ function ssPaintLive(body, d){
         '<div class="ss-kpi"><span>Sales</span><b>'+mUSD(salesTotal)+'</b></div>'+
         '<div class="ss-kpi"><span>Machine</span><b>'+mUSD(tallyTotal)+'</b></div>'+
         '<div class="ss-kpi"><span>Drawer</span><b>'+mUSD(drawer)+'</b></div>'+
+        (tradeTotal?('<div class="ss-kpi"><span>Trade</span><b>'+mUSD(tradeTotal)+'</b></div>'):'')+
       '</div></div>'+
     '<div class="subtabs" style="justify-content:center">'+
       '<button id="ss_tab_sales" class="'+(_ss.tab==='sales'?'on':'')+'">Sales</button>'+
@@ -216,32 +224,82 @@ function ssPaintLive(body, d){
   else ssPaintSales(body.querySelector('#ss_tabbody'), d);
 }
 
+function ssMoney(v){ const a=parseFloat(String(v||'').replace(/[^0-9.]/g,'')); return (a>0)?Math.round(a*100):0; }
+
 function ssPaintSales(box, d){
   const entries=d.entries||[];
+  const comp=_ss.comp;
   const chip=(cls,key,label,sel)=>'<button class="ss-chip'+(sel?' on':'')+'" data-'+cls+'="'+key+'">'+label+'</button>';
+  const single = comp.forms.length===1 && comp.forms[0]!=='trade';
+  let inner='';
+  inner+='<div class="ss-lbl">Payment — tap all that apply</div><div class="ss-chips">'+
+    SS_FORMS.concat([['trade','Trade']]).map(f=>chip('form',f[0],f[1],comp.forms.indexOf(f[0])>=0)).join('')+'</div>';
+  if(single || !comp.forms.length){
+    // classic one-line sale — shown even before a payment is picked, so entering
+    // the amount (or person) first never gets lost by picking things out of order
+    if(!comp.forms.length) inner+='<div class="muted" style="font-size:12px;margin:-4px 0 8px">Tap more than one payment to split, or Trade for trade-ins.</div>';
+    inner+='<div class="ss-lbl">Who gets it / spent it</div><div class="ss-chips">'+SS_PEOPLE.map(p=>chip('person',p[0],p[1],_ss.sel.person===p[0])).join('')+'</div>'+
+      (comp.forms[0]==='zelle'?'<div class="muted" style="font-size:12px;margin:-4px 0 8px">Zelle goes to that person\'s own Zelle account.</div>':'')+
+      '<label class="fld"><span>Amount (USD)</span><input id="ssc_amt" type="text" inputmode="decimal" placeholder="0.00" value="'+esc(_ss.amt||'')+'"/></label>';
+  } else {
+    // split transaction: one block per selected payment form, each with its own person + amount
+    comp.forms.forEach(f=>{
+      if(f!=='trade'){
+        const ln=comp.lines[f]||(comp.lines[f]={person:null,amt:''});
+        inner+='<div class="ss-lineblk"><div class="ss-lbl">'+SS_FORM_NAME[f]+' — who &amp; how much</div>'+
+          '<div class="ss-chips">'+SS_PEOPLE.map(p=>'<button class="ss-chip'+(ln.person===p[0]?' on':'')+'" data-lp="'+f+':'+p[0]+'">'+p[1]+'</button>').join('')+'</div>'+
+          '<label class="fld"><span>'+SS_FORM_NAME[f]+' amount (USD)</span><input class="ssl-amt" data-f="'+f+'" type="text" inputmode="decimal" placeholder="0.00" value="'+esc(ln.amt||'')+'"/></label></div>';
+      } else {
+        inner+='<div class="ss-lineblk"><div class="ss-lbl">Trade — who is trading? (tap all that apply)</div>'+
+          '<div class="ss-chips">'+SS_PEOPLE.map(p=>'<button class="ss-chip'+(comp.tradePersons.indexOf(p[0])>=0?' on':'')+'" data-tp="'+p[0]+'">'+p[1]+'</button>').join('')+
+          '</div>'+
+          comp.tradePersons.map(p=>'<label class="fld"><span>'+SS_PERSON_NAME[p]+'’s value toward the trade (USD)</span><input class="ssl-tval" data-p="'+p+'" type="text" inputmode="decimal" placeholder="0.00" value="'+esc(comp.tradeVals[p]||'')+'"/></label>').join('')+
+          (comp.tradePersons.length?'':'<div class="muted" style="font-size:12px;margin:0 0 8px">Tap each person putting value into the trade.</div>')+
+          '</div>';
+      }
+    });
+  }
+  inner+='<div class="ss-lbl">Direction</div><div class="ss-chips">'+
+    '<button class="ss-chip ss-add'+(_ss.sel.dir===1?' on':'')+'" data-dir="1">+ Add (money in)</button>'+
+    '<button class="ss-chip ss-sub'+(_ss.sel.dir===-1?' on':'')+'" data-dir="-1">− Subtract (money out)</button></div>'+
+    '<div class="row" style="gap:8px"><button class="ghost" id="ssc_photo" style="flex:2">'+svgIcon('camera')+(_ss.photo?' ✓ Photo ready — tap to retake':' Take photo (required)')+'</button>'+
+    '<button class="ghost" id="ssc_pick" style="flex:1">'+svgIcon('image')+' Gallery</button></div>'+
+    '<div id="ssc_prev">'+ssPhotoPrevHtml()+'</div>'+
+    '<div class="row" style="margin-top:10px"><button class="gold" id="ssc_save" style="flex:1">Save sale</button></div>';
   box.innerHTML=
-    '<div class="card">'+
-      '<div class="ss-lbl">Payment</div><div class="ss-chips">'+SS_FORMS.map(f=>chip('form',f[0],f[1],_ss.sel.form===f[0])).join('')+'</div>'+
-      '<div class="ss-lbl">Who gets it / spent it</div><div class="ss-chips">'+SS_PEOPLE.map(p=>chip('person',p[0],p[1],_ss.sel.person===p[0])).join('')+'</div>'+
-      (_ss.sel.form==='zelle'?'<div class="muted" style="font-size:12px;margin:-4px 0 8px">Zelle goes to that person\'s own Zelle account.</div>':'')+
-      '<div class="ss-lbl">Direction</div><div class="ss-chips">'+
-        '<button class="ss-chip ss-add'+(_ss.sel.dir===1?' on':'')+'" data-dir="1">+ Add (money in)</button>'+
-        '<button class="ss-chip ss-sub'+(_ss.sel.dir===-1?' on':'')+'" data-dir="-1">− Subtract (money out)</button></div>'+
-      '<label class="fld"><span>Amount (USD)</span><input id="ssc_amt" type="text" inputmode="decimal" placeholder="0.00" value="'+esc(_ss.amt||'')+'"/></label>'+
-      '<div class="row" style="gap:8px"><button class="ghost" id="ssc_photo" style="flex:2">'+svgIcon('camera')+(_ss.photo?' ✓ Photo ready — tap to retake':' Take photo (required)')+'</button>'+
-      '<button class="ghost" id="ssc_pick" style="flex:1">'+svgIcon('image')+' Gallery</button></div>'+
-      '<div id="ssc_prev">'+ssPhotoPrevHtml()+'</div>'+
-      '<div class="row" style="margin-top:10px"><button class="gold" id="ssc_save" style="flex:1">Save sale</button></div>'+
-    '</div>'+
+    '<div class="card">'+inner+'</div>'+
     '<div class="acct-sec" style="margin-top:14px">'+svgIcon('tag')+' This show\'s ledger ('+entries.length+')</div>'+
-    '<div id="ssc_ledger">'+(entries.length?entries.map(ssEntryRow).join(''):'<div class="muted">Nothing logged yet.</div>')+'</div>';
-  // the typed amount lives in _ss.amt so chip taps, photo uploads and repaints never wipe it
-  box.querySelector('#ssc_amt').oninput=e=>{ _ss.amt=e.target.value; };
-  box.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{ _ss.sel.form=b.dataset.form; ssPaint(); });
+    '<div id="ssc_ledger">'+ssLedgerHtml(entries)+'</div>';
+
+  // everything typed lives in _ss.comp/_ss.amt so chip taps, photo uploads and repaints never wipe it
+  { const a=box.querySelector('#ssc_amt'); if(a)a.oninput=e=>{ _ss.amt=e.target.value; }; }
+  box.querySelectorAll('.ssl-amt').forEach(i=>i.oninput=e=>{ (comp.lines[i.dataset.f]||(comp.lines[i.dataset.f]={person:null,amt:''})).amt=e.target.value; });
+  box.querySelectorAll('.ssl-tval').forEach(i=>i.oninput=e=>{ comp.tradeVals[i.dataset.p]=e.target.value; });
+  box.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.form, ix=comp.forms.indexOf(k);
+    const wasSingle = comp.forms.length===1 && comp.forms[0]!=='trade';
+    if(ix>=0){ comp.forms.splice(ix,1); }
+    else {
+      if(wasSingle){ // carry the classic person+amount into the split line for the first form
+        const f0=comp.forms[0]; const ln=comp.lines[f0]||(comp.lines[f0]={person:null,amt:''});
+        if(_ss.sel.person&&!ln.person)ln.person=_ss.sel.person; if(_ss.amt&&!ln.amt)ln.amt=_ss.amt;
+      }
+      comp.forms.push(k);
+    }
+    if(comp.forms.length===1 && comp.forms[0]!=='trade'){ // back to classic: carry the line back
+      const f0=comp.forms[0], ln=comp.lines[f0];
+      if(ln){ if(ln.person)_ss.sel.person=ln.person; if(ln.amt)_ss.amt=ln.amt; }
+    }
+    ssPaint();
+  });
   box.querySelectorAll('[data-person]').forEach(b=>b.onclick=()=>{ _ss.sel.person=b.dataset.person; ssPaint(); });
+  box.querySelectorAll('[data-lp]').forEach(b=>b.onclick=()=>{ const kv=b.dataset.lp.split(':');
+    (comp.lines[kv[0]]||(comp.lines[kv[0]]={person:null,amt:''})).person=kv[1]; ssPaint(); });
+  box.querySelectorAll('[data-tp]').forEach(b=>b.onclick=()=>{ const p=b.dataset.tp, ix=comp.tradePersons.indexOf(p);
+    if(ix>=0)comp.tradePersons.splice(ix,1); else comp.tradePersons.push(p); ssPaint(); });
   box.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{ _ss.sel.dir=+b.dataset.dir; ssPaint(); });
   // photo flow updates ONLY the photo button + preview — it never repaints the form,
-  // so the typed amount and selected chips physically cannot be cleared by it
+  // so typed amounts and selected chips physically cannot be cleared by it
   const pickPhoto=(useCamera)=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; if(useCamera)inp.capture='environment';
     inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading photo…'); const up=await uploadMedia(f);
       if(!up){ toast('Photo upload failed — try again.'); return; }
@@ -250,18 +308,51 @@ function ssPaintSales(box, d){
   box.querySelector('#ssc_photo').onclick=()=>pickPhoto(true);
   box.querySelector('#ssc_pick').onclick=()=>pickPhoto(false);
   ssPhotoPaint();
+
   box.querySelector('#ssc_save').onclick=async()=>{
     if(_ss.busy)return;
-    const amt=parseFloat((box.querySelector('#ssc_amt').value||'').replace(/[^0-9.]/g,''));
-    if(!_ss.sel.form){ toast('Pick the payment type.'); return; }
-    if(!_ss.sel.person){ toast('Pick the person.'); return; }
-    if(!(amt>0)){ toast('Enter the amount.'); return; }
+    if(!comp.forms.length){ toast('Pick the payment type.'); return; }
+    const lines=[];
+    if(single){
+      const cents=ssMoney(box.querySelector('#ssc_amt')&&box.querySelector('#ssc_amt').value);
+      if(!_ss.sel.person){ toast('Pick the person.'); return; }
+      if(!cents){ toast('Enter the amount.'); return; }
+      lines.push({form:comp.forms[0],person:_ss.sel.person,amount_cents:cents});
+    } else {
+      for(const f of comp.forms){
+        if(f!=='trade'){
+          const ln=comp.lines[f]||{};
+          if(!ln.person){ toast('Pick the person for '+SS_FORM_NAME[f]+'.'); return; }
+          const cents=ssMoney(ln.amt);
+          if(!cents){ toast('Enter the '+SS_FORM_NAME[f]+' amount.'); return; }
+          lines.push({form:f,person:ln.person,amount_cents:cents});
+        } else {
+          if(!comp.tradePersons.length){ toast('Pick who is trading.'); return; }
+          for(const p of comp.tradePersons){
+            const cents=ssMoney(comp.tradeVals[p]);
+            if(!cents){ toast('Enter '+SS_PERSON_NAME[p]+'’s trade value.'); return; }
+            lines.push({form:'trade',person:p,amount_cents:cents});
+          }
+        }
+      }
+    }
     if(!_ss.photo){ toast('Take a photo of what was sold or bought.'); return; }
     _ss.busy=true; const btn=box.querySelector('#ssc_save'); btn.disabled=true; btn.textContent='Saving…';
     const c=await ssCreds(); if(!c){ _ss.busy=false; btn.disabled=false; btn.textContent='Save sale'; return; }
-    const r=await sbRpc('show_entry_add',Object.assign({p_show:d.show.id,p_form:_ss.sel.form,p_person:_ss.sel.person,p_dir:_ss.sel.dir,p_amount_cents:Math.round(amt*100),p_photo:_ss.photo.url},c));
+    let r;
+    if(lines.length===1){
+      r=await sbRpc('show_entry_add',Object.assign({p_show:d.show.id,p_form:lines[0].form,p_person:lines[0].person,p_dir:_ss.sel.dir,p_amount_cents:lines[0].amount_cents,p_photo:_ss.photo.url},c));
+    } else {
+      // one atomic transaction: all lines land together or not at all
+      r=await sbRpc('show_txn_add',Object.assign({p_show:d.show.id,p_dir:_ss.sel.dir,p_photo:_ss.photo.url,p_lines:lines},c));
+    }
     _ss.busy=false;
-    if(r&&r.ok){ toast('Logged '+(_ss.sel.dir===-1?'−':'+')+mUSD(Math.round(amt*100))+' ✓'); _ss.photo=null; _ss.amt=''; _ss.sel={form:null,person:null,dir:1}; ssRefresh(); }
+    if(r&&r.ok){
+      const money=lines.filter(l=>l.form!=='trade').reduce((a,l)=>a+l.amount_cents,0);
+      const trade=lines.filter(l=>l.form==='trade').reduce((a,l)=>a+l.amount_cents,0);
+      toast('Logged '+(_ss.sel.dir===-1?'−':'+')+mUSD(money)+(trade?(' + '+mUSD(trade)+' trade'):'')+' ✓');
+      _ss.photo=null; ssCompReset(); ssRefresh();
+    }
     else { btn.disabled=false; btn.textContent='Save sale'; toast((r&&r.error)||'Could not save.'); }
   };
 }
@@ -276,6 +367,39 @@ function ssPhotoPaint(){
   if(btn)btn.innerHTML=svgIcon('camera')+(_ss.photo?' ✓ Photo ready — tap to retake':' Take photo (required)');
   if(prev){ prev.innerHTML=ssPhotoPrevHtml();
     const pc=prev.querySelector('#ssc_pclear'); if(pc)pc.onclick=()=>{ _ss.photo=null; ssPhotoPaint(); }; }
+}
+
+/* Ledger: split transactions render as ONE card with their parts listed. */
+function ssLedgerHtml(entries){
+  if(!entries.length)return '<div class="muted">Nothing logged yet.</div>';
+  const groups=[]; const byG={};
+  entries.forEach(e=>{ const g=e.txn_group||('single-'+e.id);
+    if(!byG[g]){ byG[g]={key:e.txn_group||null,items:[]}; groups.push(byG[g]); }
+    byG[g].items.push(e); });
+  return groups.map(g=>(g.items.length===1?ssEntryRow(g.items[0]):ssGroupRow(g))).join('');
+}
+
+function ssGroupRow(g){
+  const items=g.items, neg=items[0].direction===-1;
+  const money=items.filter(i=>i.pay_form!=='trade').reduce((a,i)=>a+i.amount_cents,0);
+  const trade=items.filter(i=>i.pay_form==='trade').reduce((a,i)=>a+i.amount_cents,0);
+  const head=(money?((neg?'−':'+')+mUSD(money)):'')+(trade?((money?' + ':'')+mUSD(trade)+' trade'):'');
+  const parts=items.map(i=>'<div class="muted" style="font-size:12.5px">'+esc(SS_FORM_NAME[i.pay_form]||i.pay_form)+' · '+esc(SS_PERSON_NAME[i.person]||i.person)+' · '+mUSD(i.amount_cents)+'</div>').join('');
+  return '<div class="ordcard"><div class="ordhead">'+
+      '<b style="color:'+(neg?'#ff6a5c':'#34c759')+'">'+head+'</b>'+
+      '<span class="ordstatus s_paid">SPLIT</span></div>'+
+    '<div class="muted">'+new Date(items[0].created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})+(items[0].created_by?(' · by '+esc(items[0].created_by)):'')+'</div>'+
+    parts+
+    '<div class="row" style="gap:6px;margin-top:8px">'+
+      (items[0].photo_url?('<button class="sm ghost" data-url="'+esc(items[0].photo_url)+'" onclick="openPhotoViewer([this.dataset.url],0)">View photo</button>'):'')+
+      (g.key?('<button class="sm ghost" style="color:#ff6a5c" data-g="'+esc(g.key)+'" onclick="ssVoidGroup(this.dataset.g)">Void all</button>'):'')+'</div></div>';
+}
+
+async function ssVoidGroup(gr){
+  if(!confirm('Void this whole split transaction? Every part of it is removed from the show math.'))return;
+  const c=await ssCreds(); if(!c)return;
+  const r=await sbRpc('show_txn_void',Object.assign({p_group:gr},c));
+  if(r&&r.ok){ toast('Transaction voided.'); ssRefresh(); } else toast((r&&r.error)||'Could not void.');
 }
 
 function ssEntryRow(e){
@@ -460,6 +584,7 @@ async function openShowReport(showId){
       '<div class="ss-kpi"><span>Profit</span><b>'+mUSD(rep.profit_cents||0)+'</b></div>'+
       '<div class="ss-kpi"><span>Machine</span><b>'+mUSD(rep.machine_total_cents||0)+'</b></div>'+
       '<div class="ss-kpi"><span>Entries</span><b>'+(rep.entry_count||entries.length)+'</b></div>'+
+      (rep.trades&&rep.trades.count?('<div class="ss-kpi"><span>Trades</span><b>'+mUSD(rep.trades.total_cents||0)+'</b></div>'):'')+
     '</div>'+
     (rep.verified
       ?'<div class="banner" style="background:rgba(52,199,89,.15);border:1px solid rgba(52,199,89,.4);color:#7ae0a0">✓ Every dollar is accounted for — totals verified to the cent.</div>'
@@ -468,6 +593,10 @@ async function openShowReport(showId){
     '<div class="card">'+keptLine+SS_PEOPLE.map(p=>cashLine(p[0])).join('')+
       ((rep.transfers||[]).length?('<hr class="sep">'+rep.transfers.map(t=>'<div class="ss-payline">'+svgIcon('share')+' <b>'+P[t.from]+'</b> sends <b>'+mUSD(t.amount_cents)+'</b> to <b>'+P[t.to]+'</b> <span class="muted">(via '+esc(t.via)+')</span></div>').join('')):'<hr class="sep"><div class="muted" style="text-align:center">No transfers needed — the cash box covers the whole split. 🎉</div>')+
       '<div class="muted" style="margin-top:8px;font-size:12px">Cash on hand: drawer '+mUSD(rep.drawer_end_cents||0)+' + machine '+mUSD(rep.machine_cash_cents||0)+' = '+mUSD(rep.pot_cents||0)+(rep.kept_cents?(' · '+mUSD(rep.kept_cents)+' stays in the drawer'):'')+'</div></div>'+
+    (rep.trades&&rep.trades.count?('<div class="acct-sec" style="margin-top:14px">'+svgIcon('share')+' Trades (goods, not money)</div>'+
+      '<div class="card">'+SS_PEOPLE.map(p=>{ const v=(rep.trades.by_person||{})[p[0]]||0;
+        return v?('<div class="ss-payline">'+svgIcon('tag')+' <b>'+p[1]+'</b> put <b>'+mUSD(v)+'</b> of value into trades</div>'):''; }).join('')+
+      '<div class="muted" style="font-size:12px;margin-top:6px">Trades swap goods, not money — recorded for the books, they don\'t change the cash split.</div></div>'):'')+
     (acctRows?('<div class="acct-sec" style="margin-top:14px">'+svgIcon('wallet')+' Each account — total &amp; whose money it is</div>'+
       '<div class="card" style="overflow-x:auto"><table><tr><th>Account</th><th>Total</th><th>Reggie</th><th>Manny</th><th>Hailey</th></tr>'+acctRows+'</table>'+
       '<div class="muted" style="font-size:12px;margin-top:6px">The transfers above move each person’s share out of accounts they don’t control.</div></div>'):'')+
@@ -587,6 +716,12 @@ async function ssMakePdf(show, entries, rep){
   (rep.transfers||[]).forEach(t=>L(P[t.from]+' sends '+$(t.amount_cents)+' to '+P[t.to]+'  (via '+t.via+')',{bold:true,color:[120,60,180]}));
   if(!(rep.transfers||[]).length) L('No transfers needed — the cash box covers the split.',{color:[20,130,60]});
   L('Cash on hand: drawer '+$(rep.drawer_end_cents)+' + machine '+$(rep.machine_cash_cents)+' = '+$(rep.pot_cents)+(rep.kept_cents?('   ('+$(rep.kept_cents)+' stays in the drawer)'):'')); y+=3;
+
+  if(rep.trades&&rep.trades.count){
+    H('Trades (goods, not money)');
+    SS_PEOPLE.forEach(p=>{ const v=(rep.trades.by_person||{})[p[0]]||0; if(v)L(P[p[0]]+' put '+$(v)+' of value into trades',{bold:true}); });
+    L('Trades swap goods, not money — recorded for the books, they do not change the cash split.',{size:8.5,color:[110,110,110]}); y+=3;
+  }
 
   if(rep.accounts){
     H('Each account — total and whose money it is');

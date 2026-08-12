@@ -132,5 +132,27 @@ T("fuzz: 300 random shows all verify and conserve cash", () => {
   }
 });
 
+
+T("trades: recorded per person but never move money", () => {
+  const base = { cash_start_cents: $(200), float_owner: 'reggie',
+    entries: [E('cash','hailey',1,300), E('cashapp','manny',1,120)], tallies: {} };
+  const noTrade = computeShowReport(base);
+  const withTrade = computeShowReport(Object.assign({}, base, { entries: base.entries.concat([
+    E('trade','reggie',1,80), E('trade','manny',1,45)
+  ])}));
+  eq(withTrade.verified, true, 'verified with trades');
+  eq(withTrade.trades.total_cents, $(125), 'trade total');
+  eq(withTrade.trades.by_person.reggie, $(80), 'reggie trade value');
+  eq(withTrade.trades.by_person.manny, $(45), 'manny trade value');
+  eq(withTrade.trades.count, 2, 'trade line count');
+  // the money settlement is IDENTICAL with or without the trade lines
+  for (const p of ['reggie','manny','hailey']) {
+    eq(withTrade.entitlement[p], noTrade.entitlement[p], p+' entitlement unchanged');
+    eq(withTrade.cash_out[p], noTrade.cash_out[p], p+' cash unchanged');
+  }
+  eq(withTrade.pot_cents, noTrade.pot_cents, 'pot unchanged');
+  eq(withTrade.profit_cents, noTrade.profit_cents, 'money profit unchanged');
+  eq(withTrade.transfers.length, noTrade.transfers.length, 'transfers unchanged');
+});
 console.log(fails ? ('\n' + fails + ' FAILURES') : '\nALL PASS');
 process.exit(fails ? 1 : 0);

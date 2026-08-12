@@ -44,8 +44,15 @@
     const zelleByPerson = { reggie: 0, manny: 0, hailey: 0 };
     // per-account, per-person ownership matrix (who each dollar in each account belongs to)
     const accounts = {}; ACCOUNTS.forEach(a => accounts[a[0]] = { label: a[1], controller: a[2], total_cents: 0, by_person: { reggie: 0, manny: 0, hailey: 0 } });
+    // trades: value each person put toward trades — recorded for the books, but NO money
+    // moved, so they stay out of the settlement entirely
+    const tradeBy = { reggie: 0, manny: 0, hailey: 0 }; let tradeCount = 0;
     for (const e of entries) {
       const amt = Math.round(e.amount_cents || 0); if (!(amt > 0)) continue;
+      if (e.pay_form === 'trade') {
+        if (PEOPLE.indexOf(e.person) >= 0) { tradeBy[e.person] += (e.direction === -1 ? -amt : amt); tradeCount++; }
+        continue;
+      }
       const f = form[e.pay_form]; if (!f || PEOPLE.indexOf(e.person) < 0) continue;
       const signed = (e.direction === -1 ? -amt : amt);
       if (signed >= 0) f.in_cents += amt; else f.out_cents += amt;
@@ -139,6 +146,7 @@
       sales_net: salesNet, entitlement, holdings,
       drawer_end_cents: drawerEnd, machine_cash_cents: machineCash, pot_cents: pot,
       cash_out: cashOut, transfers,
+      trades: { by_person: tradeBy, total_cents: PEOPLE.reduce((a, p) => a + tradeBy[p], 0), count: tradeCount },
       profit_cents: profit,
       entry_count: entries.length,
       verified, checks: { conserved, personsOk, cashOk, noResidual, acctOk }

@@ -628,6 +628,9 @@ input:focus,textarea:focus,select:focus,.fld input:focus,.fld textarea:focus,.fl
 .ss-chip.on{ background:linear-gradient(135deg,#c084fc,#38bdf8); color:#0a0913; border-color:transparent; box-shadow:0 6px 18px rgba(56,189,248,.4); }
 .ss-chip.ss-add.on{ background:linear-gradient(180deg,#3ddc78,#1f9d52); color:#04160a; }
 .ss-chip.ss-sub.on{ background:linear-gradient(180deg,#ef4a3d,#c5271c); color:#fff; }
+.ss-lineblk{ border:1px solid var(--glassline); background:rgba(255,255,255,.03); border-radius:14px; padding:10px 10px 4px; margin:0 0 10px; }
+.ss-lineblk .ss-chips{ margin-bottom:8px; }
+.ssl-amt,.ssl-tval{ width:100%; box-sizing:border-box; margin:0 0 8px; }
 .ss-tallygrid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .ss-tallybox{ background:var(--glass); border:1px solid var(--glassline); border-radius:16px; padding:12px 10px; min-height:112px;
   text-align:center; cursor:pointer; user-select:none; -webkit-user-select:none; touch-action:manipulation; }
@@ -711,11 +714,11 @@ window.addEventListener('error',function(e){var msg=(e.message||e.error||'')+'';
 window.addEventListener('unhandledrejection',function(e){var d=box();if(d)d.textContent+='ASYNC: '+((e.reason&&(e.reason.message||e.reason))||'')+'\n';});})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.warn('supabase cdn failed to load — running offline')"></script>
-<script src="config.js?v=20260811e"></script>
-<script src="social.js?v=20260811e"></script>
-<script src="app.js?v=20260811e"></script>
-<script src="show-math.js?v=20260811e"></script>
-<script src="show-stats.js?v=20260811e"></script>
+<script src="config.js?v=20260812a"></script>
+<script src="social.js?v=20260812a"></script>
+<script src="app.js?v=20260812a"></script>
+<script src="show-math.js?v=20260812a"></script>
+<script src="show-stats.js?v=20260812a"></script>
 <script>
 /* Install as an app (Add to Home Screen) + offline shell. Sessions persist in
    localStorage, so staff/customers stay logged in inside the installed app. */

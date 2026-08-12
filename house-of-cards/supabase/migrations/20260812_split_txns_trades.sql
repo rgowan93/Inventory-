@@ -1,0 +1,17 @@
+-- Documentation copy of the applied migration "split_transactions_and_trades".
+--
+-- show_entries.txn_group (text): lines of one split transaction share a group id.
+--
+-- show_entry_add: now also accepts pay_form 'trade' (goods swapped, no money moved;
+--   the client excludes trade lines from the settlement and reports them separately).
+--
+-- show_txn_add(p_user, p_pass, p_show, p_dir, p_photo, p_lines jsonb):
+--   Atomic multi-line transaction — several payment forms and/or trade lines, each
+--   with its own person and amount, all sharing one photo and direction. Everything
+--   is validated first, then inserted under one gen_random_uuid() txn_group in a
+--   single call, so a network drop can never half-record a deal. FOR SHARE lock on
+--   the live show row (serializes against show_end). 1..12 lines.
+--
+-- show_txn_void(p_user, p_pass, p_group):
+--   Voids every non-deleted line of a split transaction at once (live shows only) —
+--   parts of a split can never be voided separately by the UI.
