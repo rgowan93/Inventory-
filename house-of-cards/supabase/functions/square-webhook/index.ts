@@ -50,12 +50,19 @@ Deno.serve(async (req: Request) => {
   const sig = req.headers.get("x-square-hmacsha256-signature") || "";
   if (!sig) return json({ ok: false, error: "Missing signature." }, 401);
 
-  // Square signs (notificationUrl + body). Accept the configured URL, plus the request URL
-  // with and without its query string, so a trailing ?apikey= can't break verification.
+  // Square signs (notificationUrl + body). Inside the edge runtime req.url can carry an
+  // internal scheme/host (http://…) that differs from the public https URL Square signs,
+  // which made every real delivery fail verification. So check against: the configured
+  // URL, the canonical public URL derived from SUPABASE_URL (always correct), and the
+  // request URL as-is / https-normalized / without query string.
   const reqUrl = req.url;
   const noQuery = reqUrl.split("?")[0];
   const configured = (Deno.env.get("SQUARE_WEBHOOK_URL") || "").trim();
-  const candidates = [configured, reqUrl, noQuery].filter(Boolean);
+  const canonical = (Deno.env.get("SUPABASE_URL") || "").replace(/\/$/, "") + "/functions/v1/square-webhook";
+  const candidates = [...new Set([
+    configured, canonical, reqUrl, noQuery,
+    reqUrl.replace(/^http:/i, "https:"), noQuery.replace(/^http:/i, "https:"),
+  ].filter(Boolean))];
   let verified = false;
   for (const url of candidates) {
     try { if (safeEq(await hmacB64(sigKey, url + raw), sig)) { verified = true; break; } } catch (_) {}
