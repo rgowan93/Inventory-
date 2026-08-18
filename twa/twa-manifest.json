@@ -1,0 +1,51 @@
+{
+  "packageId": "com.houseofcardsftwalton.app",
+  "host": "houseofcardsftwalton.com",
+  "name": "House of Cards",
+  "launcherName": "House of Cards",
+  "display": "standalone",
+  "themeColor": "#101117",
+  "themeColorDark": "#101117",
+  "navigationColor": "#101117",
+  "navigationColorDark": "#101117",
+  "navigationDividerColor": "#101117",
+  "navigationDividerColorDark": "#101117",
+  "backgroundColor": "#101117",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "http://127.0.0.1:4310/icon-512.png",
+  "maskableIconUrl": "http://127.0.0.1:4310/icon-512-maskable.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "/tmp/claude-0/-home-user-Inventory-/0c07dd40-f351-5605-92cc-f5c9203b9846/scratchpad/twa-build/hoc-upload.keystore",
+    "alias": "hocupload"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "unknown",
+  "webManifestUrl": "http://127.0.0.1:4310/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://houseofcardsftwalton.com/",
+  "minSdkVersion": 21,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "appVersion": "1",
+  "useBrowserOnChromeOS": true
+}
