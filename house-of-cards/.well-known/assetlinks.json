@@ -3,9 +3,10 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.houseofcardsftwalton.twa",
+      "package_name": "com.houseofcardsftwalton.app",
       "sha256_cert_fingerprints": [
-        "35:44:F4:07:DC:B3:50:49:11:1E:36:6C:82:02:C3:1A:8E:45:D6:A6:81:0D:0E:D7:78:53:EC:90:37:24:85:98"
+        "87:61:D1:CD:0A:D4:C6:16:94:74:85:43:7F:1F:26:A7:D8:A1:44:17:DC:FB:78:F8:29:49:4F:2E:A0:81:48:04",
+        "9B:18:F9:F4:F1:9C:E9:1B:67:B4:22:30:37:58:EA:72:ED:A0:F3:E2:72:C2:72:A7:77:C1:23:26:15:6A:11:A5"
       ]
     }
   }
