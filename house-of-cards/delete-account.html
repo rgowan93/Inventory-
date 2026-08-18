@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Delete your account — House of Cards</title>
+<meta name="robots" content="noindex"/>
+<style>
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0b11;color:#e8eaf2;display:flex;justify-content:center;padding:24px 16px}
+  .wrap{max-width:520px;width:100%}
+  .logo{width:96px;height:96px;object-fit:contain;border-radius:20px;background:#fff;padding:5px;border:3px solid #F4B400;display:block;margin:18px auto 14px}
+  h1{font-size:24px;text-align:center;margin:0 0 6px}
+  .sub{color:#9aa1b8;text-align:center;margin:0 0 22px;font-size:14px}
+  .card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:18px;margin-bottom:14px}
+  h2{font-size:15px;margin:0 0 8px;color:#F4B400}
+  p,li{font-size:14px;line-height:1.55;color:#c7ccdf;margin:0 0 8px}
+  ul{padding-left:20px;margin:0 0 8px}
+  label{display:block;font-size:13px;color:#9aa1b8;margin:0 0 6px}
+  input{width:100%;box-sizing:border-box;padding:13px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.35);color:#fff;font-size:16px}
+  button{width:100%;margin-top:12px;padding:14px;border:none;border-radius:12px;background:linear-gradient(180deg,#ef4a3d,#c5271c);color:#fff;font-weight:800;font-size:16px;cursor:pointer}
+  button:disabled{opacity:.6}
+  .msg{margin-top:12px;font-size:14px;text-align:center;display:none;padding:12px;border-radius:12px}
+  .ok{background:rgba(52,199,89,.15);border:1px solid rgba(52,199,89,.4);color:#7ae0a0}
+  .err{background:rgba(226,59,46,.14);border:1px solid rgba(226,59,46,.4);color:#ff8a80}
+  a{color:#38bdf8}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img class="logo" src="logo.png" alt="House of Cards"/>
+  <h1>Delete your account</h1>
+  <p class="sub">House of Cards — houseofcardsftwalton.com</p>
+
+  <div class="card">
+    <h2>What gets deleted</h2>
+    <ul>
+      <li>Your member account and sign-in</li>
+      <li>Your name, email address, and phone number</li>
+      <li>Photos you uploaded to your account</li>
+    </ul>
+    <p>Records of completed purchases may be kept where the law requires it (for example, for accounting). Deletion is completed within 30 days and is permanent.</p>
+  </div>
+
+  <div class="card">
+    <h2>Request deletion</h2>
+    <p>Enter the email address on your account. We&rsquo;ll process the request and confirm by email.</p>
+    <label for="em">Account email</label>
+    <input id="em" type="email" autocomplete="email" placeholder="you@example.com"/>
+    <button id="go">Delete my account &amp; data</button>
+    <div id="m_ok" class="msg ok">Request received. Your account and data will be deleted within 30 days, and we&rsquo;ll confirm by email.</div>
+    <div id="m_err" class="msg err"></div>
+  </div>
+
+  <div class="card">
+    <p style="margin:0">Prefer to talk to a person? Reach us through the Contact section at <a href="https://houseofcardsftwalton.com">houseofcardsftwalton.com</a> and we&rsquo;ll handle it for you.</p>
+  </div>
+</div>
+<script src="config.js"></script>
+<script>
+  document.getElementById('go').onclick = async function(){
+    var btn=this, em=document.getElementById('em').value||'';
+    var ok=document.getElementById('m_ok'), err=document.getElementById('m_err');
+    ok.style.display='none'; err.style.display='none';
+    btn.disabled=true; btn.textContent='Sending…';
+    try{
+      var cfg=window.HOC_CONFIG||{};
+      var r=await fetch((cfg.SUPABASE_URL||'').replace(/\/$/,'')+'/rest/v1/rpc/account_delete_request',{
+        method:'POST',
+        headers:{apikey:cfg.SUPABASE_ANON_KEY,Authorization:'Bearer '+cfg.SUPABASE_ANON_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify({p_email:em})
+      });
+      var d=await r.json();
+      if(d&&d.ok){ ok.style.display='block'; btn.textContent='Request sent'; return; }
+      err.textContent=(d&&d.error)||'Something went wrong — please try again.';
+      err.style.display='block';
+    }catch(e){ err.textContent='Could not reach the server — please try again.'; err.style.display='block'; }
+    btn.disabled=false; if(btn.textContent==='Sending…')btn.textContent='Delete my account & data';
+  };
+</script>
+</body>
+</html>

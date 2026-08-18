@@ -809,6 +809,11 @@ async function staffDo(fn,args,okMsg){
   if(okMsg)toast(okMsg);
   return res;
 }
+async function delReqDone(id){
+  const s=staffSession(); if(!s||!_staffPw)return;
+  const r=await sbRpc('deletion_request_done',{p_user:s.username,p_pass:_staffPw,p_id:id});
+  if(r&&r.ok){ toast('Marked handled.'); loadMembers(); } else toast('Could not update — try again.');
+}
 async function loadMembers(){
   const cont=el('wMemberList'); if(!cont)return;
   const s=staffSession(); if(!s){ cont.innerHTML='<div class="muted" style="text-align:center">Staff only.</div>'; return; }
@@ -817,9 +822,14 @@ async function loadMembers(){
   const res=await sbRpc('staff_members',{p_user:s.username,p_pass:_staffPw});
   if(!res||res.ok!==true){ _staffPw=null; cont.innerHTML='<div class="muted" style="text-align:center">Couldn\'t verify your password. <button class="sm ghost" onclick="loadMembers()">Try again</button></div>'; return; }
   const m=res.members||[];
-  if(!m.length){ cont.innerHTML='<div class="muted" style="text-align:center">No members have joined yet.</div>'; return; }
+  // pending account-deletion requests (from the public delete-account.html page)
+  let delReqs=[]; try{ const dr=await sbRpc('deletion_requests_list',{p_user:s.username,p_pass:_staffPw}); if(dr&&dr.ok)delReqs=dr.requests||[]; }catch(e){}
+  const delHtml=delReqs.length?('<div class="card" style="border-color:rgba(226,59,46,.55);margin-bottom:12px"><div class="acct-sec" style="margin-top:0">🗑 Account deletion requests ('+delReqs.length+')</div>'+
+    delReqs.map(r=>'<div class="row" style="justify-content:space-between;align-items:center;margin:6px 0;gap:8px"><span style="word-break:break-all">'+esc(r.email)+' <span class="muted" style="font-size:12px">'+new Date(r.created_at).toLocaleDateString()+'</span></span><button class="sm ghost" onclick="delReqDone('+(+r.id)+')">Done</button></div>').join('')+
+    '<div class="muted" style="font-size:12px">Remove their member account below (and any lead with their info), then tap Done.</div></div>'):'';
+  if(!m.length){ cont.innerHTML=delHtml+'<div class="muted" style="text-align:center">No members have joined yet.</div>'; return; }
   const accts=m.filter(x=>x.kind==='account').length;
-  cont.innerHTML='<div class="memcount">'+m.length+' member'+(m.length===1?'':'s')+' · '+accts+' with account'+(accts===1?'':'s')+'</div>'+m.map(x=>{
+  cont.innerHTML=delHtml+'<div class="memcount">'+m.length+' member'+(m.length===1?'':'s')+' · '+accts+' with account'+(accts===1?'':'s')+'</div>'+m.map(x=>{
     const ph=String(x.phone||'').replace(/[^\d+]/g,''); const d=x.created_at?new Date(x.created_at).toLocaleDateString():'';
     const badge=x.kind==='account'?'<span class="membadge acct">account</span>':'<span class="membadge">contact</span>';
     const idJs=JSON.stringify(String(x.id)); const nmJs=JSON.stringify(x.name||x.phone||'this member');
