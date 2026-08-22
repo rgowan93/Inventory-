@@ -2343,7 +2343,34 @@ function mediaSecTap(){ const n=Date.now(); if(n-_mediaTapT>1500)_mediaTaps=0; _
 function staffUnlock(){ const p=(prompt('Staff: enter your mobile number to unlock uploads')||'').replace(/\D/g,''); if(!p)return;
   if(ADMIN_PHONES.some(n=>n.slice(-10)===p.slice(-10))){ try{ localStorage.setItem('hoc_admin_phone',p); }catch(e){} toast('Staff upload unlocked.'); loadMedia(); }
   else toast('That number isn\'t on the staff list.'); }
+/* Shrink a photo on-device before uploading: phone cameras produce 4-8MB files that
+   crawl over venue wifi; 1600px JPEG (~200-400KB) uploads 10-20x faster and stays plenty
+   sharp. Falls back to the original file untouched if anything can't be decoded. */
+async function compressImage(file, maxDim, quality){
+  try{
+    if(!file || !/^image\//.test(file.type||'') || /gif/.test(file.type)) return file;
+    let src=null, iw=0, ih=0;
+    try{ const b=await createImageBitmap(file); src=b; iw=b.width; ih=b.height; }catch(e){}
+    if(!src){
+      const url=URL.createObjectURL(file);
+      try{
+        src=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
+        iw=src.naturalWidth; ih=src.naturalHeight;
+      }finally{ setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} }, 5000); }
+    }
+    if(!(iw>0&&ih>0)) return file;
+    const sc=Math.min(1,(maxDim||1600)/Math.max(iw,ih));
+    if(sc>=1 && file.size<400000) return file;   // already small
+    const c=document.createElement('canvas');
+    c.width=Math.max(1,Math.round(iw*sc)); c.height=Math.max(1,Math.round(ih*sc));
+    c.getContext('2d').drawImage(src,0,0,c.width,c.height);
+    const blob=await new Promise(res=>c.toBlob(res,'image/jpeg',quality||0.82));
+    if(!blob || blob.size>=file.size) return file;
+    return new File([blob], ((file.name||'photo').replace(/\.[^.]+$/,'')||'photo')+'.jpg', {type:'image/jpeg'});
+  }catch(e){ return file; }
+}
 async function uploadMedia(file){ const {base,key}=sbBase(); if(!base||!key){ toast('Cloud not set up.'); return null; }
+  if(/^image\//.test((file&&file.type)||'')) file=await compressImage(file, 1600, 0.82);
   const ext=((file.name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'')||'bin';
   const path=Date.now()+'-'+Math.random().toString(36).slice(2,8)+'.'+ext;
   try{ const r=await fetch(base+'/storage/v1/object/show-media/'+path,{method:'POST',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},body:file});
