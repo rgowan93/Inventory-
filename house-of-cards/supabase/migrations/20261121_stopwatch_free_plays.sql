@@ -1,0 +1,13 @@
+-- Documentation copy of the migration "stopwatch_game_and_free_plays" (PENDING USER
+-- APPROVAL in the Supabase MCP at time of writing; apply before deploying the client).
+--
+-- show_prizes: prize rounds — photo (required), value_cents (what the item is worth),
+--   play_price_cents (set per prize), owner ('reggie' | 'manny' | 'split'), hit_at.
+--   One un-hit prize per show at a time (prize_start refuses otherwise).
+-- prize_plays: per-prize tally counts per payment box (8 money boxes + 'free').
+-- RPCs (staff_ok-gated, FOR SHARE lock on the live show): prize_start, prize_play_bump
+--   (atomic, refuses after hit), prize_hit (idempotent).
+-- show_tally_bump: 'free' box allowed (machine free plays — counted, never money).
+-- show_live_get: + prizes[] and prizes_sig (canonical jsonb the client echoes back).
+-- show_end: + p_prizes_sig — compared under the row lock; mismatch -> 'changed'.
+-- show_delete: also removes prize rows.

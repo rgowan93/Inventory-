@@ -139,6 +139,23 @@ function svgIcon(name,cls){ const d=_ICON_PATHS[name]; if(!d)return '';
 const val=id=>{const e=el(id);return e?e.value.trim():'';};
 const num=id=>{const v=parseFloat(val(id));return isNaN(v)?0:v;};
 function toast(msg){const t=el('toast');const d=document.createElement('div');d.className='toast';d.textContent=String(msg==null?'':msg);t.innerHTML='';t.appendChild(d);setTimeout(()=>{t.innerHTML='';},2600);}
+/* Kill pull-to-refresh app-wide: when whatever is being scrolled is already at the top,
+   a further downward drag can only be the browser's reload gesture — swallow it.
+   Scrolling through content in either direction is untouched. */
+(function(){
+  let y0=0;
+  document.addEventListener('touchstart',function(e){ if(e.touches&&e.touches.length)y0=e.touches[0].clientY; },{passive:true});
+  document.addEventListener('touchmove',function(e){
+    if(!e.touches||!e.touches.length)return;
+    let n=e.target, sc=null;
+    while(n&&n!==document.body&&n!==document.documentElement){
+      if(n.scrollHeight>n.clientHeight+1){ try{ const st=getComputedStyle(n); if(/(auto|scroll)/.test(st.overflowY)){ sc=n; break; } }catch(err){} }
+      n=n.parentElement;
+    }
+    const atTop = sc ? sc.scrollTop<=0 : ((document.scrollingElement?document.scrollingElement.scrollTop:0)<=0);
+    if(atTop && (e.touches[0].clientY-y0)>2){ try{ e.preventDefault(); }catch(err){} }
+  },{passive:false});
+})();
 function genBarcodeId(){ const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<5;i++)s+=a[Math.floor(Math.random()*a.length)];return 'HOC-'+s; }
 const currentShow=()=>state.shows.find(s=>s.id===state.currentShowId)||null;
 const openShow=()=>{const s=currentShow();return (s&&s.status==='open')?s:null;};
@@ -758,10 +775,13 @@ async function bioUnlock(u){
     return a?d.pw:null;
   }catch(e){ return null; }
 }
-/* Get the staff password hash, using Face ID if set up, otherwise a one-time prompt. */
+/* Get the staff password hash. Signed in = unlocked: the saved one-tap credential
+   unlocks silently, so staff are never re-prompted until they physically Sign out.
+   Face ID / a one-time prompt only appear if there is no saved credential. */
 async function ensureStaffPw(){
   if(_staffPw)return _staffPw;
   const s=staffSession(); if(!s)return null;
+  try{ const saved=savedStaffCred(); if(saved&&saved.u===s.username&&saved.pw){ _staffPw=saved.pw; return _staffPw; } }catch(e){}
   if(bioEnabledFor(s.username)){ const h=await bioUnlock(s.username); if(h){ _staffPw=h; return _staffPw; } }
   const p=prompt('Confirm your staff password:'); if(p===null||p==='')return null; _staffPw=hashPass(p); return _staffPw;
 }

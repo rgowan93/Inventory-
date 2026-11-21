@@ -154,5 +154,71 @@ T("trades: recorded per person but never move money", () => {
   eq(withTrade.profit_cents, noTrade.profit_cents, 'money profit unchanged');
   eq(withTrade.transfers.length, noTrade.transfers.length, 'transfers unchanged');
 });
+
+T("stopwatch: all money to Reggie, custody by box, prize value is goods not cash", () => {
+  const r = computeShowReport({ cash_start_cents: 0, float_owner: 'reggie', entries: [], tallies: {}, next_float_cents: 0,
+    prizes: [{ id: 1, value_cents: $(120), play_price_cents: $(5), owner: 'reggie', hit_at: '2026-11-21T20:00:00Z',
+      plays: { cash: 4, venmo: 3, zelle_hailey: 2, free: 5 } }] });
+  eq(r.stopwatch.total_cents, $(45), '9 paid plays x $5');
+  eq(r.stopwatch.reggie_cents, $(45), 'all to reggie');
+  eq(r.stopwatch.manny_cents, 0, 'none to manny');
+  eq(r.stopwatch.free_plays, 5, '5 free plays counted');
+  eq(r.stopwatch.hit_value_cents, $(120), 'prize value recorded as goods');
+  eq(r.entitlement.reggie, $(45), 'reggie entitled to all of it');
+  eq(r.holdings.manny, $(15), 'manny HOLDS the venmo plays (reggie\'s money)');
+  eq(r.holdings.hailey, $(10), 'hailey holds her zelle plays');
+  eq(r.pot_cents, $(20), 'cash plays are physical cash');
+  eq(r.verified, true, 'verified');
+  // manny+hailey hold reggie's money -> transfers back
+  eq(r.transfers.reduce((a,t)=>a+t.amount_cents,0), $(25), 'venmo+zelle money comes back to reggie');
+  eq(r.profit_cents, $(45), 'play money is profit; prize item value is not cash');
+});
+
+T("stopwatch: manny-owned and split prizes (odd cent to Reggie)", () => {
+  const r = computeShowReport({ cash_start_cents: 0, float_owner: 'reggie', entries: [], tallies: {}, next_float_cents: 0,
+    prizes: [
+      { id: 1, value_cents: $(50), play_price_cents: $(10), owner: 'manny', plays: { cash: 3 } },
+      { id: 2, value_cents: $(30), play_price_cents: 125, owner: 'split', plays: { cash: 1 } }   // $1.25 split -> 63/62
+    ] });
+  eq(r.stopwatch.total_cents, $(30)+125, 'totals');
+  eq(r.stopwatch.manny_cents, $(30)+62, 'manny: his prize + floor half');
+  eq(r.stopwatch.reggie_cents, 63, 'reggie gets the odd cent');
+  eq(r.entitlement.manny, $(30)+62, 'manny entitled');
+  eq(r.entitlement.reggie, 63, 'reggie entitled');
+  eq(r.checks.acctOk, true, 'account matrix still exact');
+  eq(r.verified, true, 'verified');
+});
+
+T("machine free plays: counted, never money", () => {
+  const r = computeShowReport({ cash_start_cents: 0, float_owner: 'reggie', entries: [],
+    tallies: { cash: 2, free: 7 }, next_float_cents: 0 });
+  eq(r.machine_total_cents, $(20), 'free plays add no machine money');
+  eq(r.machine_free_plays, 7, 'but they are counted');
+  eq(r.verified, true, 'verified');
+});
+
+T("fuzz v3: 200 random shows with prizes all verify and conserve cash", () => {
+  const forms=['cash','cashapp','venmo','paypal','zelle','square'], people=['reggie','manny','hailey'];
+  const boxes=['cash','cashapp','venmo','paypal','square','zelle_reggie','zelle_manny','zelle_hailey'];
+  const owners=['reggie','manny','split'];
+  let seed=777; const rnd=()=>((seed=(seed*1103515245+12345)>>>0)/4294967296);
+  for(let s=0;s<200;s++){
+    const entries=[]; const n=Math.floor(rnd()*30);
+    for(let i=0;i<n;i++) entries.push(E(forms[Math.floor(rnd()*6)], people[Math.floor(rnd()*3)], rnd()<0.85?1:-1, Math.floor(rnd()*20000)/100+1));
+    const tallies={ free: Math.floor(rnd()*10) }; boxes.forEach(b=>{ if(rnd()<0.5) tallies[b]=Math.floor(rnd()*15); });
+    const prizes=[]; const np=Math.floor(rnd()*4);
+    for(let i=0;i<np;i++){ const plays={ free: Math.floor(rnd()*6) }; boxes.forEach(b=>{ if(rnd()<0.4) plays[b]=Math.floor(rnd()*12); });
+      prizes.push({ id:i+1, value_cents: Math.floor(rnd()*20000), play_price_cents: Math.floor(rnd()*995)+5,
+        owner: owners[Math.floor(rnd()*3)], hit_at: rnd()<0.7?'2026-11-21T00:00:00Z':null, plays }); }
+    const r=computeShowReport({ cash_start_cents: Math.floor(rnd()*30000), float_owner: people[Math.floor(rnd()*3)], entries, tallies, prizes });
+    if(r.pot_cents>=0){
+      if(!r.verified) throw new Error('show '+s+' failed verification');
+      const out=r.cash_out.reggie+r.cash_out.manny+r.cash_out.hailey;
+      if(out+r.kept_cents!==r.pot_cents) throw new Error('show '+s+' cash leak');
+      if(r.stopwatch.reggie_cents+r.stopwatch.manny_cents!==r.stopwatch.total_cents) throw new Error('show '+s+' stopwatch split leak');
+    } else if(!r.checks.conserved) throw new Error('show '+s+' not conserved');
+  }
+});
+
 console.log(fails ? ('\n' + fails + ' FAILURES') : '\nALL PASS');
 process.exit(fails ? 1 : 0);

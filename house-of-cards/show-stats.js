@@ -10,14 +10,18 @@ const SS_FORM_NAME={}; SS_FORMS.forEach(f=>SS_FORM_NAME[f[0]]=f[1]); SS_FORM_NAM
 const SS_PERSON_NAME={}; SS_PEOPLE.forEach(p=>SS_PERSON_NAME[p[0]]=p[1]);
 function ssCap(s){ s=String(s||''); return s.charAt(0).toUpperCase()+s.slice(1); }
 
-let _ss={ wrap:null, data:null, tab:'sales', sel:{form:null,person:null,dir:1}, photo:null, amt:'', busy:false, poll:null, hold:null, winUp:null, pending:{},
+let _ss={ wrap:null, data:null, tab:'sales', sel:{form:null,person:null,dir:1}, photo:null, amt:'', busy:false, poll:null, hold:null, winUp:null, pending:{}, pendingSw:{},
+  sw:{ photo:null, val:'', price:'', owner:'reggie' },
   comp:{ forms:[], lines:{}, tradePersons:[], tradeVals:{} } };
 function ssCompReset(){ _ss.comp={ forms:[], lines:{}, tradePersons:[], tradeVals:{} }; _ss.amt=''; _ss.sel={form:null,person:null,dir:1}; }
 
 async function ssCreds(){ const c=await _staffCreds(); return c; }
 /* Cached-creds-only variant for the background poll: never opens a login modal,
-   Face ID sheet, or password prompt from a timer. */
-function ssCredsCached(){ const s=staffSession(); if(!s||!_staffPw)return null; return {p_user:s.username,p_pass:_staffPw}; }
+   Face ID sheet, or password prompt from a timer. Seeds the in-memory hash from the
+   saved one-tap credential so staying signed in means staying unlocked. */
+function ssCredsCached(){ const s=staffSession(); if(!s)return null;
+  if(!_staffPw){ try{ const saved=savedStaffCred(); if(saved&&saved.u===s.username&&saved.pw)_staffPw=saved.pw; }catch(e){} }
+  if(!_staffPw)return null; return {p_user:s.username,p_pass:_staffPw}; }
 
 function openShowStats(){
   if(!staffSession()){ openLogin(); return; }
@@ -27,7 +31,7 @@ function openShowStats(){
   const ex=document.querySelector('.ssmodal'); if(ex)ex.remove();
   const w=document.createElement('div'); w.className='scanmodal pagewrap ssmodal'; document.body.appendChild(w);
   w.innerHTML='<div class="card pagecard">'+pageHead('Show stats','ss_x')+'<div id="ss_body"><div class="muted">Loading…</div></div></div>';
-  _ss.wrap=w; _ss.tab='sales'; _ss.photo=null; _ss.pending={}; _ss.sig=null; ssCompReset();
+  _ss.wrap=w; _ss.tab='sales'; _ss.photo=null; _ss.pending={}; _ss.pendingSw={}; _ss.sig=null; _ss.sw={photo:null,val:'',price:'',owner:'reggie'}; ssCompReset();
   ssWireTallies(w);
   ssNoPull(w);
   const close=()=>{ if(_ss.poll){ clearInterval(_ss.poll); _ss.poll=null; } ssHoldStop();
@@ -62,6 +66,7 @@ function ssUserBusy(){
   if(_ss.comp&&(_ss.comp.forms.length>1||_ss.comp.tradePersons.length))return true; // building a split/trade
   const a=document.activeElement;
   if(a&&w.contains(a)&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))return true;     // focused in any field
+  if(_ss.sw&&(_ss.sw.photo||_ss.sw.val||_ss.sw.price))return true;                  // setting up a stopwatch prize
   return false;
 }
 
@@ -73,7 +78,10 @@ async function ssRefresh(silent){
   if(!r||r.ok!==true){ if(!silent){ const b=_ss.wrap&&_ss.wrap.querySelector('#ss_body'); if(b)b.innerHTML='<div class="muted">Could not load. <button class="sm ghost" onclick="ssRefresh()">Retry</button></div>'; } return; }
   // overlay tally bumps still in flight, so a refresh can't clobber (or double-revert) them
   if(r.tallies){ const pend=_ss.pending||{}; Object.keys(pend).forEach(b=>{ if(pend[b]) r.tallies[b]=Math.max(0,(r.tallies[b]||0)+pend[b]); }); }
-  const sig=JSON.stringify([r.show,r.entries,r.tallies]);
+  if(r.prizes){ const pend=_ss.pendingSw||{}; Object.keys(pend).forEach(k=>{ const d2=pend[k]; if(!d2)return;
+    const ix=k.indexOf(':'); const pid=+k.slice(0,ix), bx=k.slice(ix+1);
+    for(const p of r.prizes){ if(p.id===pid){ p.plays=p.plays||{}; p.plays[bx]=Math.max(0,(p.plays[bx]||0)+d2); break; } } }); }
+  const sig=JSON.stringify([r.show,r.entries,r.tallies,r.prizes]);
   // don't repaint over someone mid-entry — and do NOT record the signature, so the
   // screen catches up on the next quiet poll (_ss.sig always describes what's painted)
   if(silent && ssUserBusy()){ _ss.data=r; return; }
@@ -201,6 +209,7 @@ function ssPaintLive(body, d){
   const drawer=(s.cash_start_cents||0)+net.cash;
   const tallyTotal=SS_BOXES.reduce((a,b)=>a+(tallies[b[0]]||0),0)*1000;
   const salesTotal=SS_FORMS.reduce((a,f)=>a+net[f[0]],0);
+  const swT=(d.prizes||[]).reduce((a,p)=>a+SS_BOXES.reduce((x,b)=>x+((p.plays||{})[b[0]]||0),0)*p.play_price_cents,0);
 
   body.innerHTML=
     '<div class="card"><div class="ordhead"><b>'+esc(s.name||'Live show')+'</b><span class="ordstatus s_paid">LIVE</span></div>'+
@@ -209,18 +218,22 @@ function ssPaintLive(body, d){
         '<div class="ss-kpi"><span>Sales</span><b>'+mUSD(salesTotal)+'</b></div>'+
         '<div class="ss-kpi"><span>Machine</span><b>'+mUSD(tallyTotal)+'</b></div>'+
         '<div class="ss-kpi"><span>Drawer</span><b>'+mUSD(drawer)+'</b></div>'+
+        (swT?('<div class="ss-kpi"><span>Stopwatch</span><b id="ss_kpi_sw">'+mUSD(swT)+'</b></div>'):'')+
         (tradeTotal?('<div class="ss-kpi"><span>Trade</span><b>'+mUSD(tradeTotal)+'</b></div>'):'')+
       '</div></div>'+
     '<div class="subtabs" style="justify-content:center">'+
       '<button id="ss_tab_sales" class="'+(_ss.tab==='sales'?'on':'')+'">Sales</button>'+
       '<button id="ss_tab_game" class="'+(_ss.tab==='game'?'on':'')+'">Game</button>'+
+      '<button id="ss_tab_sw" class="'+(_ss.tab==='sw'?'on':'')+'">Stopwatch</button>'+
     '</div>'+
     '<div id="ss_tabbody"></div>'+
     '<hr class="sep"><div class="row"><button class="red" id="ss_end" style="flex:1">'+svgIcon('lock')+' End show now</button></div>';
   body.querySelector('#ss_tab_sales').onclick=()=>{ _ss.tab='sales'; ssPaint(); };
   body.querySelector('#ss_tab_game').onclick=()=>{ _ss.tab='game'; ssPaint(); };
+  body.querySelector('#ss_tab_sw').onclick=()=>{ _ss.tab='sw'; ssPaint(); };
   body.querySelector('#ss_end').onclick=ssEndShow;
   if(_ss.tab==='game') ssPaintGame(body.querySelector('#ss_tabbody'), d);
+  else if(_ss.tab==='sw') ssPaintSw(body.querySelector('#ss_tabbody'), d);
   else ssPaintSales(body.querySelector('#ss_tabbody'), d);
 }
 
@@ -435,7 +448,9 @@ function ssPaintGame(box, d){
   const t=d.tallies||{};
   box.innerHTML='<div class="muted" style="text-align:center;margin-bottom:10px">Tap a box each time a token is bought with that payment. Each mark = <b style="color:#F4B400">$10</b>. Press &amp; hold to erase.</div>'+
     '<div class="ss-tallygrid">'+SS_BOXES.map(b=>{ const n=t[b[0]]||0;
-      return '<div class="ss-tallybox" data-box="'+b[0]+'"><div class="ss-tname">'+b[1]+'</div><div class="ss-tmarks" id="ssm_'+b[0]+'">'+ssTallySvg(n)+'</div><div class="ss-tval" id="ssv_'+b[0]+'">'+n+' · '+mUSD(n*1000)+'</div></div>'; }).join('')+'</div>'+
+      return '<div class="ss-tallybox" data-box="'+b[0]+'"><div class="ss-tname">'+b[1]+'</div><div class="ss-tmarks" id="ssm_'+b[0]+'">'+ssTallySvg(n)+'</div><div class="ss-tval" id="ssv_'+b[0]+'">'+n+' · '+mUSD(n*1000)+'</div></div>'; }).join('')+
+      '<div class="ss-tallybox" data-box="free"><div class="ss-tname">🎁 Free plays</div><div class="ss-tmarks" id="ssm_free">'+ssTallySvg(t.free||0)+'</div><div class="ss-tval" id="ssv_free">'+(t.free||0)+' given away free</div></div>'+
+    '</div>'+
     '<div class="card" style="margin-top:12px;text-align:center"><div class="muted">Machine total (splits 50/50 Reggie &amp; Manny)</div>'+
     '<div class="big" id="ss_machtotal">'+mUSD(SS_BOXES.reduce((a,b)=>a+(t[b[0]]||0),0)*1000)+'</div></div>';
 }
@@ -445,24 +460,27 @@ function ssPaintGame(box, d){
    listeners could leak a running erase interval when their element was detached mid-hold.
    With delegation + global state, a repaint can never orphan a hold. */
 function ssWireTallies(w){
-  const findBox=e=>{ const el=e.target&&e.target.closest&&e.target.closest('.ss-tallybox'); return el?el.dataset.box:null; };
+  const findBox=e=>{ const el=e.target&&e.target.closest&&e.target.closest('.ss-tallybox'); if(!el)return null;
+    if(el.dataset.swbox) return { kind:'sw', box:el.dataset.swbox, prize:+el.dataset.prize };
+    if(el.dataset.box) return { kind:'m', box:el.dataset.box };
+    return null; };
   w.addEventListener('pointerdown', e=>{
-    const box=findBox(e); if(!box)return;
+    const tb=findBox(e); if(!tb)return;
     if(e.pointerType==='mouse'&&e.button!==0)return;
     e.preventDefault();
     ssHoldStop();
     const showId=_ss.data&&_ss.data.show&&_ss.data.show.id; if(!showId)return;
-    const h={ box:box, showId:showId, downAt:Date.now(), erased:false, timer:null, rep:null };
+    const h={ kind:tb.kind, box:tb.box, prize:tb.prize||0, showId:showId, downAt:Date.now(), erased:false, timer:null, rep:null };
     _ss.hold=h;
     h.timer=setTimeout(()=>{ if(_ss.hold!==h)return; ssHoldErase(h); h.rep=setInterval(()=>{ if(_ss.hold!==h){ clearInterval(h.rep); return; } ssHoldErase(h); }, 650); }, 600);
   });
   // pointerup/cancel live on window so the hold ALWAYS ends, even if the finger drifts
   // off the box or the element under it was swapped out
   const up=e=>{ const h=_ss.hold; if(!h)return;
-    const at=e.target&&e.target.closest&&e.target.closest('.ss-tallybox');
-    const tap = e.type==='pointerup' && !h.erased && (Date.now()-h.downAt)<600 && at && at.dataset.box===h.box;
+    const at=findBox(e);
+    const tap = e.type==='pointerup' && !h.erased && (Date.now()-h.downAt)<600 && at && at.box===h.box && at.kind===h.kind;
     ssHoldStop();
-    if(tap) ssBump(h.showId, h.box, 1); };
+    if(tap){ if(h.kind==='sw') ssSwBump(h.prize, h.box, 1); else ssBump(h.showId, h.box, 1); } };
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
   _ss.winUp=up;
@@ -470,6 +488,11 @@ function ssWireTallies(w){
 }
 function ssHoldStop(){ const h=_ss.hold; if(!h)return; clearTimeout(h.timer); clearInterval(h.rep); h.timer=h.rep=null; _ss.hold=null; }
 function ssHoldErase(h){ h.erased=true;
+  if(h.kind==='sw'){
+    const pz=ssPrizeById(h.prize); const n=pz&&pz.plays&&pz.plays[h.box]||0;
+    if(n>0) ssSwBump(h.prize, h.box, -1); else ssHoldStop();
+    return;
+  }
   const t=_ss.data&&_ss.data.tallies;
   if(t&&(t[h.box]||0)>0) ssBump(h.showId, h.box, -1);
   else ssHoldStop(); }
@@ -478,7 +501,8 @@ function ssTallyPaintBox(box){
   const t=(_ss.data&&_ss.data.tallies)||{};
   const m=document.getElementById('ssm_'+box), v=document.getElementById('ssv_'+box), tot=document.getElementById('ss_machtotal');
   const machTotal=SS_BOXES.reduce((a,b)=>a+(t[b[0]]||0),0)*1000;
-  if(m)m.innerHTML=ssTallySvg(t[box]||0); if(v)v.textContent=(t[box]||0)+' · '+mUSD((t[box]||0)*1000);
+  if(m)m.innerHTML=ssTallySvg(t[box]||0);
+  if(v)v.textContent = box==='free' ? ((t[box]||0)+' given away free') : ((t[box]||0)+' · '+mUSD((t[box]||0)*1000));
   if(tot)tot.textContent=mUSD(machTotal);
   const kpis=_ss.wrap&&_ss.wrap.querySelectorAll('.ss-kpi b'); if(kpis&&kpis[1])kpis[1].textContent=mUSD(machTotal);
 }
@@ -508,6 +532,132 @@ function ssBumpRevert(box, delta){
   ssTallyPaintBox(box);
 }
 
+/* ---------- stopwatch prize game ---------- */
+function ssPrizeById(id){ const ps=_ss.data&&_ss.data.prizes; if(!ps)return null;
+  for(let i=0;i<ps.length;i++){ if(ps[i].id===id)return ps[i]; } return null; }
+function ssSwTotal(){ const ps=(_ss.data&&_ss.data.prizes)||[]; let t=0;
+  ps.forEach(p=>{ const pl=p.plays||{}; t+=SS_BOXES.reduce((a,b)=>a+(pl[b[0]]||0),0)*p.play_price_cents; }); return t; }
+function ssOwnerName(o){ return o==='split'?'50/50 Reggie & Manny':(o==='manny'?'Manny':'Reggie'); }
+
+function ssPaintSw(box, d){
+  const prizes=d.prizes||[];
+  const active=prizes.find(p=>!p.hit_at);
+  let inner='';
+  if(!active){
+    const sw=_ss.sw;
+    const ochip=(k,lbl)=>'<button class="ss-chip'+(sw.owner===k?' on':'')+'" data-swowner="'+k+'">'+lbl+'</button>';
+    inner+='<div class="card">'+
+      '<div class="ss-lbl">New prize — photo it, value it, price the plays</div>'+
+      '<div class="row" style="gap:8px"><button class="ghost" id="sw_photo" style="flex:2">'+svgIcon('camera')+(sw.photo?' ✓ Prize photo ready — tap to retake':' Photo the prize (required)')+'</button>'+
+      '<button class="ghost" id="sw_pick" style="flex:1">'+svgIcon('image')+' Gallery</button></div>'+
+      '<div id="sw_prev">'+(sw.photo?('<img class="showflyer" style="max-height:140px" src="'+esc(sw.photo.url)+'"/>'):'')+'</div>'+
+      '<label class="fld"><span>Prize value — what the item is worth (USD)</span><input id="sw_val" type="text" inputmode="decimal" placeholder="e.g. 120.00" value="'+esc(sw.val||'')+'"/></label>'+
+      '<label class="fld"><span>Price per play (USD)</span><input id="sw_price" type="text" inputmode="decimal" placeholder="e.g. 5.00" value="'+esc(sw.price||'')+'"/></label>'+
+      '<div class="ss-lbl">Whose money is this prize’s game?</div><div class="ss-chips">'+ochip('reggie','Reggie')+ochip('manny','Manny')+ochip('split','Split 50/50')+'</div>'+
+      '<div class="row" style="margin-top:8px"><button class="gold" id="sw_start" style="flex:1;font-size:16px;padding:14px">⏱ Start this prize</button></div></div>';
+  } else {
+    const price=active.play_price_cents, plays=active.plays||{};
+    const paid=SS_BOXES.reduce((a,b)=>a+(plays[b[0]]||0),0), rev=paid*price, freeN=plays.free||0;
+    inner+='<div class="card"><div class="row" style="gap:10px;align-items:center">'+
+      '<img class="showflyer" style="height:90px;width:90px;object-fit:cover;margin:0;max-height:90px" src="'+esc(active.photo_url)+'"/>'+
+      '<div style="flex:1"><b>Prize worth '+mUSD(active.value_cents)+'</b>'+
+      '<div class="muted">'+mUSD(price)+' per play · money to '+esc(ssOwnerName(active.owner))+'</div>'+
+      '<div class="muted" style="margin-top:4px"><b id="ss_swrev" style="color:#F4B400">'+mUSD(rev)+'</b> from <span id="ss_swplays">'+paid+'</span> plays · <span id="ss_swfree">'+freeN+'</span> free</div></div></div>'+
+      '<div class="row" style="margin-top:10px"><button class="red" id="sw_hit" style="flex:1;font-size:16px;padding:14px">🏆 Item hit!</button></div></div>'+
+      '<div class="muted" style="text-align:center;margin:8px 0">Tap a box for each play, by how they paid. Press &amp; hold to erase.</div>'+
+      '<div class="ss-tallygrid">'+SS_BOXES.map(b=>{ const n=plays[b[0]]||0;
+        return '<div class="ss-tallybox" data-swbox="'+b[0]+'" data-prize="'+active.id+'"><div class="ss-tname">'+b[1]+'</div><div class="ss-tmarks" id="ssm_sw_'+b[0]+'">'+ssTallySvg(n)+'</div><div class="ss-tval" id="ssv_sw_'+b[0]+'">'+n+' · '+mUSD(n*price)+'</div></div>'; }).join('')+
+      '<div class="ss-tallybox" data-swbox="free" data-prize="'+active.id+'"><div class="ss-tname">🎁 Free plays</div><div class="ss-tmarks" id="ssm_sw_free">'+ssTallySvg(plays.free||0)+'</div><div class="ss-tval" id="ssv_sw_free">'+(plays.free||0)+' given away free</div></div>'+
+      '</div>';
+  }
+  const done=prizes.filter(p=>p.hit_at);
+  if(done.length){
+    inner+='<div class="acct-sec" style="margin-top:14px">🏆 Prizes hit this show ('+done.length+')</div>'+
+      done.map(p=>{ const pl=p.plays||{}; const paid=SS_BOXES.reduce((a,b)=>a+(pl[b[0]]||0),0);
+        return '<div class="ordcard"><div class="ordhead"><b style="color:#34c759">'+mUSD(paid*p.play_price_cents)+' taken</b><span class="ordstatus s_complete">HIT '+new Date(p.hit_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'</span></div>'+
+        '<div class="muted">Prize worth '+mUSD(p.value_cents)+' · '+mUSD(p.play_price_cents)+'/play · '+paid+' plays'+((pl.free||0)?(' · '+(pl.free||0)+' free'):'')+' · money to '+esc(ssOwnerName(p.owner))+'</div>'+
+        (p.photo_url?('<div class="row" style="margin-top:8px"><button class="sm ghost" data-url="'+esc(p.photo_url)+'" onclick="openPhotoViewer([this.dataset.url],0)">View prize photo</button></div>'):'')+'</div>'; }).join('');
+  }
+  box.innerHTML=inner;
+
+  if(!active){
+    const sw=_ss.sw;
+    const pickSwPhoto=(cam)=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; if(cam)inp.capture='environment';
+      inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading photo…'); const up=await uploadMedia(f);
+        if(!up){ toast('Photo upload failed — try again.'); return; }
+        sw.photo=up;
+        const btn=box.querySelector('#sw_photo'); if(btn)btn.innerHTML=svgIcon('camera')+' ✓ Prize photo ready — tap to retake';
+        const prev=box.querySelector('#sw_prev'); if(prev)prev.innerHTML='<img class="showflyer" style="max-height:140px" src="'+esc(up.url)+'"/>'; };
+      inp.click(); };
+    box.querySelector('#sw_photo').onclick=()=>pickSwPhoto(true);
+    box.querySelector('#sw_pick').onclick=()=>pickSwPhoto(false);
+    box.querySelector('#sw_val').oninput=e=>{ sw.val=e.target.value; };
+    box.querySelector('#sw_price').oninput=e=>{ sw.price=e.target.value; };
+    box.querySelectorAll('[data-swowner]').forEach(b=>b.onclick=()=>{ sw.owner=b.dataset.swowner; ssPaint(); });
+    box.querySelector('#sw_start').onclick=async()=>{
+      if(_ss.busy)return;
+      if(!sw.photo){ toast('Photo the prize first.'); return; }
+      const v=parseFloat((sw.val||'').replace(/[^0-9.]/g,''));
+      if(isNaN(v)||v<0){ toast('Enter what the prize is worth.'); return; }
+      const pr=ssMoney(sw.price);
+      if(!pr){ toast('Enter the price per play.'); return; }
+      _ss.busy=true;
+      const c=await ssCreds(); if(!c){ _ss.busy=false; return; }
+      const r=await sbRpc('prize_start',Object.assign({p_show:d.show.id,p_photo:sw.photo.url,p_value_cents:Math.round(v*100),p_price_cents:pr,p_owner:sw.owner},c));
+      _ss.busy=false;
+      if(r&&r.ok){ toast('⏱ Prize is live — tap plays as they come!'); _ss.sw={photo:null,val:'',price:'',owner:sw.owner}; _ss.sig=null; ssRefresh(); }
+      else toast((r&&r.error)||'Could not start the prize.');
+    };
+  } else {
+    box.querySelector('#sw_hit').onclick=async()=>{
+      if(_ss.busy)return;
+      if(!confirm('Mark this prize as HIT? That closes this round — you’ll set up the next prize fresh.'))return;
+      _ss.busy=true;
+      try{ await _ssBumpChain; }catch(e){}
+      const c=await ssCreds(); if(!c){ _ss.busy=false; return; }
+      const r=await sbRpc('prize_hit',Object.assign({p_prize:active.id},c));
+      _ss.busy=false;
+      if(r&&r.ok){ toast('🏆 Prize hit! Set up the next one.'); _ss.sig=null; ssRefresh(); }
+      else toast((r&&r.error)||'Could not mark the hit.');
+    };
+  }
+}
+
+function ssSwPaintBox(prizeId, box){
+  const pz=ssPrizeById(prizeId); if(!pz)return; const plays=pz.plays||(pz.plays={});
+  const n=plays[box]||0, price=pz.play_price_cents;
+  const m=document.getElementById('ssm_sw_'+box), v=document.getElementById('ssv_sw_'+box);
+  if(m)m.innerHTML=ssTallySvg(n);
+  if(v)v.textContent = box==='free' ? (n+' given away free') : (n+' · '+mUSD(n*price));
+  const paid=SS_BOXES.reduce((a,b)=>a+(plays[b[0]]||0),0);
+  const rev=document.getElementById('ss_swrev'); if(rev)rev.textContent=mUSD(paid*price);
+  const pl=document.getElementById('ss_swplays'); if(pl)pl.textContent=paid;
+  const fr=document.getElementById('ss_swfree'); if(fr)fr.textContent=(plays.free||0);
+  const kpi=document.getElementById('ss_kpi_sw'); if(kpi)kpi.textContent=mUSD(ssSwTotal());
+}
+function ssSwBump(prizeId, box, delta){
+  const pz=ssPrizeById(prizeId); if(!pz)return; const plays=pz.plays||(pz.plays={});
+  plays[box]=Math.max(0,(plays[box]||0)+delta);
+  const k=prizeId+':'+box; _ss.pendingSw[k]=(_ss.pendingSw[k]||0)+delta;
+  ssSwPaintBox(prizeId, box);
+  _ssBumpChain=_ssBumpChain.then(async()=>{
+    const settle=()=>{ _ss.pendingSw[k]=(_ss.pendingSw[k]||0)-delta; };
+    const c=ssCredsCached();
+    if(!c){ settle(); ssSwRevert(prizeId, box, delta); toast('Sign in again — that play didn’t save.'); return; }
+    const args=Object.assign({p_prize:prizeId,p_box:box,p_delta:delta},c);
+    let r=await sbRpc('prize_play_bump',args);
+    if(!r){ await new Promise(res=>setTimeout(res,1200)); r=await sbRpc('prize_play_bump',args); }
+    settle();
+    if(r&&r.ok&&typeof r.count==='number'){ /* server is source of truth on next poll */ }
+    else { ssSwRevert(prizeId, box, delta); toast((r&&r.error)||'No connection — that play didn’t save. Tap again.'); }
+  }).catch(()=>{});
+}
+function ssSwRevert(prizeId, box, delta){
+  const pz=ssPrizeById(prizeId); if(!pz)return; const plays=pz.plays||(pz.plays={});
+  plays[box]=Math.max(0,(plays[box]||0)-delta);
+  ssSwPaintBox(prizeId, box);
+}
+
 /* ---------- end show + report ---------- */
 function ssEndShow(){
   if(document.querySelector('.sse-sheet'))return;   // one confirmation sheet at a time
@@ -534,12 +684,13 @@ function ssEndShow(){
       if(!fresh||fresh.ok!==true){ toast('Could not reach the server — nothing was finalized. Try again.'); unlock(); return; }
       if(!fresh.show){ toast('Show was already ended.'); close(); ssRefresh(); return; }
       const s=fresh.show, entries=fresh.entries||[], tallies=fresh.tallies||{};
-      const rep=HOC_SHOW_MATH.computeShowReport({cash_start_cents:s.cash_start_cents,float_owner:s.float_owner,entries:entries,tallies:tallies});
+      const rep=HOC_SHOW_MATH.computeShowReport({cash_start_cents:s.cash_start_cents,float_owner:s.float_owner,entries:entries,tallies:tallies,prizes:fresh.prizes||[]});
       rep.name=s.name||null; rep.started_at=s.started_at; rep.ended_at=new Date().toISOString();
       const fp={ p_entry_count:entries.length,
                  p_amount_sum:entries.reduce((a,e)=>a+(e.amount_cents||0),0),
                  p_max_id:entries.reduce((a,e)=>Math.max(a,e.id||0),0),
-                 p_tallies:tallies };
+                 p_tallies:tallies,
+                 p_prizes_sig:fresh.prizes_sig||null };
       const er=await sbRpc('show_end',Object.assign({p_show:s.id,p_report:rep,p_pdf:null},fp,c));
       if(er&&er.ok===true){
         close(); toast(rep.verified?'Show finalized — math verified ✓':'Show finalized — ⚠ check the report math');
@@ -569,7 +720,8 @@ async function openShowReport(showId){
   const w=document.createElement('div'); w.className='scanmodal pagewrap'; document.body.appendChild(w);
   const close=()=>w.remove();
   const P=SS_PERSON_NAME, F=SS_FORM_NAME;
-  const photos=entries.filter(e=>e.photo_url).map(e=>e.photo_url);
+  const photos=entries.filter(e=>e.photo_url).map(e=>e.photo_url)
+    .concat(((rep.stopwatch&&rep.stopwatch.prizes)||[]).filter(p=>p.photo_url).map(p=>p.photo_url));
   const cashLine=p=>{ const c2=(rep.cash_out||{})[p]||0; const fl=(p===rep.float_owner&&rep.cash_start_cents&&!rep.kept_cents)?(' <span class="muted">(includes '+mUSD(rep.cash_start_cents)+' float back)</span>'):'';
     return '<div class="ss-payline">'+svgIcon('wallet')+' <b>'+P[p]+'</b> takes <b>'+mUSD(c2)+'</b> cash'+fl+'</div>'; };
   const keptLine=rep.kept_cents?('<div class="ss-payline" style="color:#F4B400">'+svgIcon('box')+' Leave <b>'+mUSD(rep.kept_cents)+'</b> in the drawer for the next show <span class="muted">(counts as '+esc(P[rep.kept_by]||rep.kept_by||'')+'’s money)</span></div>'):'';
@@ -577,13 +729,14 @@ async function openShowReport(showId){
     if(!a.total_cents&&!a.by_person.reggie&&!a.by_person.manny&&!a.by_person.hailey)return '';
     return '<tr><td>'+esc(a.label)+'</td><td class="money"><b>'+mUSD(a.total_cents)+'</b></td><td class="money">'+mUSD(a.by_person.reggie)+'</td><td class="money">'+mUSD(a.by_person.manny)+'</td><td class="money">'+mUSD(a.by_person.hailey)+'</td></tr>'; };
   const acctRows=rep.accounts?Object.keys(rep.accounts).map(acctRow).join(''):'';
-  const formRow=f=>{ const d2=(rep.forms||{})[f]||{}; return '<tr><td>'+F[f]+'</td><td class="money">'+mUSD(d2.in_cents||0)+'</td><td class="money">'+mUSD(d2.out_cents||0)+'</td><td class="money">'+mUSD(d2.machine_cents||0)+'</td><td class="money"><b>'+mUSD((d2.net_cents||0)+(d2.machine_cents||0))+'</b></td></tr>'; };
+  const formRow=f=>{ const d2=(rep.forms||{})[f]||{}; return '<tr><td>'+F[f]+'</td><td class="money">'+mUSD(d2.in_cents||0)+'</td><td class="money">'+mUSD(d2.out_cents||0)+'</td><td class="money">'+mUSD(d2.machine_cents||0)+'</td><td class="money">'+mUSD(d2.stopwatch_cents||0)+'</td><td class="money"><b>'+mUSD((d2.net_cents||0)+(d2.machine_cents||0)+(d2.stopwatch_cents||0))+'</b></td></tr>'; };
   const personRow=p=>'<tr><td>'+P[p]+'</td><td class="money">'+mUSD((rep.sales_net||{})[p]||0)+'</td><td class="money">'+mUSD((rep.machine_split||{})[p]||0)+'</td><td class="money">'+(p===rep.float_owner?mUSD(rep.cash_start_cents||0):'—')+'</td><td class="money"><b>'+mUSD((rep.entitlement||{})[p]||0)+'</b></td></tr>';
   w.innerHTML='<div class="card pagecard">'+pageHead((s.name||('Show #'+s.id))+' — report','sr_x')+
     '<div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:6px">'+
       '<div class="ss-kpi"><span>Profit</span><b>'+mUSD(rep.profit_cents||0)+'</b></div>'+
       '<div class="ss-kpi"><span>Machine</span><b>'+mUSD(rep.machine_total_cents||0)+'</b></div>'+
       '<div class="ss-kpi"><span>Entries</span><b>'+(rep.entry_count||entries.length)+'</b></div>'+
+      (rep.stopwatch&&rep.stopwatch.total_cents?('<div class="ss-kpi"><span>Stopwatch</span><b>'+mUSD(rep.stopwatch.total_cents)+'</b></div>'):'')+
       (rep.trades&&rep.trades.count?('<div class="ss-kpi"><span>Trades</span><b>'+mUSD(rep.trades.total_cents||0)+'</b></div>'):'')+
     '</div>'+
     (rep.verified
@@ -597,11 +750,24 @@ async function openShowReport(showId){
       '<div class="card">'+SS_PEOPLE.map(p=>{ const v=(rep.trades.by_person||{})[p[0]]||0;
         return v?('<div class="ss-payline">'+svgIcon('tag')+' <b>'+p[1]+'</b> put <b>'+mUSD(v)+'</b> of value into trades</div>'):''; }).join('')+
       '<div class="muted" style="font-size:12px;margin-top:6px">Trades swap goods, not money — recorded for the books, they don\'t change the cash split.</div></div>'):'')+
+    (rep.stopwatch&&(rep.stopwatch.total_cents||rep.stopwatch.free_plays||(rep.stopwatch.prizes||[]).length)?(
+      '<div class="acct-sec" style="margin-top:14px">⏱ Stopwatch game</div>'+
+      '<div class="card">'+
+        '<div class="ss-payline">'+svgIcon('wallet')+' Took in <b>'+mUSD(rep.stopwatch.total_cents||0)+'</b>'+
+          ' — Reggie <b>'+mUSD(rep.stopwatch.reggie_cents||0)+'</b> · Manny <b>'+mUSD(rep.stopwatch.manny_cents||0)+'</b></div>'+
+        (rep.stopwatch.free_plays?('<div class="muted" style="font-size:13px">🎁 '+rep.stopwatch.free_plays+' free play'+(rep.stopwatch.free_plays===1?'':'s')+' given away</div>'):'')+
+        (rep.stopwatch.hit_value_cents?('<div class="muted" style="font-size:13px">Prizes handed out: '+mUSD(rep.stopwatch.hit_value_cents)+' in goods (not cash)</div>'):'')+
+        ((rep.stopwatch.prizes||[]).length?('<hr class="sep">'+(rep.stopwatch.prizes||[]).map(p=>
+          '<div class="ss-payline" style="align-items:flex-start">'+svgIcon('tag')+' <div style="flex:1">Prize worth <b>'+mUSD(p.value_cents)+'</b> · '+mUSD(p.play_price_cents)+'/play · '+p.plays+' plays'+(p.free_plays?(' · '+p.free_plays+' free'):'')+
+          ' = <b>'+mUSD(p.revenue_cents)+'</b> to '+esc(ssOwnerName(p.owner))+(p.hit?(' · HIT '+new Date(p.hit_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})):' · still up')+
+          (p.photo_url?(' <button class="sm ghost sr-view" data-pv="'+photos.indexOf(p.photo_url)+'">Photo</button>'):'')+'</div></div>').join('')):'')+
+        '<div class="muted" style="font-size:12px;margin-top:6px">A split prize’s odd cent goes to Reggie.</div></div>'):'')+
     (acctRows?('<div class="acct-sec" style="margin-top:14px">'+svgIcon('wallet')+' Each account — total &amp; whose money it is</div>'+
       '<div class="card" style="overflow-x:auto"><table><tr><th>Account</th><th>Total</th><th>Reggie</th><th>Manny</th><th>Hailey</th></tr>'+acctRows+'</table>'+
       '<div class="muted" style="font-size:12px;margin-top:6px">The transfers above move each person’s share out of accounts they don’t control.</div></div>'):'')+
     '<div class="acct-sec" style="margin-top:14px">'+svgIcon('grid')+' Payment forms</div>'+
-    '<div class="card" style="overflow-x:auto"><table><tr><th>Form</th><th>In</th><th>Out</th><th>Machine</th><th>Ends with</th></tr>'+SS_FORMS.map(f=>formRow(f[0])).join('')+'</table></div>'+
+    '<div class="card" style="overflow-x:auto"><table><tr><th>Form</th><th>In</th><th>Out</th><th>Machine</th><th>Stopwatch</th><th>Ends with</th></tr>'+SS_FORMS.map(f=>formRow(f[0])).join('')+'</table>'+
+      (rep.machine_free_plays?('<div class="muted" style="font-size:12px;margin-top:6px">🎁 Machine free plays given away: '+rep.machine_free_plays+'</div>'):'')+'</div>'+
     '<div class="acct-sec" style="margin-top:14px">'+svgIcon('users')+' Per person</div>'+
     '<div class="card" style="overflow-x:auto"><table><tr><th>Person</th><th>Sales</th><th>Machine</th><th>Float</th><th>Walks with</th></tr>'+SS_PEOPLE.map(p=>personRow(p[0])).join('')+'</table></div>'+
     '<div class="row" style="gap:8px;margin-top:12px">'+
@@ -689,12 +855,13 @@ function ssFetchPhoto(url){
 
 async function ssMakePdf(show, entries, rep){
   await ssLoadJsPdf();
-  // pull the sale photos down first so the appendix can embed them
-  const withPhotos=entries.filter(e=>e.photo_url);
+  // pull the sale + prize photos down first so the appendix can embed them
+  const withPhotos=entries.filter(e=>e.photo_url).map(e=>({kind:'entry',e:e,url:e.photo_url}))
+    .concat((((rep||{}).stopwatch||{}).prizes||[]).filter(p=>p.photo_url).map(p=>({kind:'prize',p:p,url:p.photo_url})));
   let photoImgs=[];
   if(withPhotos.length){
     toast('Adding '+withPhotos.length+' photo'+(withPhotos.length>1?'s':'')+' to the PDF…');
-    photoImgs=await Promise.all(withPhotos.map(e=>ssFetchPhoto(e.photo_url)));
+    photoImgs=await Promise.all(withPhotos.map(it=>ssFetchPhoto(it.url)));
   }
   const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'});
   const P=SS_PERSON_NAME, F=SS_FORM_NAME;
@@ -739,7 +906,18 @@ async function ssMakePdf(show, entries, rep){
 
   H('Vending machine');
   SS_BOXES.forEach(b=>{ const n=Math.round((rep.box_cents&&rep.box_cents[b[0]]||0)/1000); if(n)L(b[1]+': '+n+' plays = '+$( (rep.box_cents||{})[b[0]] )); });
-  L('Machine total '+$(rep.machine_total_cents)+' — split 50/50: Reggie '+$((rep.machine_split||{}).reggie)+' / Manny '+$((rep.machine_split||{}).manny),{bold:true}); y+=3;
+  L('Machine total '+$(rep.machine_total_cents)+' — split 50/50: Reggie '+$((rep.machine_split||{}).reggie)+' / Manny '+$((rep.machine_split||{}).manny),{bold:true});
+  if(rep.machine_free_plays) L('Free plays given away: '+rep.machine_free_plays); y+=3;
+
+  if(rep.stopwatch&&(rep.stopwatch.total_cents||rep.stopwatch.free_plays||(rep.stopwatch.prizes||[]).length)){
+    H('Stopwatch game');
+    L('Took in '+$(rep.stopwatch.total_cents)+' — Reggie '+$(rep.stopwatch.reggie_cents)+' / Manny '+$(rep.stopwatch.manny_cents)+'   (a split prize\'s odd cent goes to Reggie)',{bold:true});
+    if(rep.stopwatch.free_plays) L('Free plays given away: '+rep.stopwatch.free_plays);
+    if(rep.stopwatch.hit_value_cents) L('Prizes handed out: '+$(rep.stopwatch.hit_value_cents)+' in goods (not cash)');
+    (rep.stopwatch.prizes||[]).forEach(p=>{
+      L('Prize worth '+$(p.value_cents)+' · '+$(p.play_price_cents)+'/play · '+p.plays+' plays'+(p.free_plays?(' + '+p.free_plays+' free'):'')+' = '+$(p.revenue_cents)+' to '+ssOwnerName(p.owner)+(p.hit?('  · HIT '+new Date(p.hit_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})):'  · still up')); });
+    y+=3;
+  }
 
   H('Per person');
   L('Person      Sales         Machine      Float        Walks with',{bold:true});
@@ -757,8 +935,13 @@ async function ssMakePdf(show, entries, rep){
   // ---- photo appendix: every sale image, labeled for printing ----
   if(withPhotos.length){
     H('Item photos');
-    withPhotos.forEach((e,ix)=>{
-      const label=(P[e.person]||e.person)+'   ·   '+new Date(e.created_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'   ·   '+(e.direction===-1?'-':'+')+$(e.amount_cents)+'   ·   '+(F[e.pay_form]||e.pay_form);
+    withPhotos.forEach((it,ix)=>{
+      let label;
+      if(it.kind==='prize'){ const p=it.p;
+        label='PRIZE worth '+$(p.value_cents)+'   ·   '+$(p.play_price_cents)+'/play   ·   to '+ssOwnerName(p.owner)+(p.hit?('   ·   HIT '+new Date(p.hit_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})):'');
+      } else { const e=it.e;
+        label=(P[e.person]||e.person)+'   ·   '+new Date(e.created_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'   ·   '+(e.direction===-1?'-':'+')+$(e.amount_cents)+'   ·   '+(F[e.pay_form]||e.pay_form);
+      }
       const im=photoImgs[ix];
       if(!im){ room(7); doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(170,40,40);
         doc.text(label+'   (photo could not be loaded — use the ledger link)',14,y); y+=7; return; }

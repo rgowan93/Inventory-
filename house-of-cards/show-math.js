@@ -12,7 +12,11 @@
      the physical pot, which stays correct even if the drawer dipped below the float.
    - The drawer keeps NEXT_FLOAT (default $200) for the next show before cash is divided;
      the kept cash counts as the float owner's money (it's their float rolling forward),
-     so if it exceeds their cash share they send the difference electronically. */
+     so if it exceeds their cash share they send the difference electronically.
+   - Stopwatch prize game: each prize has a price-per-play and an owner — reggie, manny,
+     or split (50/50 reggie/manny; an odd cent goes to Reggie). Plays are tallied per
+     payment box like the machine; 'free' plays are counted but never worth money.
+     Prize ITEM value is goods given away, shown for the record, never cash. */
 (function (root) {
   const PEOPLE = ['reggie', 'manny', 'hailey'];
   const FORMS = ['cash', 'cashapp', 'venmo', 'paypal', 'zelle', 'square'];
@@ -36,6 +40,7 @@
     const floatOwner = PEOPLE.indexOf(input.float_owner) >= 0 ? input.float_owner : 'reggie';
     const entries = (input.entries || []).filter(e => !e.deleted);
     const tallies = input.tallies || {};
+    const prizes = input.prizes || [];
     const nextFloat = input.next_float_cents == null ? NEXT_FLOAT_CENTS : Math.max(0, Math.round(input.next_float_cents));
 
     // ---- per-form and per-person sales ----
@@ -72,23 +77,60 @@
       accounts[b].by_person.reggie += c / 2; accounts[b].by_person.manny += c / 2;
     });
     const machineShare = { reggie: machineTotal / 2, manny: machineTotal / 2, hailey: 0 };
+    const machineFree = Math.max(0, Math.round(tallies.free || 0));   // free plays: counted, never money
     accounts.cash.by_person[floatOwner] += cashStart;   // the float sits in the drawer and is the owner's
+
+    // ---- stopwatch prize game (owner per prize: reggie | manny | split 50/50) ----
+    const MONEY_BOXES = ['cash', 'cashapp', 'venmo', 'paypal', 'square', 'zelle_reggie', 'zelle_manny', 'zelle_hailey'];
+    const swBox = {}; MONEY_BOXES.forEach(b => swBox[b] = 0);
+    const swShare = { reggie: 0, manny: 0 };
+    let swTotal = 0, swFree = 0, swHitValue = 0;
+    const swPrizes = [];
+    for (const pz of prizes) {
+      const price = Math.max(0, Math.round(pz.play_price_cents || 0));
+      const owner = (pz.owner === 'manny' || pz.owner === 'split') ? pz.owner : 'reggie';
+      const plays = pz.plays || {};
+      const freeN = Math.max(0, Math.round(plays.free || 0));
+      let moneyPlays = 0, rev = 0, pr = 0, pm = 0;
+      for (const b of MONEY_BOXES) {
+        const n = Math.max(0, Math.round(plays[b] || 0)); if (!n) continue;
+        const c = n * price;
+        moneyPlays += n; rev += c; swBox[b] += c;
+        // owner split happens PER BOX so accounts, entitlements and totals agree to the cent
+        let r = c, m = 0;
+        if (owner === 'manny') { r = 0; m = c; }
+        else if (owner === 'split') { m = Math.floor(c / 2); r = c - m; }   // odd cent -> Reggie
+        pr += r; pm += m;
+        accounts[b].by_person.reggie += r; accounts[b].by_person.manny += m;
+      }
+      swShare.reggie += pr; swShare.manny += pm; swTotal += rev; swFree += freeN;
+      if (pz.hit_at) swHitValue += Math.max(0, Math.round(pz.value_cents || 0));
+      swPrizes.push({ id: pz.id, photo_url: pz.photo_url || null, value_cents: Math.max(0, Math.round(pz.value_cents || 0)),
+        play_price_cents: price, owner, hit: !!pz.hit_at, hit_at: pz.hit_at || null,
+        plays: moneyPlays, free_plays: freeN, revenue_cents: rev, share_reggie: pr, share_manny: pm });
+    }
+    FORMS.forEach(f => form[f].stopwatch_cents = 0);
+    MONEY_BOXES.forEach(b => { const c = swBox[b]; if (!c) return;
+      if (b.indexOf('zelle_') === 0) form.zelle.stopwatch_cents += c; else form[b].stopwatch_cents += c; });
+
     ACCOUNTS.forEach(a => { const k = a[0]; accounts[k].total_cents = PEOPLE.reduce((s, p) => s + accounts[k].by_person[p], 0); });
 
     // ---- entitlements (what each person should walk away with) ----
     const entitlement = {};
-    PEOPLE.forEach(p => entitlement[p] = salesNet[p] + machineShare[p] + (p === floatOwner ? cashStart : 0));
+    PEOPLE.forEach(p => entitlement[p] = salesNet[p] + machineShare[p] + (p === floatOwner ? cashStart : 0)
+      + (p === 'reggie' ? swShare.reggie : 0) + (p === 'manny' ? swShare.manny : 0));
 
     // ---- platform holdings (money already sitting in accounts someone controls) ----
     const holdings = { reggie: 0, manny: 0, hailey: 0 };
-    holdings.manny += form.venmo.net_cents + boxCents.venmo;
-    holdings.reggie += form.cashapp.net_cents + boxCents.cashapp + form.paypal.net_cents + boxCents.paypal + form.square.net_cents + boxCents.square;
-    PEOPLE.forEach(p => holdings[p] += zelleByPerson[p] + boxCents['zelle_' + p]);
+    holdings.manny += form.venmo.net_cents + boxCents.venmo + swBox.venmo;
+    holdings.reggie += form.cashapp.net_cents + boxCents.cashapp + swBox.cashapp + form.paypal.net_cents + boxCents.paypal + swBox.paypal + form.square.net_cents + boxCents.square + swBox.square;
+    PEOPLE.forEach(p => holdings[p] += zelleByPerson[p] + boxCents['zelle_' + p] + swBox['zelle_' + p]);
 
     // ---- physical cash pot ----
     const drawerEnd = cashStart + form.cash.net_cents;
     const machineCash = boxCents.cash;
-    const pot = drawerEnd + machineCash;
+    const swCash = swBox.cash;
+    const pot = drawerEnd + machineCash + swCash;
 
     // ---- who still needs what, after keeping their own platform money ----
     const diff = {}; PEOPLE.forEach(p => diff[p] = entitlement[p] - holdings[p]);
@@ -135,16 +177,18 @@
     const acctOk = PEOPLE.every(p => Object.keys(accounts).reduce((s, k) => s + accounts[k].by_person[p], 0) === entitlement[p]);
     const verified = conserved && personsOk && cashOk && noResidual && acctOk;
 
-    const profit = PEOPLE.reduce((a, p) => a + salesNet[p], 0) + machineTotal;
+    const profit = PEOPLE.reduce((a, p) => a + salesNet[p], 0) + machineTotal + swTotal;
 
     return {
-      version: 2,
+      version: 3,
       cash_start_cents: cashStart, float_owner: floatOwner,
       next_float_cents: nextFloat, kept_cents: kept, kept_by: floatOwner, cash_avail_cents: cashAvail,
       forms: form, box_cents: boxCents, accounts,
-      machine_total_cents: machineTotal, machine_split: machineShare,
+      machine_total_cents: machineTotal, machine_split: machineShare, machine_free_plays: machineFree,
+      stopwatch: { total_cents: swTotal, reggie_cents: swShare.reggie, manny_cents: swShare.manny,
+        cash_cents: swCash, free_plays: swFree, by_box: swBox, hit_value_cents: swHitValue, prizes: swPrizes },
       sales_net: salesNet, entitlement, holdings,
-      drawer_end_cents: drawerEnd, machine_cash_cents: machineCash, pot_cents: pot,
+      drawer_end_cents: drawerEnd, machine_cash_cents: machineCash, sw_cash_cents: swCash, pot_cents: pot,
       cash_out: cashOut, transfers,
       trades: { by_person: tradeBy, total_cents: PEOPLE.reduce((a, p) => a + tradeBy[p], 0), count: tradeCount },
       profit_cents: profit,
